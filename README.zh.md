@@ -97,6 +97,19 @@ Captain 把需求拆成用户故事（*"作为财务专员，我希望退款调�
 
 协议开销是**工程压下来的，不是嘴上说说的**：事件驱动监控（无 busy-poll）、粒度自适应控制器（连过 3 环→放大步幅、两连拒→强制拆小）、三层缓存（落盘协议状态、按 `gitHead+path+mtime` 键控的 L2 仓库证据缓存、逐字稳定版本化的角色 persona 以吃满 LLM 供应商的 prompt 缓存），外加循环预算兜底。每一枚 token 花在哪，复盘报告里都有。
 
+### 不碰 YAML 的运行时覆盖（敏捷不是人人都要全套）
+
+上表中的热更字段同时注册为宿主 **settings 命名空间**（`pair-programming`，走 `dsh-settings`）。在 `~/.dsh/settings.yaml` 里写一段覆盖——或通过设置 API 写入——它叠加在 profile 合成值之上，**下一次工具调用即生效**，并保留"重置回合成值"语义：
+
+```yaml
+# ~/.dsh/settings.yaml
+pair-programming:
+  tddMode: coach        # 放宽：TDD 步骤可用，不再强制
+  maxCyclesPerTask: 8   # 探索性工作用更轻的预算
+```
+
+没有 settings provider 的启动完全不受影响（插件严格按合成配置工作）。`stateDir`、`slashCommand`、成员派生选项等启动期字段有意只留在 profile YAML。本插件的 Settings-UI 专属卡片在 backlog；在此之前，settings 命名空间经由配置文件/API 已是全功能。
+
 ## 安装
 
 ```sh

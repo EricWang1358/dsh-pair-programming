@@ -97,6 +97,19 @@ The Captain drafts stories (*"As a finance ops clerk, I want refund calls to be 
 
 Protocol overhead is engineered down, not wished away: **event-driven monitoring** (no busy-polling), an **adaptive granularity controller** (3 clean cycles in a row → widen steps; 2 rejections → force smaller), a **3-tier cache** (durable protocol state, L2 repo-evidence cache keyed to `gitHead+path+mtime`, and byte-stable versioned personas that maximize LLM provider prompt-cache hits), and cycle budgets that make spinning impossible. Every token spent is visible in the retro report.
 
+### Runtime overrides without touching YAML (Scrum not everyone's cup of tea)
+
+The hot-tunable fields above are also registered as a host **settings namespace** (`pair-programming`, via `dsh-settings`). Drop an override into `~/.dsh/settings.yaml` — or write it through the settings API — and it takes effect on the next tool call, layered over the profile's composed YAML with reset-back-to-composed semantics:
+
+```yaml
+# ~/.dsh/settings.yaml
+pair-programming:
+  tddMode: coach        # relax: TDD steps available, not mandated
+  maxCyclesPerTask: 8   # leaner budget for exploratory work
+```
+
+Boots without a settings provider are unaffected (the plugin keeps working exactly as composed). Boot-only fields (`stateDir`, `slashCommand`, member-spawn options) intentionally stay in the profile YAML. A dedicated Settings-UI card for this plugin is on the backlog; until then the settings namespace is fully live via the document/API.
+
 ## Install
 
 ```sh

@@ -324,3 +324,13 @@ L3 LLM prompt 缓存友好化（provider 端命中）
 - 旧会话持久化的 cycle 无 `tddMode` 戳 → 视为 `off` 链，自然走完旧步骤（读旧写新，不炸状态）。
 - `tddMode=coach` 机器上等价双链（TDD 步与传统 REPORT 都可走），差别只在 prompt 推荐语。
 - 文档一致性：`03-prompts/PROMPT.md`、`04-acceptance/ACCEPTANCE.md` 中的 agent-teams 前置依赖表述系 v1.0 遗留，已按 v1.1 自含运行时 + v1.2 课程层修订。
+
+### 12.3 配置面：三层覆盖（v1.3，SDK cohort 0.1.2-alpha.3）
+
+字段按"读取时机"分两层暴露：
+
+- **运行时命名空间 `pair-programming`（dsh-settings）**：`tddMode / pairStyle / defaultMode / maxCyclesPerTask / spikeMaxCycles / greenBuildOnStop / dod`——消费者全部在工具调用时读取，`installSection` 的 setSource/onChange 把值热写回 mutable `resolved` 对象即生效（与 bash-local/subagent-model-selection 同型）。层序：schema 默认 → profile 合成 YAML（base）→ `~/.dsh/settings.yaml` 用户节（可重置回合成值）。provider 缺席时 `ctx.inject(['settings'])` 不触发，行为与纯 YAML 完全一致。
+- **启动期 YAML-only**：`stateDir / memberProvider / memberModel / memberMaxDepth / maxMembers / evidenceCache / promptSectionOrder / slashCommand`——注册期一次性接线，改动须重启 profile。
+- 跨字段约束（枚举合法、预算 ≥1、DoD 项在白名单内）放 `validate` hook，非法写入被 provider 拒绝。
+- Settings-UI 卡片需浏览器侧 client 包（`settings.plugin.item` keyed slot + lazy-CJS client module），host 侧已就绪、卡片列入 P2。
+- 实机验证记录：真实 `dsh-settings-file` provider 下 base `off` 被用户节 `coach` 覆盖、describe 正确暴露 user 层；pair-dev headless 真启动零错误。
