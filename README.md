@@ -108,7 +108,7 @@ pair-programming:
   maxCyclesPerTask: 8   # leaner budget for exploratory work
 ```
 
-Boots without a settings provider are unaffected (the plugin keeps working exactly as composed). Boot-only fields (`stateDir`, `slashCommand`, member-spawn options) intentionally stay in the profile YAML. A dedicated Settings-UI card for this plugin is on the backlog; until then the settings namespace is fully live via the document/API.
+Boots without a settings provider are unaffected (the plugin keeps working exactly as composed). Boot-only fields (`stateDir`, `slashCommand`, member-spawn options) intentionally stay in the profile YAML. The fields above also ship as a **Settings → Plugins card** in the web UI: staged edits, per-field *overridden* badges with the composed value shown and a reset button, save/discard with revision fencing — no YAML required.
 
 ## Install
 

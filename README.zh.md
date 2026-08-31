@@ -108,7 +108,7 @@ pair-programming:
   maxCyclesPerTask: 8   # 探索性工作用更轻的预算
 ```
 
-没有 settings provider 的启动完全不受影响（插件严格按合成配置工作）。`stateDir`、`slashCommand`、成员派生选项等启动期字段有意只留在 profile YAML。本插件的 Settings-UI 专属卡片在 backlog；在此之前，settings 命名空间经由配置文件/API 已是全功能。
+没有 settings provider 的启动完全不受影响（插件严格按合成配置工作）。`stateDir`、`slashCommand`、成员派生选项等启动期字段有意只留在 profile YAML。上述字段同时提供 **Settings → Plugins 图形卡片**：草稿式编辑、每字段"已覆盖"徽标（显示组合基线并可一键恢复）、带 revision fence 的保存/放弃——全程不必碰 YAML。
 
 ## 安装
 
