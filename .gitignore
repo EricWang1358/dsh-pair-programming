@@ -1,0 +1,10 @@
+# dependencies (setup-peers.mjs creates symlinks here)
+node_modules/
+
+# runtime team/protocol state (lives in the *user's* workspace, guard in dev checkouts)
+.pair-programming/
+
+# pack artifacts & logs
+*.tgz
+*.log
+.DS_Store

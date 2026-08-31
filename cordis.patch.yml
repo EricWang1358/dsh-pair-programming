@@ -1,0 +1,53 @@
+# dsh-pair-programming bundle patch: mounts the pair-programming plugin into
+# the host composition of a dsh profile. The plugin registers its `pair_*`
+# tools into the shared `tools` registry, one usage section into the global
+# system prompt, and the `/pair` slash command + gesture boundary, so every
+# session of the profile can start an Agile pair-programming team.
+#
+# The plugin is self-contained: it builds its own team runtime (state, task
+# graph, JSONL mailboxes, event-driven scheduler) on the DSH host primitives
+# (ctx.subagents / ctx.tools / ctx.systemPrompt / ctx.agents / ctx.llm). It
+# does NOT depend on any third-party plugin.
+#
+# Install: `dsh plugin --profile <name> add <this package>` (npm or a local
+# path). The `dsh plugin` command pnpm-installs the package into the profile
+# and reconciles it into the profile's `dsh.profile.bundles` layer list.
+- insert:
+    - id: pair-programming
+      # Node-resolvable package name — must stay in sync with package.json
+      # `name`. Quoted because `@` is a reserved indicator in YAML and cannot
+      # open a plain scalar.
+      name: '@ericwang1358/dsh-pair-programming'
+      config:
+        # Team/protocol state lives under `<session workspace>/<stateDir>/<teamId>/`
+        # (team.json + inbox/*.jsonl mailboxes + cache/).
+        stateDir: .pair-programming
+        # Provider used to spawn member subagents ('spawn' or 'fork').
+        memberProvider: spawn
+        # Hard cap on Pair Cycles per task before the captain must consult the user.
+        maxCyclesPerTask: 12
+        # Default team mode: 'full' (Driver+Navigator+Challenger) or 'light' (Driver+Navigator).
+        defaultMode: full
+        # TDD enforcement: 'enforce' = tool-mandated RED->GREEN->REFACTOR cycles
+        # (invariant I7, Test First); 'coach' = recommended, both orders accepted;
+        # 'off' = legacy report cycles.
+        tddMode: enforce
+        # Default pairing style: 'traditional' | 'strong' (idea holder dictates,
+        # Driver is the hands) | 'ping-pong' (test author / implementer alternate).
+        pairStyle: traditional
+        # Cycle budget for a spike task (research timebox; exits with a decision).
+        spikeMaxCycles: 2
+        # Green-build rule: nobody goes home on a red build — pair_stop requires
+        # fresh whole-suite green evidence when changes were accepted (unless force).
+        greenBuildOnStop: true
+        # Optional comma-separated Definition-of-Done gate item ids
+        # (all_accepted,no_blocking_risks,verify_evidence,decisions_documented,
+        #  test_first,spike_outcome). Empty = protocol defaults.
+        # dod: ""
+        # Enable the L2 repository evidence cache under <stateDir>/cache/.
+        evidenceCache: true
+        # Team size cap in members (default 4: driver + navigator + challenger + spare).
+        maxMembers: 4
+        # Register the deterministic `/pair` activation surfaces (slash command +
+        # plain-text gesture boundary). Disable to keep natural-language only.
+        slashCommand: true

@@ -1,0 +1,76 @@
+{
+  "name": "@ericwang1358/dsh-pair-programming",
+  "version": "0.2.0",
+  "description": "Agile pair programming for DeepSeek Harness: a self-contained Driver/Navigator/Challenger protocol runtime with quality gates, on host subagent primitives. No third-party plugin dependencies.",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "pair-programming",
+    "agile",
+    "multi-agent",
+    "subagent",
+    "ai-agent",
+    "llm"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "sdk": {
+      "testedCohort": "@deepseek-ai/dsh@0.1.2-alpha.2 (cordis 4.0.1)",
+      "supportedDsh": ">=0.1.2-alpha <0.2",
+      "note": "Beta+ gate: the plugin must start under this cohort. Bumping the DSH SDK requires re-running verify:startup before re-enabling in any daily profile."
+    }
+  },
+  "scripts": {
+    "setup:peers": "node scripts/setup-peers.mjs",
+    "postinstall": "node scripts/setup-peers.mjs",
+    "typecheck": "node scripts/typecheck.mjs",
+    "test": "node tests/run.mjs",
+    "build": "node scripts/build.mjs",
+    "pack": "npm pack",
+    "verify:runtime-imports": "node scripts/verify-runtime-imports.mjs",
+    "verify:package": "node scripts/verify-package.mjs",
+    "verify:startup": "node scripts/verify-startup.mjs",
+    "verify": "node scripts/setup-peers.mjs && node scripts/typecheck.mjs && node tests/run.mjs && node scripts/verify-runtime-imports.mjs && node scripts/build.mjs && node scripts/verify-package.mjs && node scripts/verify-startup.mjs",
+    "prepublishOnly": "node scripts/verify-runtime-imports.mjs && node scripts/build.mjs && node scripts/verify-package.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-agent": ">=0.1.0-rc <2",
+    "@deepseek-ai/dsh-llm": ">=0.1.0-rc <2",
+    "@deepseek-ai/dsh-session": ">=0.1.0-rc <2",
+    "@deepseek-ai/dsh-subagent": ">=0.1.0-rc <2",
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc <2",
+    "@deepseek-ai/schemastery": ">=3.18.0 <4",
+    "@deepseek-ai/cordis": ">=4.0.0-rc <5"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
