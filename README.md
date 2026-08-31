@@ -1,79 +1,128 @@
 # dsh-pair-programming
 
-Agile pair programming for DeepSeek Harness. A self-contained plugin that turns a session into the **captain** of a three-agent pair-programming team — **Driver** (the only file writer), **Navigator** (reviewer + quality gate), and **Challenger** (adversarial risk explorer) — with a hard quality gate on every task.
+**One line of Agile. Zero broken builds shipped.**
 
-**Zero third-party plugin dependencies.** The plugin ships its own runtime (team state, task dependency graph, JSONL mailboxes, event-driven scheduler) built directly on DSH host primitives (`ctx.subagents`, `ctx.tools`, `ctx.systemPrompt`, `ctx.agents`, `ctx.llm`). It works whether or not `@nanmicoder/dsh-agent-teams` is installed. Mature concurrency/persistence patterns are adapted from that project's MIT-licensed source (per-file credit in `lib/` headers).
+> AI agents write code like brilliant lone-wolf hackers: fast, confident, and *alone* — no reviewer, no tester, no one watching your back. `dsh-pair-programming` turns any [DeepSeek Harness](https://github.com/deepseek-ai) session into a **mini agile team** that never lets a line of code through without a review, a test that failed first, and a gate that says DONE.
 
-## Install & run
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**Development (this checkout):** the plugin is a `link:` and loads only in a dedicated dev profile — never the daily `web` profile until it passes every readiness gate:
-
-```sh
-node scripts/setup-peers.mjs            # provision @deepseek-ai/* peers resolvable from this dir
-node scripts/verify-runtime-imports.mjs # gate ①: every runtime import is a required dep/peer
-node scripts/verify-startup.mjs         # gate ②: entry imports + apply() under the real SDK
-dsh plugin --profile pair-dev add "$(pwd)"   # local link, loaded only in pair-dev
-dsh --profile pair-dev                   # boot the dev profile
+```
+/pair add a JWT login endpoint with refresh tokens
 ```
 
-**Release / daily use (only after `pnpm verify` is fully green = Stable):**
+That's it. You just became the **Captain** of a pair-programming team — and every change now goes through the same discipline a senior agile engineering org would enforce: *propose → review → test-first → verify → risk-hunt → quality gate.*
+
+---
+
+## Why: the loner-agent problem
+
+Letting a single agent "just implement" your feature is waterfall with extra speed:
+
+- **Nobody reviews until UAT** — defects discovered after release cost up to **100×** what they cost to prevent at the point of creation (and an agent will cheerfully report "done" having tested nothing).
+- **Test-after is test-never** — code written without a failing test in front of it drifts from what the user asked for.
+- **The bus factor is one** — all knowledge lives in one head (or one context window), and "90% done" means nothing if nothing runs.
+- **Fake Agile** — "Sprint 1: requirements, Sprint 5: testing" is waterfall in disguise. Real agile delivers a *verified, working increment* every cycle.
+
+Agile engineering practices — Extreme Programming, pair programming, TDD, user stories, retrospectives — were invented precisely to kill these failure modes in human teams. **They work just as well on agent teams, and agents enforce them more faithfully than tired humans do.**
+
+## What you get: an agile team, not a chatbot
+
+| Role | Who | Duty | Hard rule |
+|---|---|---|---|
+| **Captain** | *you*, in your own session | Arbitrate, plan, talk to you | Decides on evidence at the 70% bar, never writes the implementation |
+| **Driver** | spawned subagent | The hands: the only agent allowed to touch files | No edit without an approved proposal (I1, I3) |
+| **Navigator** | spawned subagent | The eyes: reviews every step, independently re-runs verification | No ACCEPT by parroting the Driver's report (I4, I6) |
+| **Challenger** | spawned subagent | The red team: attacks the approach with failure modes | A P0 risk blocks the cycle; a P1 blocks task completion (I5) |
+
+Eight protocol invariants are enforced **by the tools themselves, not by prompting the models to please you**:
+
+> **I1** single writer · **I2** small steps · **I3** propose before act · **I4** completion needs the gate · **I5** no risk left overnight · **I6** evidence over opinion · **I7** test first · **I8** constructive feedback is structured
+
+A task literally *cannot* be marked completed without a `pair_gate_check` pass. A vague rejection ("looks off") is rejected by the message schema. A production-code commit with no failing test recorded before it fails the Definition-of-Done. Ask the AI nicely and it may forget; the tooling cannot.
+
+## The workflow
+
+### Session level — every story-shaped task earns its increment
+
+```
+pair_start ──► PLANNING ──────► CYCLING ◄──── TASK_GATE ──► GREEN BUILD ──► RETRO ──► pair_stop
+             user stories +                 (configurable   whole suite    keep/try
+             INVEST check   one cycle       Definition      must pass      lessons
+             + spike/triage per change      of Done)        before "home")  carried
+             70% arbitration                                                    ▼
+                                                                    next session's PLANNING
+```
+
+### Cycle level — TDD is not a suggestion, it's the step machine (`tddMode=enforce`, default)
+
+```
+Driver [PROPOSE] ──► Navigator [GO] ──► RED      write the failing test FIRST
+                                       (a compile error of the missing API counts as RED)
+                                       ──► GREEN   minimal code to pass it
+                                       ──► REFACTOR clean up under the green safety net
+                                       ──► Navigator VERIFY (independently re-runs it all)
+                                       ──► Challenger RISK_CHECK ──► GATE
+```
+
+Every verdict moves as **structured constructive feedback** — *observation → impact → way forward* — the same triad taught to agile teams, here validated by schema. Rejections are auto-classified (`invest_violation` / `test_first_violation` / `risk_hit` / `quality`) and land in the retro stats, because **retrospectives beat post-mortems**: the team improves while the project can still benefit.
+
+Progress is reported in **accepted working increments** — never lines of code, never effort percentages. Working software is the only measure of progress.
+
+## What it looks like in practice
+
+```
+/pair 给订单服务加一个退款接口，要求幂等 --light
+/pair migrate the payment webhook to the new provider --tdd=enforce --style=ping-pong
+```
+
+The Captain drafts stories (*"As a finance ops clerk, I want refund calls to be idempotent, so that double-charges can never hit a customer"* — a generic "As a user" or a benefit that restates the goal is **rejected by the tool** with an actionable error). The Navigator rules on every cycle. The Challenger attacks: *"P0: replayed webhook with the same id refunds twice if the idempotency check is non-atomic — use a conditional update."* Only when every cycle is ACCEPTed, no blocking risks remain, the test-first chain holds, and the DoD passes — *then* the task completes.
+
+**Pairing styles** (real XP, adapted to agents):
+- `traditional` — one Driver types, one Navigator watches ahead; the Captain rotates the role so knowledge doesn't pool in one head (raises your **truck factor**).
+- `strong` — an idea only enters the computer through the partner's head: the idea holder dictates, the Driver is the hands. The fastest onboarding mode.
+- `ping-pong` — test author and implementer alternate ownership per cycle.
+
+**Sizing the ceremony honestly**: research work becomes a **spike** (a 2-cycle timebox whose deliverable is a go/no-go decision, not code); typo-level work gets `trivial=true` and skips the full protocol. Agile knows when *not* to pair — so does this.
+
+## Modes, configuration & cost control
+
+| Config (cordis.patch.yml / profile) | Default | Meaning |
+|---|---|---|
+| `tddMode` | `enforce` | `enforce` tool-mandated RED→GREEN→REFACTOR · `coach` recommended, both orders accepted · `off` legacy |
+| `pairStyle` | `traditional` | `traditional` \| `strong` \| `ping-pong` |
+| `dod` | protocol defaults | comma-separated Definition-of-Done items: `all_accepted,no_blocking_risks,verify_evidence,decisions_documented,test_first,spike_outcome` |
+| `greenBuildOnStop` | `true` | `pair_stop` demands fresh whole-suite green evidence when changes landed |
+| `maxCyclesPerTask` / `spikeMaxCycles` | `12` / `2` | hard budgets — no protocol spinning, no token burn |
+| `defaultMode` | `full` | `full` (3 agents) or `light` (2 agents, fast lane) |
+
+Protocol overhead is engineered down, not wished away: **event-driven monitoring** (no busy-polling), an **adaptive granularity controller** (3 clean cycles in a row → widen steps; 2 rejections → force smaller), a **3-tier cache** (durable protocol state, L2 repo-evidence cache keyed to `gitHead+path+mtime`, and byte-stable versioned personas that maximize LLM provider prompt-cache hits), and cycle budgets that make spinning impossible. Every token spent is visible in the retro report.
+
+## Install
 
 ```sh
-dsh plugin --profile web add @ericwang1358/dsh-pair-programming   # published tarball
+dsh plugin --profile web add @ericwang1358/dsh-pair-programming
 dsh web
 ```
 
-> Readiness ladder and both automated gates are defined in
-> [`docs/06-process/PLUGIN-READINESS-GATES.md`](docs/06-process/PLUGIN-READINESS-GATES.md). A plugin that a
-> daily profile auto-loads *is* a release candidate; keep dev work in `pair-dev`.
+Or develop against a local checkout (`link:` install per [docs](docs/README.md)). Dual activation — the `/pair` slash command *and* a plain-text gesture boundary — covers web UI, headless CLI, and API sessions.
 
-## Use
+**Graceful degradation, stated up front.** Missing or broken platform capabilities downgrade the session instead of failing it (pure-prompt mode, stateless mode) — and the current mode is declared at the top of every session. 降级优于报错，证据优于意见。
 
-```
-/pair 实现用户登录接口，要求 JWT + 刷新令牌
-/pair 给这个 Express 应用加 /health 端点，带测试 --light
-/pair 接入外部支付网关 --tdd=enforce --style=ping-pong
-```
+## Verified engineering
 
-or natural language: “用结对编程完成这个需求：……”.
-
-## The protocol (v2 — SWE5006 Agile/XP layer)
-
-Tasks are captured as **user stories** — "As a [specific role], I want [goal], so that [real value]" plus acceptance criteria. `pair_task_create` enforces the machine-checkable INVEST rules (no generic "user" role, no benefit that restates the goal, Testable criteria mandatory); research work becomes a **spike** (tiny timebox that exits with a decision), and obvious trivia runs a short loop instead of the full protocol.
-
-Each small change runs one **Pair Cycle** (Test-First by default):
-
-```
-Driver PROPOSE → Navigator GO/NO_GO → Driver RED (failing test first)
-  → Driver GREEN (minimal passing code) → Driver REFACTOR (clean under green)
-  → Navigator independently verify → ACCEPT/REJECT → Challenger RISK_CHECK (quadrants 3/4)
-  → pair_gate_check (configurable Definition of Done)
-  → (pass) pair_task_update(completed, gate_pass_id)
+```sh
+npm test          # 102 assertions across 4 suites, pure-logic, offline
+npm run verify    # import gate · startup gate · package gate · typecheck — all green
 ```
 
-Session close follows the **green-build rule** — nobody goes home on a red build: a fresh whole-suite evidence line before `pair_stop`, preceded by `pair_retro`, whose keep/try action items the next session's PLANNING automatically inherits (retrospectives, not post-mortems).
+Zero third-party plugin dependencies: the plugin ships its own runtime (team state, task graph, JSONL mailboxes, scheduler) on plain DSH host primitives. Patterns adapted from [`@nanmicoder/dsh-agent-teams`](https://www.npmjs.com/package/@nanmicoder/dsh-agent-teams) (MIT). Full design rationale, invariants and acceptance tests (T1–T14) live in [`docs/`](docs/README.md).
 
-Hard invariants (enforced by tooling, not just prompts):
+## Why trust this
 
-- **Single writer** — only the Driver can edit files; Navigator/Challenger have write tools physically denied via `toolFilter`.
-- **Propose before act** — implementation without a Navigator `GO` is void.
-- **Test first (I7)** — under `tddMode=enforce`, no production code before a failing test: accepted cycles must carry RED evidence recorded before GREEN (a compile error counts as RED).
-- **Completion needs the gate** — `pair_task_update(status=completed)` is rejected without a valid `pair_gate_check` pass against the configured DoD checklist.
-- **No risk left overnight** — a P0 blocks the current cycle; a P1 blocks task completion.
-- **Evidence over opinion** — every verdict cites repository evidence.
-- **Constructive feedback** — a NO_GO/REJECT must be an observation → impact → way_forward triad; vague wishes are rejected by the message schema.
+Every practice here comes from the playbook that made agile work — Kent Beck's XP, the Agile Manifesto's values, Scrum's artifacts and ceremonies — applied where it has never had better conditions than agent teams: agents have *no ego* to defend in a strong-style pair, *no fatigue* in a 30-minute rotation, and *no incentive* to mark a task done without the gate pass. The failure modes of lone-wolf coding don't disappear in AI-assisted development. They get a bigger keyboard.
 
-## Modes & styles
-
-- `full` (default): Driver + Navigator + Challenger. `--light`: Driver + Navigator only.
-- `tdd_mode`: `enforce` (RED→GREEN→REFACTOR tool-mandated, default) | `coach` (TDD steps available and recommended, plain reports still accepted) | `off` (legacy cycles).
-- `style`: `traditional` (stable Driver, rotate on a cadence to raise the truck factor) | `strong` (the idea holder dictates; the Driver is the hands) | `ping-pong` (test author and implementer alternate per cycle).
-- Rejections are classified (`invest_violation` / `test_first_violation` / `risk_hit` / `quality`) and surface in `pair_status` and `retro.md` stats.
-
-## State & cache
-
-State lives under `<workspace>/.pair-programming/` (`team.json`, `inbox/*.jsonl`, `cache/`, `retro.md`, `lessons.json`). The L2 evidence cache keys on `sha256(gitHead + subject)` for precise invalidation. Personas are versioned, byte-stable prefixes (per mode/style) to maximize LLM provider prompt-cache hits.
+**Stop code review theater. Start shipping verified increments.**
 
 ## License
 
-MIT. Contains patterns adapted from `@nanmicoder/dsh-agent-teams` (MIT, © 程序员阿江 / Relakkes).
+MIT.
