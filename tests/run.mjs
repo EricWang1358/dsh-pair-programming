@@ -10,7 +10,7 @@ function check(cond, name) {
 }
 
 // Each suite exports an async run(check) so state is isolated.
-const suites = ['protocol.test.mjs', 'state.test.mjs', 'gate.test.mjs', 'story.test.mjs', 'settings.test.mjs', 'client.test.mjs'];
+const suites = ['protocol.test.mjs', 'state.test.mjs', 'gate.test.mjs', 'story.test.mjs', 'settings.test.mjs', 'client.test.mjs', 'members.test.mjs', 'lifecycle.test.mjs'];
 for (const s of suites) {
   const mod = await import(new URL(`./${s}`, import.meta.url).href);
   await mod.run(check);
