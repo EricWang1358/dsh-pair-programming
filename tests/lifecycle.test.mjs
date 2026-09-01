@@ -4,12 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { retireSpawnedMembers, registerLifecycleTools } from '../lib/tools/lifecycle.js';
 import { createTeamDir, readTeam, writeTeam } from '../lib/state/store.js';
+import { withLock } from '../lib/state/lock.js';
+import { teamLockKey } from '../lib/state/layout.js';
 import { registerRiskTools } from '../lib/tools/risk.js';
 import { registerArbitrateTools } from '../lib/tools/arbitrate.js';
 import { registerFlowTools } from '../lib/tools/flow.js';
 import { openRisk } from '../lib/protocol/risks.js';
 import { appendMailbox, createMessage, claimMailboxDelivery, releaseMailboxDelivery, acknowledgeMailbox } from '../lib/state/mailbox.js';
-import { initialProtocolState } from '../lib/protocol/machine.js';
+import { initialProtocolState, openCycle } from '../lib/protocol/machine.js';
 
 function mockCtx() {
   const calls = [];
@@ -189,6 +191,38 @@ export async function run(check) {
     const gauged = await status({}, { agent: ps.captain });
     check(await gauge() === 0 && typeof gauged.pending_note === 'string' && gauged.pending_note.includes('in flight'), 'ack clears the gauge and the note explains what 0 means');
     check(rotate.description.includes('Currently refused in 0.2.x'), 'pair_rotate description carries the refusal marker');
+    // ORDER-P1 A: current_cycle must track cycles[] across JSON round-trips.
+    const cb = stopHarness(root, { stateDir: 'cc-state' });
+    const statusOf = cb.defs.find((x) => x.name === 'pair_status').execute;
+    await createTeamDir(cb.stateRoot, teamFixture());
+    const bump = async (step) => withLock(teamLockKey(cb.stateRoot, 't1'), async () => {
+      const fresh = await readTeam(cb.stateRoot, 't1');
+      fresh.protocol.cycles[fresh.protocol.cycles.length - 1].step = step;
+      await writeTeam(cb.stateRoot, fresh);
+    });
+    const open = async (taskId) => withLock(teamLockKey(cb.stateRoot, 't1'), async () => {
+      const fresh = await readTeam(cb.stateRoot, 't1');
+      openCycle(fresh.protocol, taskId, { tddMode: 'enforce' });
+      await writeTeam(cb.stateRoot, fresh);
+    });
+    await open('t-1');
+    await bump('VERIFIED');
+    await open('t-1');
+    await bump('GREEN');
+    const st = await statusOf({}, { agent: cb.captain });
+    const back = await readTeam(cb.stateRoot, 't1');
+    const last = back.protocol.cycles[back.protocol.cycles.length - 1];
+    check(st.current_cycle.id === last.id && st.current_cycle.step === last.step && last.step === 'GREEN',
+      'current_cycle tracks cycles[] after write/read round-trips (ORDER-P1 A)');
+    // ORDER-P1 B: a legacy frozen currentCycle field is ignored (inert), not migrated.
+    const bl = stopHarness(root, { stateDir: 'cc-legacy' });
+    const statusLegacy = bl.defs.find((x) => x.name === 'pair_status').execute;
+    await createTeamDir(bl.stateRoot, teamFixture({
+      protocol: { ...initialProtocolState(), currentCycle: { id: 'c-t-1-1-9', step: 'PROPOSED' }, cycles: [{ id: 'c-t-1-1-9', taskId: 't-1', step: 'VERIFIED' }] },
+    }));
+    const stLegacy = await statusLegacy({}, { agent: bl.captain });
+    check(stLegacy.current_cycle?.step === 'VERIFIED', 'a stale legacy currentCycle field is ignored in favor of cycles[] (ORDER-P1 B)');
+    check(stLegacy.summary.includes('c-t-1-1-9@VERIFIED'), 'the legacy-inert fix reaches the summary line too (ORDER-P1 B)');
     // AC-A2-1: the sunny path must not regress behind the new rollback catch.
     const s1 = startHarness(root, { failOnCall: -1 });
     const startOk = s1.defs.find((x) => x.name === 'pair_start').execute;

@@ -38,7 +38,7 @@ export async function run(check) {
   check(phaseTransitionError('FORMING', 'PLANNING') === undefined, 'machine FORMING->PLANNING ok');
   check(phaseTransitionError('FORMING', 'DONE') !== undefined, 'machine FORMING->DONE rejected');
   const c = openCycle(p, 't-1');
-  check(c.step === 'PROPOSED' && p.currentCycle.id === c.id, 'machine openCycle');
+  check(c.step === 'PROPOSED' && p.cycles[p.cycles.length - 1] === c && p.currentCycle === undefined, 'machine openCycle');
   check(c.tddMode === 'off', 'machine openCycle default off');
   check(cycleBudgetExhausted(p.cycles, 't-1', 1), 'machine budget exhausted at cap 1');
   check(!cycleBudgetExhausted(p.cycles, 't-1', 5), 'machine budget not exhausted');

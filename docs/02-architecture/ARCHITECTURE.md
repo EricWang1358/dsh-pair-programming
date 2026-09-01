@@ -196,7 +196,6 @@ interface PairTeamState {           // 落盘 team.json
 interface PairProtocolState {
   phase: 'FORMING'|'PLANNING'|'CYCLING'|'TASK_GATE'|'RETRO'|'DONE';
   currentTaskId?: string;
-  currentCycle?: CycleState;
   cycles: CycleRecord[];
   risks: RiskRecord[];              // OPEN/MITIGATED/CLOSED/WONTFIX
   decisions: DecisionRecord[];      // ARBITRATE 日志
