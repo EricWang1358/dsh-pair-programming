@@ -5,6 +5,31 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [0.2.1] - 2026-09-01
+
+Hot fix: teams form on any DSH host, and a partially failed spawn no longer leaves live members behind.
+
+### Fixed
+- **`pair_start` crashed on hosts without the legacy editor tool names** (win32 included):
+  the member deny list filters write candidates against the host tool registry, and a role
+  that cannot be stripped of write access now fails loudly — I1 is no longer fail-open.
+- **Orphaned members after a partially failed spawn loop**: `retireSpawnedMembers` interrupts
+  every already-spawned member before the team directory goes away; `pair_stop` shares it.
+
+### Changed
+- **`pair_rotate` is refused in 0.2.x** — member capabilities bind at spawn time, so rotating
+  would deny the incoming Driver while the outgoing one kept write access. Dissolve and
+  restart instead; the TRADITIONAL pairing note says so.
+
+### Known gaps (tracked, not closed here)
+- Rotation needs a dynamic per-role write guard, not a spawn-time deny list.
+- The gate never runs a verification command; green-build evidence is honor-system.
+- The scheduler has no backoff; a stopped team's id cannot be reused; retired ids and the
+  `removed` status are written but never read.
+
+### Tests
+- 194 assertions across 8 suites; `npm run verify` is the release chain.
+
 ## [0.2.0] - 2026-09-01
 
 The SWE5006 course layer: Agile/XP engineering discipline hardened into the
