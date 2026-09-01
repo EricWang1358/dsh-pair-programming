@@ -102,3 +102,23 @@ peer 用区间（如 `>=0.1.0-rc <2`），与 `@ericwang1358/dsh-chat-mindmap` �
 
 修复后：`web` 已彻底不含该插件；`pair-dev` 是唯一加载本地 link 的开发 profile；`pnpm verify` 全绿；
 `dsh --profile pair-dev` 真实启动通过。
+
+## 8. v0.2.0 Beta 豁免（用户授权，留痕）
+
+2026-09-01：经用户明确指示（"我之后直接使用此功能进行 func test"），`@ericwang1358/dsh-pair-programming@0.2.0` 以 **`link:` 本地路径**加入 `web` profile 的 `bundles`——这与 §6 首条检查表（Stable 前 web 不含该插件）**有意偏离**，属用户裁决的受控例外，登记如下。
+
+**支持豁免的证据**（Beta 门槛实际已越过）：
+- `pnpm verify` 全绿：140 断言 + 门禁①②（alpha.3 cohort，cordis 4.0.2）；
+- 第二 `dsh web` 实例（3199）真实组合启动：插件加载 + client 包被扫描器命中并经 `/plugins` combo 路由送达（实例退出仅因第三方 task-board 单例锁，与本插件无关）；
+- `pair-dev` headless 真实启动零错误；settings 命名空间在真 `dsh-settings-file` provider 下分层正确。
+
+**未达 Stable 的缺口**：Stable 要求以**发布 tarball**（而非 link:）安装进日常 profile 回归——待 `npm login` 后发布完成。
+
+**回滚预案（web 若因此加载失败）**：
+```sh
+dsh plugin --profile web remove @ericwang1358/dsh-pair-programming
+# 或直接摘除 bundles 行 + dependencies 键后重启 dsh web
+```
+若 `dsh web` 起不来：先 `--patch` 加 `- id: pair-programming` + `disabled: true` 止血，再 remove。
+
+**豁免终止条件**：完成 tarball 安装回归转 Stable，或 func test 发现阻断级缺陷 → 立即 remove 回 pair-dev。

@@ -117,6 +117,8 @@ dsh plugin --profile web add @ericwang1358/dsh-pair-programming
 dsh web
 ```
 
+To roll back: `dsh plugin --profile web remove @ericwang1358/dsh-pair-programming` (restart the app afterwards). Local-path installs work identically while developing.
+
 Or develop against a local checkout (`link:` install per [docs](docs/README.md)). Dual activation — the `/pair` slash command *and* a plain-text gesture boundary — covers web UI, headless CLI, and API sessions.
 
 **Graceful degradation, stated up front.** Missing or broken platform capabilities downgrade the session instead of failing it (pure-prompt mode, stateless mode) — and the current mode is declared at the top of every session. 降级优于报错，证据优于意见。

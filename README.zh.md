@@ -117,6 +117,8 @@ dsh plugin --profile web add @ericwang1358/dsh-pair-programming
 dsh web
 ```
 
+回滚：`dsh plugin --profile web remove @ericwang1358/dsh-pair-programming`（之后重启应用）。开发期用本地路径安装，命令等价。
+
 或本地 checkout 开发（`link:` 安装，流程见 [docs](docs/README.md)）。双通道激活——`/pair` 斜杠命令 + 纯文本手势边界——覆盖 Web UI、headless CLI 与 API 会话。
 
 **降级先声明。** 平台能力缺失时会话自动降级（纯 prompt 模式、无状态模式）而不是崩掉，且每次会话开头明示当前模式。降级优于报错，证据优于意见。

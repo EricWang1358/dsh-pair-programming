@@ -316,8 +316,16 @@ L3 LLM prompt 缓存友好化（provider 端命中）
 1. **每任务微复盘**：任务连续失败 N 次即触发 mini-RETRO，而非只在会话尾复盘。
 2. **复盘信号回灌粒度控制器**：`stats.reasons` 分类分布作为 enlarge/shrink 的附加信号（当前仅 ACCEPT/ATTACK 计数）。
 3. **truck factor / 知识传递度量**：strong 风格下的交接学习记录，量化"单点知识"消除进度。
-4. **MVP 发布顺序提示**：PLANNING 建议首个可交付增量的故事子集（"够客户端到端用起来"）。
+4. **MVP 优先级排序提示**：PLANNING 建议首个可交付增量的故事子集（"够客户端到端用起来"）。
 5. **探测不到测试框架时自动降 `coach`**：PLANNING 验证命令探测结果驱动模式降级并在会话开头明示（当前由 Captain 人工判断）。
+
+### 12.1.1 已评估否决：同成员短窗口合并唤醒（coalesced wake）
+
+曾疑"live 路径逐条唤醒浪费轮次"（如 Navigator 收 RED→GREEN→REFACTOR 起 3 个 turn）。
+分析结论：**窗口合并无实际收益**——这些消息之间隔着 Driver 的实现轮次（分钟级），任何
+可行的 debounce 窗口（百毫秒级）内根本不会同时出现同成员多条消息；真正的背靠背场景
+（成员 turn 进行中到达多条）已由 mailbox 兜底路径的**批量 drain**（`fallbackMailboxPrompt`
+一次消化整个未读批次）覆盖。协议消息的到达节奏天然自限，无需再加一层定时器。
 
 ### 12.2 兼容与降级说明（v1.2）
 
