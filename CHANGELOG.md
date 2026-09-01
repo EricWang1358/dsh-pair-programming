@@ -5,6 +5,32 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [0.2.2] - 2026-09-01
+
+Driven by a real team's dogfood session (deep arbitration pileups and a full risk register): the
+captain now gets a hammer, a gauge, and two budgets that until then existed only as prose advice.
+
+### Added
+- **`pair_interrupt`** cancels one member's current turn and reports `delivered`; queued mailbox
+  messages are not cleared by it. `pair_status` shows per-member `mailbox.pending`, where a
+  delivery claimed inside its 60s lease is excluded — so 0 can mean "in flight", not "delivered".
+- **Risk WIP budget** `maxOpenRisks` (default 15, team-wide): a P1/P2 raise is refused while the
+  register is full, naming the oldest P2 tickets to clear; a P0 always goes through.
+- **Planning budget** `planningMaxArbitrations` (default 2, per task): past it `pair_arbitrate`
+  refuses and asks for a chosen side or a risk ticket; a task that already has a cycle is exempt,
+  and cancelling a started task stays refused until the reason is recorded by `pair_arbitrate`.
+
+### Fixed
+- `verify-startup` diffs both directions (missing **and** unexpected tools) and reports the
+  registered count instead of the expected one, so a new tool cannot slip past the gate unaudited.
+
+### Known gaps (tracked, not closed here)
+- A ruling that names no task spends no budget; `status=failed` is not guarded.
+- settings→resolved is not proven at `apply()` level; M7'-M11' unchanged from 0.2.1.
+### Tests
+- 239 assertions across 8 suites; every captain-facing sentence about the two budgets and the
+  interrupt is pinned by a test that reads the rendered prose, so docs cannot drift ahead of code.
+
 ## [0.2.1] - 2026-09-01
 
 Hot fix: teams form on any DSH host, and a partially failed spawn no longer leaves live members behind.
