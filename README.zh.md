@@ -93,6 +93,8 @@ Captain 把需求拆成用户故事（*"作为财务专员，我希望退款调�
 | `dod` | 协议默认 | DoD 门禁项（逗号分隔）：`all_accepted,no_blocking_risks,verify_evidence,decisions_documented,test_first,spike_outcome` |
 | `greenBuildOnStop` | `true` | 有落地改动时，`pair_stop` 必须附新鲜的全量测试通过证据 |
 | `maxCyclesPerTask` / `spikeMaxCycles` | `12` / `2` | 硬预算——协议不空转，token 不白烧 |
+| `maxOpenRisks` | `15` | 全队 OPEN 非 P0 风险票上限；P0 提票不受此限 |
+| `planningMaxArbitrations` | `2` | 任务进入规划期时可裁决的争议上限；任务已有 cycle 即豁免 |
 | `defaultMode` | `full` | `full`（3 代理）或 `light`（2 代理快线） |
 
 协议开销是**工程压下来的，不是嘴上说说的**：事件驱动监控（无 busy-poll）、粒度自适应控制器（连过 3 环→放大步幅、两连拒→强制拆小）、三层缓存（落盘协议状态、按 `gitHead+path+mtime` 键控的 L2 仓库证据缓存、逐字稳定版本化的角色 persona 以吃满 LLM 供应商的 prompt 缓存），外加循环预算兜底。每一枚 token 花在哪，复盘报告里都有。

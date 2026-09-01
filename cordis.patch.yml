@@ -26,6 +26,10 @@
         memberProvider: spawn
         # Hard cap on Pair Cycles per task before the captain must consult the user.
         maxCyclesPerTask: 12
+        # Team-wide cap on OPEN non-P0 risk tickets; a P0 raise always bypasses it.
+        # 0 freezes non-P0 raises entirely (YAML-only kill switch; the settings face rejects 0).
+        maxOpenRisks: 15
+        planningMaxArbitrations: 2
         # Default team mode: 'full' (Driver+Navigator+Challenger) or 'light' (Driver+Navigator).
         defaultMode: full
         # TDD enforcement: 'enforce' = tool-mandated RED->GREEN->REFACTOR cycles

@@ -12,6 +12,8 @@ export interface Config {
   memberMaxDepth?: number;
   maxMembers?: number;
   maxCyclesPerTask?: number;
+  maxOpenRisks?: number;
+  planningMaxArbitrations?: number;
   defaultMode?: 'full' | 'light';
   evidenceCache?: boolean;
   promptSectionOrder?: number;

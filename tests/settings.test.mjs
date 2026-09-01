@@ -26,16 +26,25 @@ export async function run(check) {
   check(parseDod('  ') === undefined && parseDod(undefined) === undefined, 'parseDod empty -> undefined (protocol defaults)');
 
   // toRuntimeSettings maps to the runtime shapes consumers read
-  const rt = toRuntimeSettings({ tddMode: 'coach', pairStyle: 'ping-pong', defaultMode: 'light', maxCyclesPerTask: 6, spikeMaxCycles: 1, greenBuildOnStop: false, dod: 'all_accepted,test_first' });
+  const rt = toRuntimeSettings({ tddMode: 'coach', pairStyle: 'ping-pong', defaultMode: 'light', maxCyclesPerTask: 6, spikeMaxCycles: 1, maxOpenRisks: 3, greenBuildOnStop: false, dod: 'all_accepted,test_first' });
   check(rt.tddMode === 'coach' && rt.pairStyle === 'ping-pong' && rt.maxCyclesPerTask === 6 && rt.greenBuildOnStop === false, 'toRuntimeSettings copies scalars');
   check(Array.isArray(rt.dod) && rt.dod.length === 2, 'toRuntimeSettings parses dod to array');
   check(toRuntimeSettings({ tddMode: 'weird' }).tddMode === 'enforce', 'toRuntimeSettings fails safe on unknown enum');
 
   // validate rejects nonsense beyond the schema (string enums, budgets, dod names)
-  check(settingsValueError({ tddMode: 'enforce', pairStyle: 'strong', defaultMode: 'full', maxCyclesPerTask: 12, spikeMaxCycles: 2, greenBuildOnStop: true, dod: 'test_first' }) === undefined, 'validate accepts a sane section');
+  check(settingsValueError({ tddMode: 'enforce', pairStyle: 'strong', defaultMode: 'full', maxCyclesPerTask: 12, spikeMaxCycles: 2, planningMaxArbitrations: 2, maxOpenRisks: 15, greenBuildOnStop: true, dod: 'test_first' }) === undefined, 'validate accepts a sane section');
   check(String(settingsValueError({ tddMode: 'yolo', pairStyle: 'traditional', defaultMode: 'full', maxCyclesPerTask: 12, spikeMaxCycles: 2, greenBuildOnStop: true, dod: '' })).includes('tddMode'), 'validate rejects bad tddMode');
   check(String(settingsValueError({ tddMode: 'enforce', pairStyle: 'traditional', defaultMode: 'full', maxCyclesPerTask: 0, spikeMaxCycles: 2, greenBuildOnStop: true, dod: '' })).includes('maxCyclesPerTask'), 'validate rejects zero budget');
-  check(String(settingsValueError({ tddMode: 'enforce', pairStyle: 'traditional', defaultMode: 'full', maxCyclesPerTask: 12, spikeMaxCycles: 2, greenBuildOnStop: true, dod: 'made_up_item' })).includes('made_up_item'), 'validate rejects unknown DoD item');
+  check(String(settingsValueError({ tddMode: 'enforce', pairStyle: 'traditional', defaultMode: 'full', maxCyclesPerTask: 12, spikeMaxCycles: 2, planningMaxArbitrations: 2, maxOpenRisks: 15, greenBuildOnStop: true, dod: 'made_up_item' })).includes('made_up_item'), 'validate rejects unknown DoD item');
+
+  // the raise budget is a hot field: validated and carried like its siblings.
+  const okSettings = { tddMode: 'enforce', pairStyle: 'traditional', defaultMode: 'full', maxCyclesPerTask: 12, spikeMaxCycles: 2, maxOpenRisks: 15, planningMaxArbitrations: 2, greenBuildOnStop: true, dod: '' };
+  check(settingsValueError(okSettings) === undefined, 'a settings value carrying the budget validates');
+  check([0, 2.5, 'big'].every(bad => String(settingsValueError({ ...okSettings, maxOpenRisks: bad })).includes('maxOpenRisks must be an integer >= 1')), 'the settings face rejects a 0 or fractional budget');
+  check(toRuntimeSettings(okSettings).maxOpenRisks === 15, 'toRuntimeSettings carries the raise budget');
+  check(PairSettingsSchema({}).maxOpenRisks === 15, 'section schema defaults maxOpenRisks to 15');
+  check([0, 1.5, 'two'].every(bad => String(settingsValueError({ ...okSettings, planningMaxArbitrations: bad })).includes('planningMaxArbitrations must be an integer >= 1')), 'the planning cap refuses 0 and non-integers');
+  check(toRuntimeSettings(okSettings).planningMaxArbitrations === 2 && PairSettingsSchema({}).planningMaxArbitrations === 2, 'the planning cap defaults to 2 and reaches the runtime shape');
 
   // settingsEntry: base layer mirrors the composed YAML, dod raw string preserved
   const resolved = { tddMode: 'off', pairStyle: 'traditional', defaultMode: 'full', maxCyclesPerTask: 12, spikeMaxCycles: 2, greenBuildOnStop: true, dod: undefined, stateDir: '.pair-programming', slashCommand: true };

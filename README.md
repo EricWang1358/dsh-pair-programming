@@ -93,6 +93,8 @@ The Captain drafts stories (*"As a finance ops clerk, I want refund calls to be 
 | `dod` | protocol defaults | comma-separated Definition-of-Done items: `all_accepted,no_blocking_risks,verify_evidence,decisions_documented,test_first,spike_outcome` |
 | `greenBuildOnStop` | `true` | `pair_stop` demands fresh whole-suite green evidence when changes landed |
 | `maxCyclesPerTask` / `spikeMaxCycles` | `12` / `2` | hard budgets — no protocol spinning, no token burn |
+| `maxOpenRisks` | `15` | team-wide cap on OPEN non-P0 risk tickets; a P0 raise bypasses it |
+| `planningMaxArbitrations` | `2` | disputes resolvable per task while it is still in planning; a task with cycles is exempt |
 | `defaultMode` | `full` | `full` (3 agents) or `light` (2 agents, fast lane) |
 
 Protocol overhead is engineered down, not wished away: **event-driven monitoring** (no busy-polling), an **adaptive granularity controller** (3 clean cycles in a row → widen steps; 2 rejections → force smaller), a **3-tier cache** (durable protocol state, L2 repo-evidence cache keyed to `gitHead+path+mtime`, and byte-stable versioned personas that maximize LLM provider prompt-cache hits), and cycle budgets that make spinning impossible. Every token spent is visible in the retro report.

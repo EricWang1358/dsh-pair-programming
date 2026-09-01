@@ -106,22 +106,24 @@ try {
   };
   apply(ctx, {});
 
-  const expectTools = ['pair_start', 'pair_propose', 'pair_review', 'pair_red', 'pair_green', 'pair_refactor', 'pair_report', 'pair_verify', 'pair_risk', 'pair_arbitrate', 'pair_gate_check', 'pair_task_create', 'pair_task_claim', 'pair_task_update', 'pair_rotate', 'pair_status', 'pair_retro', 'pair_stop'];
+  const expectTools = ['pair_start', 'pair_propose', 'pair_review', 'pair_red', 'pair_green', 'pair_refactor', 'pair_report', 'pair_verify', 'pair_risk', 'pair_arbitrate', 'pair_gate_check', 'pair_task_create', 'pair_task_claim', 'pair_task_update', 'pair_rotate', 'pair_status', 'pair_retro', 'pair_stop', 'pair_interrupt'];
   const missingTools = expectTools.filter(t => !reg.tools.includes(t));
+  const unexpectedTools = reg.tools.filter(t => !expectTools.includes(t));
   const needCommands = reg.commands.includes('pair');
   const needListeners = reg.listeners.includes('agent/status') && reg.listeners.includes('agent/pre-step');
 
   console.log(`apply() wired: ${reg.tools.length} tools, sections=[${reg.sections}], commands=[${reg.commands}], listeners=[${reg.listeners}], setup=${reg.setup}`);
-  if (missingTools.length || !needCommands || !needListeners || reg.setup !== 1 || !reg.sections.includes('pair-programming:usage')) {
+  if (missingTools.length || unexpectedTools.length || !needCommands || !needListeners || reg.setup !== 1 || !reg.sections.includes('pair-programming:usage')) {
     const why = [];
     if (missingTools.length) why.push(`missing tools: ${missingTools.join(', ')}`);
+    if (unexpectedTools.length) why.push(`unexpected tools not in expectTools: ${unexpectedTools.join(', ')} — update that list deliberately, or the release gate goes blind to a new tool`);
     if (!needCommands) why.push('/pair command not registered');
     if (!needListeners) why.push('gesture/status listeners not installed');
     if (reg.setup !== 1) why.push('continuable setup not installed');
     console.error(`verify:startup FAILED: ${why.join('; ')}`);
     process.exit(1);
   }
-  console.log(`verify:startup OK: entry imports against SDK ${sdk}, all runtime SDK exports present, ${expectTools.length} tools + /pair + gesture boundary + scheduler observer install.`);
+  console.log(`verify:startup OK: entry imports against SDK ${sdk}, all runtime SDK exports present, ${reg.tools.length} tools + /pair + gesture boundary + scheduler observer install.`);
   process.exit(0);
 } catch (error) {
   console.error('verify:startup FAILED:', error?.message ?? error);

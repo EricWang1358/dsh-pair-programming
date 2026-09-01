@@ -45,7 +45,7 @@ function loadClient(check) {
 /** fake browser ctx: one settingsScope namespace with base/user/value layers and a ready snapshot. */
 function fakeCtx() {
   const user = { tddMode: 'coach' };
-  const base = { tddMode: 'enforce', pairStyle: 'traditional', defaultMode: 'full', maxCyclesPerTask: 12, spikeMaxCycles: 2, greenBuildOnStop: true, dod: '' };
+  const base = { tddMode: 'enforce', pairStyle: 'traditional', defaultMode: 'full', maxCyclesPerTask: 12, planningMaxArbitrations: 2, spikeMaxCycles: 2, greenBuildOnStop: true, dod: '' };
   const listeners = new Set();
   const writes = [];
   const scope = {
@@ -80,7 +80,7 @@ export async function run(check) {
   check(env.slots.boundNamespace === 'pair-programming', 'binds the host settings namespace pair-programming');
   check(env.locale.registered?.ns === 'settings.pair-programming', 'locale registered under its own namespace');
   const copy = env.locale.registered?.copy;
-  const needed = ['cardTitle', 'tddMode', 'pairStyle', 'defaultMode', 'maxCyclesPerTask', 'spikeMaxCycles', 'greenBuildOnStop', 'dod', 'save', 'discard', 'reset', 'overridden', 'baseLabel', 'readOnly', 'saveFailed', 'unsaved', 'saving', 'invalidNumber'];
+  const needed = ['cardTitle', 'tddMode', 'pairStyle', 'defaultMode', 'maxCyclesPerTask', 'maxOpenRisks', 'planningMaxArbitrations', 'spikeMaxCycles', 'greenBuildOnStop', 'dod', 'save', 'discard', 'reset', 'overridden', 'baseLabel', 'readOnly', 'saveFailed', 'unsaved', 'saving', 'invalidNumber'];
   check(needed.every(k => typeof copy?.zh?.[k] === 'string' && typeof copy?.en?.[k] === 'string'), 'both locales cover every needed key');
   check(env.slots.injectedName === 'settings.plugin.item', 'injected into settings.plugin.item slot');
   check(env.slots.registration?.key === 'pair-programming', 'card keyed by the settings namespace');

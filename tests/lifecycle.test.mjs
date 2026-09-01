@@ -1,9 +1,14 @@
-/** rollback: retireSpawnedMembers — interrupt is the obligation, audit is best effort. */
+/** Tool-handler behaviour through register-capture: member rollback and the raise budget. */
 import { mkdtemp, rm, writeFile, readFile, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { retireSpawnedMembers, registerLifecycleTools } from '../lib/tools/lifecycle.js';
-import { createTeamDir, readTeam } from '../lib/state/store.js';
+import { createTeamDir, readTeam, writeTeam } from '../lib/state/store.js';
+import { registerRiskTools } from '../lib/tools/risk.js';
+import { registerArbitrateTools } from '../lib/tools/arbitrate.js';
+import { registerFlowTools } from '../lib/tools/flow.js';
+import { openRisk } from '../lib/protocol/risks.js';
+import { appendMailbox, createMessage, claimMailboxDelivery, releaseMailboxDelivery, acknowledgeMailbox } from '../lib/state/mailbox.js';
 import { initialProtocolState } from '../lib/protocol/machine.js';
 
 function mockCtx() {
@@ -20,6 +25,33 @@ async function exists(p) {
 async function rejects(fn, needle) {
   try { await fn(); } catch (error) { return String(error?.message ?? error).includes(needle); }
   return false;
+}
+
+/** Register the flow tools; pair_task_update is the guarded one. */
+function flowHarness(root, stateDir = 'flow-state') {
+  const defs = [];
+  registerFlowTools({ logger: { warn: () => {}, debug: () => {}, error: () => {} }, tools: { register: (d) => { defs.push(d); } }, agents: { get: () => undefined }, subagents: { followup: async () => true } }, { stateDir }, { scheduler: {} });
+  return { defs, captain: { id: 'cap1', session: { header: { cwd: root }, append: () => {} } }, stateRoot: join(root, stateDir) };
+}
+
+/** Register pair_arbitrate against a mock ctx; config carries the planning cap. */
+function arbHarness(root, { planningMaxArbitrations = 2, stateDir = 'arb-state' } = {}) {
+  const defs = [];
+  const ctx = { logger: { warn: () => {}, debug: () => {}, error: () => {} }, tools: { register: (d) => { defs.push(d); } }, agents: { get: () => undefined }, subagents: { followup: async () => true } };
+  registerArbitrateTools(ctx, { stateDir, planningMaxArbitrations }, { scheduler: {} });
+  return { defs, captain: { id: 'cap1', session: { header: { cwd: root }, append: () => {} } }, stateRoot: join(root, stateDir) };
+}
+
+/** Register pair_risk against a mock ctx; config carries the budget under test. */
+function riskHarness(root, { maxOpenRisks = 15, stateDir = 'risk-state' } = {}) {
+  const defs = [];
+  const ctx = {
+    logger: { warn: () => {}, debug: () => {}, error: () => {} },
+    tools: { register: (d) => { defs.push(d); } },
+    agents: { get: () => undefined },
+  };
+  registerRiskTools(ctx, { stateDir, maxOpenRisks }, { scheduler: {} });
+  return { defs, captain: { id: 'cap1', session: { header: { cwd: root }, append: () => {} } }, stateRoot: join(root, stateDir) };
 }
 
 /** Register the real lifecycle tools against a mock ctx and grab pair_stop. */
@@ -128,6 +160,34 @@ export async function run(check) {
     const rotate = h.defs.find((x) => x.name === 'pair_rotate');
     check(await rejects(() => rotate.execute({ new_driver: 'navigator', handoff_note: 'x' }, { agent: h.captain }), 'bound at spawn'), 'pair_rotate refuses its own captain');
     check(await rejects(() => rotate.execute({ new_driver: 'navigator', handoff_note: 'x' }, { agent: member }), 'only the captain'), 'a non-captain hits the permission guard first');
+    // F1-a: pair_interrupt is the captain's hammer over exactly one live turn.
+    const hi = stopHarness(root, { stateDir: 'int-state' });
+    const hammer = hi.defs.find((x) => x.name === 'pair_interrupt');
+    await createTeamDir(hi.stateRoot, teamFixture());
+    const ir = await hammer.execute({ member: 'driver', reason: 'cycle stuck' }, { agent: hi.captain });
+    check(JSON.stringify(hi.interrupts) === '["child-1"]' && ir.interrupted === 'driver' && ir.reason === 'cycle stuck' && ir.delivered === true, 'pair_interrupt reports the session it cancelled and that delivery worked');
+    check(await rejects(() => hammer.execute({ member: 'driver', reason: 'x' }, { agent: member }), 'only the captain'), 'a non-captain cannot pull the hammer');
+    check(await rejects(() => hammer.execute({ member: 'ghost', reason: 'x' }, { agent: hi.captain }), 'member named "ghost"'), 'an unknown member is named in the refusal');
+    check(await rejects(() => hammer.execute({ member: 'navigator', reason: 'x' }, { agent: hi.captain }), 'no live session'), 'a member without a session id is refused by name');
+    check(await rejects(() => hammer.execute({ member: 'driver', reason: '   ' }, { agent: hi.captain }), 'needs a reason'), 'a blank reason is refused');
+    check(hammer.description.includes('not cleared') && !/clears? the queue/i.test(hammer.description), 'the description is honest about the queue');
+    // F1-b: pair_status carries the honest queue gauge, lease-aware.
+    const ps = stopHarness(root, { stateDir: 'ps-state' });
+    const status = ps.defs.find((x) => x.name === 'pair_status').execute;
+    await createTeamDir(ps.stateRoot, teamFixture());
+    const msgA = createMessage('captain', 'driver', '[PAIR:INFO] first');
+    const msgB = createMessage('captain', 'driver', '[PAIR:INFO] second');
+    await appendMailbox(ps.stateRoot, 't1', 'driver', msgA);
+    await appendMailbox(ps.stateRoot, 't1', 'driver', msgB);
+    const gauge = async () => (await status({}, { agent: ps.captain })).members.find((m) => m.name === 'driver')?.mailbox?.pending ?? -1;
+    check(await gauge() === 2, 'pair_status counts two unacknowledged messages');
+    await claimMailboxDelivery(ps.stateRoot, 't1', 'driver', [msgA.id, msgB.id]);
+    check(await gauge() === 0, 'a delivery claimed inside its lease does not count as pending');
+    await releaseMailboxDelivery(ps.stateRoot, 't1', 'driver', [msgA.id, msgB.id]);
+    check(await gauge() === 2, 'releasing the lease makes the queue pending again');
+    await acknowledgeMailbox(ps.stateRoot, 't1', 'driver', [msgA.id, msgB.id]);
+    const gauged = await status({}, { agent: ps.captain });
+    check(await gauge() === 0 && typeof gauged.pending_note === 'string' && gauged.pending_note.includes('in flight'), 'ack clears the gauge and the note explains what 0 means');
     check(rotate.description.includes('Currently refused in 0.2.x'), 'pair_rotate description carries the refusal marker');
     // AC-A2-1: the sunny path must not regress behind the new rollback catch.
     const s1 = startHarness(root, { failOnCall: -1 });
@@ -151,6 +211,43 @@ export async function run(check) {
     await stopG({ reason: 'x', green_build_evidence: 'suite green' }, { agent: g.captain });
     const closed = await readTeam(g.stateRoot, 't1');
     check(closed.protocol.greenBuild?.evidence === 'suite green' && closed.protocol.phase === 'DONE', 'supplied evidence is stored and the team closes');
+    // F2-b1: the raise budget enforced through the real pair_risk handler.
+    const rh = riskHarness(root, { maxOpenRisks: 2 });
+    const raise = rh.defs.find((x) => x.name === 'pair_risk').execute;
+    const booked = teamFixture();
+    await createTeamDir(rh.stateRoot, booked);
+    openRisk(booked.protocol, { severity: 'P2', scenario: 's', trigger: 't', suggestion: 'g', raisedBy: 'challenger' });
+    openRisk(booked.protocol, { severity: 'P1', scenario: 's', trigger: 't', suggestion: 'g', raisedBy: 'challenger' });
+    await writeTeam(rh.stateRoot, booked);
+    const refused = await raise({ action: 'raise', severity: 'P2', scenario: 's2', trigger: 't2', suggestion: 'g2' }, { agent: rh.captain }).then(() => '', (e) => String(e?.message ?? e));
+    check(refused.includes('cap 2') && refused.includes('2 open non-P0') && /r-\S+\(P2\)/.test(refused), 'the third non-P0 raise is refused with live numbers and a named ticket');
+    const afterRefusal = await readTeam(rh.stateRoot, 't1');
+    check(afterRefusal.protocol.risks.length === 2, 'a refused raise writes no ticket to the register');
+    check(afterRefusal.protocol.stats.attacks === 2, 'a refused raise does not inflate the attack count');
+    const p0 = await raise({ action: 'raise', severity: 'P0', scenario: 's3', trigger: 't3', suggestion: 'g3' }, { agent: rh.captain });
+    const afterP0 = await readTeam(rh.stateRoot, 't1');
+    check(p0.severity === 'P0' && p0.escalated === true && afterP0.protocol.risks.length === 3 && afterP0.protocol.stats.attacks === 3, 'a P0 bypasses the budget, lands on disk, and counts as an attack');
+    // F3-2a: the planning cap reaches pair_arbitrate through the config key the chain writes.
+    const tsk = (id) => ({ id, subject: 's', status: 'pending', dependencies: [], createdAt: 1, updatedAt: 1 });
+    const ah = arbHarness(root, { planningMaxArbitrations: 1 });
+    const arbitrate = ah.defs.find((x) => x.name === 'pair_arbitrate').execute;
+    await createTeamDir(ah.stateRoot, teamFixture({ tasks: [tsk('t-1')] }));
+    const firstArb = await arbitrate({ conflict_ref: 'plan', decision: 'A', evidence: ['a.js:1'], rationale: 'r', task_id: 't-1' }, { agent: ah.captain });
+    const secondArb = await arbitrate({ conflict_ref: 'plan', decision: 'B', evidence: ['b.js:1'], rationale: 'r', task_id: 't-1' }, { agent: ah.captain }).then(() => '', (e) => String(e?.message ?? e));
+    check(typeof firstArb.decision_id === 'string' && secondArb.includes('used 1 of 1') && secondArb.includes('pick a side'), 'the config cap reaches the guard and the refusal is the predicate text');
+    check((await arbitrate({ conflict_ref: 'plan', decision: 'C', evidence: ['c.js:1'], rationale: 'r' }, { agent: ah.captain }).then(() => 'ok', () => 'blocked')) === 'ok', 'a ruling that names no task spends nothing (declared boundary)');
+    const capTwo = { id: 'cap2', session: { header: { cwd: root }, append: () => {} } };
+    await createTeamDir(ah.stateRoot, teamFixture({ id: 't2', captainSessionId: 'cap2', tasks: [tsk('t-1')], protocol: { ...initialProtocolState(), cycles: [{ taskId: 't-1', openedAt: 5 }], decisions: [{ id: 'd-old', taskId: 't-1', conflictRef: 'plan t-1', at: 1 }] } }));
+    const midFrozen = await arbitrate({ conflict_ref: 'plan', decision: 'B', evidence: ['b.js:1'], rationale: 'r', task_id: 't-1' }, { agent: capTwo }).then(() => 'ok', (e) => String(e?.message ?? e));
+    check(midFrozen === 'ok', 'a task that already has cycles is exempt from the planning budget');
+    // 2b: a task that already has cycles cannot be cancelled without a recorded reason.
+    const flh = flowHarness(root);
+    const updateTask = flh.defs.find((x) => x.name === 'pair_task_update').execute;
+    await createTeamDir(flh.stateRoot, teamFixture({ tasks: [tsk('t-1'), tsk('t-9')], protocol: { ...initialProtocolState(), cycles: [{ taskId: 't-1', openedAt: 5 }] } }));
+    const cancelStarted = await updateTask({ task_id: 't-1', status: 'cancelled', attempt_id: 'a-1' }, { agent: flh.captain }).then(() => 'ok', (e) => String(e?.message ?? e));
+    check(cancelStarted.includes('already has cycles') && cancelStarted.includes('pair_arbitrate'), 'a started task refuses silent cancellation and names the way through');
+    const cancelPlanned = await updateTask({ task_id: 't-9', status: 'cancelled', attempt_id: 'a-1' }, { agent: flh.captain }).then(() => 'ok', (e) => String(e?.message ?? e));
+    check(cancelPlanned === 'ok', 'an unplanned task still cancels normally (the guard is not over-broad)');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
