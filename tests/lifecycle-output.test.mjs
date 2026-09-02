@@ -23,7 +23,7 @@ function startHarness(root, stateDir) {
   };
   registerLifecycleTools(ctx, { stateDir, memberProvider: 'pair', tddMode: 'enforce', pairStyle: 'traditional', greenBuildOnStop: false }, { selections: { withPending: async (i, l, s, op) => op() }, scheduler: {} });
   const captain = { id: 'cap1', session: { header: { cwd: root }, append: () => {}, requestHeader: () => ({ config: { provider: 'p', model: 'm' } }) } };
-  return { spawns, start: defs.find((d) => d.name === 'pair_start').execute, stop: defs.find((d) => d.name === 'pair_stop').execute, captain };
+  return { spawns, start: defs.find((d) => d.name === 'pair_start').execute, stop: defs.find((d) => d.name === 'pair_stop').execute, status: defs.find((d) => d.name === 'pair_status').execute, captain };
 }
 
 export async function run(check) {
@@ -50,6 +50,36 @@ export async function run(check) {
     check(restarted?.team_id === 'lo-a2' && a.spawns.length === 4, 'state A2: after pair_stop the same captain session starts a new team (2 more spawns)');
     check(restartError === undefined, `state A2: no "you already lead" after stop${restartError ? ` — got: ${restartError.message}` : ''}`);
     check(isJsonValue(restarted) === true, 'state A2: second pair_start output also passes the lossless-JSON gate');
+
+    // State A3 (M13' round 2, prefer-active ruling): with a DONE archive (lo-a) and
+    // a live team (lo-a2) coexisting, the captain seat resolves pair_status/pair_stop
+    // to the LIVE team; with no live team left, pair_status falls back to the first
+    // DONE archive (tool-level audit face). Fail-closed: unreadable/malformed still block.
+    let st1;
+    let st1Error;
+    try {
+      st1 = await a.status({}, { agent: a.captain });
+    } catch (error) {
+      st1Error = error;
+    }
+    check(st1 !== undefined && st1.summary.includes('Team "lo-a2"'), 'state A3: pair_status resolves to the live team lo-a2 while lo-a is archived');
+    check(st1Error === undefined, `state A3: no "belongs to multiple active teams" while a DONE archive coexists${st1Error ? ` — got: ${st1Error.message}` : ''}`);
+    let stopped2;
+    let stop2Error;
+    try {
+      stopped2 = await a.stop({ reason: 'm13 round2' }, { agent: a.captain });
+    } catch (error) {
+      stop2Error = error;
+    }
+    check(stopped2?.team_id === 'lo-a2', `state A3: pair_stop resolves the live team while an archive coexists${stop2Error ? ` — got: ${stop2Error.message}` : ''}`);
+    let st3;
+    let st3Error;
+    try {
+      st3 = await a.status({}, { agent: a.captain });
+    } catch (error) {
+      st3Error = error;
+    }
+    check(st3 !== undefined && st3.phase === 'DONE' && st3.summary.includes('Team "lo-a" ('), `state A3: after stopping lo-a2, pair_status falls back to the first DONE archive (lo-a, DONE phase — tool-level audit face)${st3Error ? ` — got: ${st3Error.message}` : ''}`);
     // State B: lessons.json present — same gate, and only the keep/try projection is carried.
     const b = startHarness(root, 'out-b');
     await mkdir(join(root, 'out-b'), { recursive: true });
