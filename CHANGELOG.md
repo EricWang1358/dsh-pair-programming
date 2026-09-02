@@ -5,6 +5,36 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [0.3.0] - 2026-09-02
+
+The gate runs the verification command itself, stale receipts fold before offline delivery, and `pair_status` reads one board.
+
+### Added
+- **Machine gate (M7')**: set `dodCommand` and `pair_gate_check` executes it in the workspace
+  itself — outside the team lock, 120s constant timeout. Successes cache under a content digest
+  of the whole workspace with the state dir excluded (cache writes cannot invalidate themselves;
+  any changed byte reruns; failures never cache; an incomputable digest still runs, just
+  uncached). A pass record carries `{command, exit, outputSha, cached}`; a failed run counts
+  toward `gateFails` with the last 40 output lines attached. The command runs through the
+  shell — a deployment-owner setting on the same trust boundary as `dod` / `memberProvider`.
+
+### Changed
+- **Canonical board**: the current cycle in `pair_status` is derived from `cycles[]`
+  (`currentCycleOf`) instead of a second stored pointer that JSON round-trips split from the
+  array; a legacy `currentCycle` field is ignored, never migrated.
+- **Delivery-time collapse**: offline backlog redelivery folds receipts whose effect is already
+  on the board (GO/RED/GREEN/REFACTOR/ACCEPT judged against the cycle record) into one
+  `[n absorbed by board: …]` line; live messages, non-protocol text and unknown cycles stay
+  verbatim; claim/ack semantics untouched.
+
+### Known gaps (tracked, not closed here)
+- The gate proves the workspace passes at gate time; the per-step tree REFACTOR touched is not
+  machine-judged yet (needs a GREEN-time snapshot, 0.3.x). Without `dodCommand`, verification
+  evidence stays honor-system. Unchanged: rulings naming no task spend no budget, `failed` is
+  unguarded, no scheduler backoff; pipeline/preemption wait for pending data.
+### Tests
+- 263 assertions across 9 suites; `npm run verify` is the release chain.
+
 ## [0.2.2] - 2026-09-01
 
 Driven by a real team's dogfood session (deep arbitration pileups and a full risk register): the
