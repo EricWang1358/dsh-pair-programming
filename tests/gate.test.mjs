@@ -2,6 +2,12 @@
 import { runGate } from '../lib/protocol/gate.js';
 import { openRisk, mitigateRisk, closeRisk, wontfixRisk, openBlockingRisks, hasOpenP0 } from '../lib/protocol/risks.js';
 import { initialProtocolState, openCycle } from '../lib/protocol/machine.js';
+import { runDodCommand } from '../lib/tools/gate-exec.js';
+import { EvidenceCache } from '../lib/state/evidence-cache.js';
+import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 export async function run(check) {
   const p = initialProtocolState();
@@ -73,4 +79,33 @@ export async function run(check) {
   let g10 = runGate(team2, 't-9', { tddMode: 'enforce', dod: ['all_accepted', 'verify_evidence'] });
   check(g10.pass === true, 'gate honors reduced DoD checklist (no risk/decision/test-first items)');
   check(Array.isArray(g10.checklist.dod) && g10.checklist.dod.length === 2, 'gate checklist echoes active DoD items');
+
+  // gate-exec (M7'): the configured command runs for real; successes cache by content digest.
+  const gx = await mkdtemp(join(tmpdir(), 'gateexec-'));
+  try {
+    const cache = new EvidenceCache(join(gx, 'state'), true, { cacheHits: 0, cacheMiss: 0 });
+    const cmd = `node -e "require('fs').appendFileSync('marker.txt','x')"`;
+    const a = await runDodCommand({ dodCommand: cmd }, gx, cache, join(gx, 'state'));
+    check(a.exit === 0 && a.cached === false && a.skipped === undefined, 'gate-exec A: non-git workspace runs the command and never caches');
+    const b1 = await runDodCommand({ dodCommand: 'node -e "process.exit(3)"' }, gx, cache, join(gx, 'state'));
+    check(b1.exit === 3 && typeof b1.outputTail === 'string' && b1.cached === false, 'gate-exec B: failing command reports exit+tail, uncached');
+    check((await runDodCommand({ dodCommand: 'node -e "process.exit(3)"' }, gx, cache, join(gx, 'state'))).cached === false, 'gate-exec B: failures are not cached');
+    spawnSync('git', ['init'], { cwd: gx });
+    await writeFile(join(gx, '.gitignore'), 'marker.txt\n', 'utf8');
+    await writeFile(join(gx, 'app.txt'), 'v1', 'utf8');
+    spawnSync('git', ['add', '-A'], { cwd: gx });
+    spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-m', 'init'], { cwd: gx });
+    const m0 = (await readFile(join(gx, 'marker.txt'), 'utf8')).length;
+    const c1 = await runDodCommand({ dodCommand: cmd }, gx, cache, join(gx, 'state'));
+    check(c1.exit === 0 && c1.cached === false, 'gate-exec C: first git-workspace run executes');
+    const c2 = await runDodCommand({ dodCommand: cmd }, gx, cache, join(gx, 'state'));
+    check(c2.cached === true && (await readFile(join(gx, 'marker.txt'), 'utf8')).length === m0 + 1, 'gate-exec C: same bytes hit the cache, marker grew only once');
+    const bg1 = await runDodCommand({ dodCommand: 'node -e "process.exit(3)"' }, gx, cache, join(gx, 'state'));
+    check(bg1.cached === false && (await runDodCommand({ dodCommand: 'node -e "process.exit(3)"' }, gx, cache, join(gx, 'state'))).cached === false, 'gate-exec B: failures are not cached even in a digestable workspace');
+    await writeFile(join(gx, 'app.txt'), 'v2', 'utf8');
+    const d = await runDodCommand({ dodCommand: cmd }, gx, cache, join(gx, 'state'));
+    check(d.cached === false && (await readFile(join(gx, 'marker.txt'), 'utf8')).length === m0 + 2, 'gate-exec D: changed bytes rerun the command');
+  } finally {
+    await rm(gx, { recursive: true, force: true });
+  }
 }

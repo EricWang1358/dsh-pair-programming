@@ -37,10 +37,10 @@ function flowHarness(root, stateDir = 'flow-state') {
 }
 
 /** Register pair_arbitrate against a mock ctx; config carries the planning cap. */
-function arbHarness(root, { planningMaxArbitrations = 2, stateDir = 'arb-state' } = {}) {
+function arbHarness(root, { planningMaxArbitrations = 2, stateDir = 'arb-state', ...cfg } = {}) {
   const defs = [];
   const ctx = { logger: { warn: () => {}, debug: () => {}, error: () => {} }, tools: { register: (d) => { defs.push(d); } }, agents: { get: () => undefined }, subagents: { followup: async () => true } };
-  registerArbitrateTools(ctx, { stateDir, planningMaxArbitrations }, { scheduler: {} });
+  registerArbitrateTools(ctx, { stateDir, planningMaxArbitrations, ...cfg }, { scheduler: {} });
   return { defs, captain: { id: 'cap1', session: { header: { cwd: root }, append: () => {} } }, stateRoot: join(root, stateDir) };
 }
 
@@ -274,6 +274,14 @@ export async function run(check) {
     await createTeamDir(ah.stateRoot, teamFixture({ id: 't2', captainSessionId: 'cap2', tasks: [tsk('t-1')], protocol: { ...initialProtocolState(), cycles: [{ taskId: 't-1', openedAt: 5 }], decisions: [{ id: 'd-old', taskId: 't-1', conflictRef: 'plan t-1', at: 1 }] } }));
     const midFrozen = await arbitrate({ conflict_ref: 'plan', decision: 'B', evidence: ['b.js:1'], rationale: 'r', task_id: 't-1' }, { agent: capTwo }).then(() => 'ok', (e) => String(e?.message ?? e));
     check(midFrozen === 'ok', 'a task that already has cycles is exempt from the planning budget');
+  // ORDER-P3b-2: pair_gate_check runs the configured dodCommand itself (M7').
+  const gh = arbHarness(root, { stateDir: 'gateexec-state', dodCommand: 'node -e "process.exit(0)"' });
+  const gate = gh.defs.find((x) => x.name === 'pair_gate_check').execute;
+  await createTeamDir(gh.stateRoot, teamFixture({ tasks: [tsk('t-1')], protocol: { ...initialProtocolState(), cycles: [{ id: 'c1', taskId: 't-1', step: 'VERIFIED', verify: { verdict: 'accept', evidence: ['suite green'] } }] } }));
+  const gr = await gate({ task_id: 't-1' }, { agent: gh.captain });
+  check(gr.pass === true && typeof gr.gate_pass_id === 'string', 'pair_gate_check runs the configured dodCommand and passes');
+  const gp = (await readTeam(gh.stateRoot, 't1')).protocol.gatePasses[0];
+  check(gp.exit === 0 && gp.cached === false && typeof gp.command === 'string' && typeof gp.outputSha === 'string', 'the gate pass record carries the command face {command, exit, outputSha, cached}');
     // 2b: a task that already has cycles cannot be cancelled without a recorded reason.
     const flh = flowHarness(root);
     const updateTask = flh.defs.find((x) => x.name === 'pair_task_update').execute;
