@@ -45,6 +45,11 @@ export async function run(check) {
   check(PairSettingsSchema({}).maxOpenRisks === 15, 'section schema defaults maxOpenRisks to 15');
   check([0, 1.5, 'two'].every(bad => String(settingsValueError({ ...okSettings, planningMaxArbitrations: bad })).includes('planningMaxArbitrations must be an integer >= 1')), 'the planning cap refuses 0 and non-integers');
   check(toRuntimeSettings(okSettings).planningMaxArbitrations === 2 && PairSettingsSchema({}).planningMaxArbitrations === 2, 'the planning cap defaults to 2 and reaches the runtime shape');
+  // dodCommand (M7'): optional string, off by default, carried like its siblings.
+  check(settingsValueError({ ...okSettings, dodCommand: 'node tests/run.mjs' }) === undefined, 'a sane dodCommand validates');
+  check([42, {}, true].every(bad => String(settingsValueError({ ...okSettings, dodCommand: bad })).includes('dodCommand')), 'the settings face rejects a non-string dodCommand');
+  check(toRuntimeSettings({ ...okSettings, dodCommand: 'node tests/run.mjs' }).dodCommand === 'node tests/run.mjs', 'toRuntimeSettings carries dodCommand');
+  check(PairSettingsSchema({}).dodCommand === undefined, 'section schema leaves dodCommand unset by default');
 
   // settingsEntry: base layer mirrors the composed YAML, dod raw string preserved
   const resolved = { tddMode: 'off', pairStyle: 'traditional', defaultMode: 'full', maxCyclesPerTask: 12, spikeMaxCycles: 2, greenBuildOnStop: true, dod: undefined, stateDir: '.pair-programming', slashCommand: true };

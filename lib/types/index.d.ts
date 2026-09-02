@@ -14,6 +14,7 @@ export interface Config {
   maxCyclesPerTask?: number;
   maxOpenRisks?: number;
   planningMaxArbitrations?: number;
+  dodCommand?: string;
   defaultMode?: 'full' | 'light';
   evidenceCache?: boolean;
   promptSectionOrder?: number;
