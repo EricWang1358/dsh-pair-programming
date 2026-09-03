@@ -108,13 +108,19 @@ export async function run(check) {
   check(navigatorPersona(tteam, m, '.pp').includes('observation'), 'personas navigator feedback triad');
   check(navigatorPersona(tteam, m, '.pp').includes('work not done'), 'personas navigator YAGNI lens');
   check(challengerPersona(team, m, '.pp').includes('quadrants 3/4'), 'personas challenger quadrant coverage');
-  check(captainProtocol({ tddMode: 'enforce' }).includes('green-build'), 'personas captain green-build rule');
-  check(captainProtocol({ tddMode: 'enforce' }).includes('70%'), 'personas captain 70% rule');
-  check(captainProtocol({ tddMode: 'enforce' }).includes('never a generic'), 'personas captain story capture duty');
+  check(captainProtocol({ tddMode: 'enforce', defaultMode: 'light' }).includes('green-build'), 'personas captain green-build rule (legacy)');
+  check(/red build/i.test(captainProtocol({ tddMode: 'enforce' })), 'the solo protocol still names the green-build gate it will actually hit');
+  check(captainProtocol({ tddMode: 'enforce', defaultMode: 'light' }).includes('70%') && captainProtocol({ tddMode: 'enforce' }).includes('70%'), 'personas captain 70% rule in both modes');
+  check(captainProtocol({ tddMode: 'enforce', defaultMode: 'light' }).includes('never a generic'), 'personas captain story capture duty (legacy)');
+  check(captainProtocol({ tddMode: 'enforce' }).includes('as a user'), 'the solo protocol names the story validation the tool actually performs');
   check(navigatorPersona(team, m, '.pp').includes('NEVER edit'), 'personas navigator read-only');
   check(challengerPersona(team, m, '.pp').includes('red team'), 'personas challenger adversarial');
-  check(captainProtocol({ tddMode: 'enforce' }).includes('planningMaxArbitrations') && captainProtocol({ tddMode: 'enforce' }).includes('exempt'), 'personas prose states the planning budget and its exemption');
-  check(usageSectionText({ tddMode: 'enforce' }).includes('pair_interrupt') && usageSectionText({ tddMode: 'enforce' }).includes('current turn only'), 'usage prose names the interrupt hammer without over-promising');
+  check(['light', 'solo'].every(m => { const t = captainProtocol({ tddMode: 'enforce', defaultMode: m }); return t.includes('planningMaxArbitrations') && t.includes('exempt'); }), 'personas prose states the planning budget and its exemption in both modes');
+  check(usageSectionText({ tddMode: 'enforce', defaultMode: 'light' }).includes('pair_interrupt') && usageSectionText({ tddMode: 'enforce', defaultMode: 'light' }).includes('current turn only'), 'usage prose names the interrupt hammer without over-promising (legacy modes, which have durable seats to interrupt)');
+  // Solo has no durable seat to interrupt — the SPEC seat retires on its own.
+  // Carrying the hammer text there would be describing a control for a party
+  // that does not exist, which is the prompt bloat this mode set out to cut.
+  check(!usageSectionText({ tddMode: 'enforce' }).includes('current turn only'), 'the solo protocol omits controls for seats it does not have');
   check(PROTOCOL_VERSION === '3', 'personas versioned at v3');
   // The granularity controller was dead: it filtered step==='CLOSED', which no
   // tool ever sets, so the enlarge branch could never fire in any real session.

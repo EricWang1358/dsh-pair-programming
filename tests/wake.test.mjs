@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { registerWakeRuntime, wakeRuntimeFor, scheduleWake } from '../lib/runtime/wake.js';
 import { installPairScheduler } from '../lib/runtime/scheduler.js';
 import { registerFlowTools } from '../lib/tools/flow.js';
+import { registerTaskTools } from '../lib/tools/task.js';
 import { createTeamDir, readTeam } from '../lib/state/store.js';
 import { initialProtocolState, openCycle } from '../lib/protocol/machine.js';
 
@@ -104,8 +105,37 @@ export async function run(check) {
     await scheduler.heartbeat();
     check(swept.length === 1 && swept[0] === 'h1', 'E the heartbeat sweeps live teams and skips DONE/missing ones');
     check(scheduler.trackedTeams().length === 1, 'E finished and vanished teams are dropped from the sweep list');
+
+    // G: settled teams leave the sweep list (all tasks terminal, all idle,
+    // no mail, nothing owed) — a finished team costs zero future sweeps, and
+    // every wake path re-tracks first, so the list is self-healing.
+    const gRoot = join(root, 'g-state');
+    const settled = teamFixture({ id: 's1' });
+    settled.tasks = [{ id: 't-1', subject: 's', status: 'completed', dependencies: [], createdAt: 1, updatedAt: 1 }];
+    await createTeamDir(gRoot, settled);
+    await createTeamDir(gRoot, teamFixture({ id: 's2' }));
+    const sweptG = [];
+    const gctx = { logger: { warn: () => {} }, on: () => {}, agents: { get: () => undefined }, subagents: {} };
+    const gsched = installPairScheduler(gctx, { stateDir: 'g-state', heartbeatMs: 0 });
+    gsched.kickTeam = async (_workspace, teamId) => { sweptG.push(teamId); };
+    gsched.trackTeam(root, 's1');
+    gsched.trackTeam(root, 's2');
+    await gsched.heartbeat();
+    check(sweptG.length === 1 && sweptG[0] === 's2', 'G the heartbeat kicks live teams but not settled ones');
+    check(gsched.trackedTeams().length === 1 && gsched.trackedTeams()[0].teamId === 's2', 'G settled teams leave the sweep list');
     scheduler.untrackTeam(root, 'h1');
     check(scheduler.trackedTeams().length === 0, 'E untrackTeam removes the last team');
+
+    // F: task creation wakes with the WORKSPACE, not the state root (F4 regression:
+    // kickTeam(stateRoot, ...) double-joined the state dir and silently woke nobody).
+    const h3 = stalledHarness(root, [], { stateDir: 'wake-state-3' });
+    await createTeamDir(h3.stateRoot, teamFixture({ id: 't3' }));
+    const kicks3 = [];
+    registerTaskTools(h3.ctx, { stateDir: 'wake-state-3' }, { scheduler: { kickTeam: async (ws, tid) => { kicks3.push(ws + '\0' + tid); } } });
+    const create = h3.defs.find((d) => d.name === 'pair_task_create').execute;
+    const created = await create({ subject: 'new story', legacy: true }, { agent: { id: 'cap1', session: { header: { cwd: root }, append: () => {} } } });
+    check(typeof created.task_id === 'string' && created.task_id.length > 0, 'F the task is created');
+    check(kicks3.length === 1 && kicks3[0] === root + '\0t3', 'F task creation kicks with the workspace so the scheduler resolves the real state dir');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

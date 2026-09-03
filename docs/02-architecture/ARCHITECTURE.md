@@ -1,5 +1,9 @@
 # ARCHITECTURE.md — dsh-pair-programming 技术架构
 
+> ⏳ **v3 导读（2026-09-03，PROTOCOL_VERSION=3）**：本文是 v1/v2 正文，保留为历史。当前架构见
+> `dsh-pair-programming-design/02-architecture/ARCHITECTURE.md`（v3 正文）：协议层已改为"状态机 + oracle 冻结与判决 + 亲跑命令的门禁"，
+> 默认入口是 solo（SPEC 短命席位），工具共 20 个 `pair_*`（完整清单以 `verify-startup` 为准）。与代码冲突时以代码为准。
+>
 > 本文回答"怎么实现"。模块划分、数据流、API 契约、与 DSH 宿主原语的集成点。
 > **v1.1 修订**：零第三方插件依赖。插件自带完整结对运行时（团队状态、任务图、邮箱、事件驱动调度器），直接构建在 DSH 宿主原语上。成熟模式从 agent-teams 源码复刻适配（见 `05-reference/AGENT_TEAMS_API.md`，记录每个模式的出处）。
 
@@ -14,11 +18,11 @@
 │  PairProtocol 状态机 · 角色 persona 模板 · 消息 DSL 解析     │
 │  质量门禁 Gate · 风险单管理 · 决策日志 · 粒度控制器           │
 ├────────────────────────────────────────────────────────────┤
-│ 工具层（注册进共享 tools 注册表）                             │
+│ 工具层（注册进共享 tools 注册表；20 个 pair_*，以 verify-startup 为准）│
 │  pair_start · pair_oracle_write · pair_oracle · pair_propose│
-│  pair_review · pair_report                                  │
-│  pair_verify · pair_risk · pair_arbitrate · pair_gate_check │
-│  pair_task_update · pair_rotate · pair_status · pair_stop   │
+│  pair_review · pair_red/green · pair_report · pair_verify   │
+│  pair_risk · pair_arbitrate · pair_gate_check · pair_status │
+│  pair_task_create/claim/update · pair_rotate · pair_retro/stop│
 ├────────────────────────────────────────────────────────────┤
 │ 运行时层（自含，复刻 agent-teams 成熟模式）                   │
 │  members: continuable 子 Agent 派生/唤醒/persona 注入        │
@@ -53,7 +57,7 @@
 │   │   ├── messages.js           # [PAIR:*] DSL 编解码 + 校验
 │   │   ├── gate.js               # 门禁检查清单执行器
 │   │   ├── risks.js              # 风险单生命周期
-│   │   └── personas.js           # 四角色模板（版本化）
+│   │   └── personas.js           # solo+SPEC+遗留席位模板（版本化）
 │   ├── runtime/
 │   │   ├── members.js            # 子 Agent 派生/唤醒/persona（复刻 agent-teams members.js）
 │   │   ├── scheduler.js          # 事件驱动调度器（复刻 agent-teams scheduler.js）
@@ -90,7 +94,7 @@
       config:
         stateDir: .pair-programming
         maxCyclesPerTask: 12
-        defaultMode: full        # full | light
+        defaultMode: light       # light（默认） | full（遗留）
         evidenceCache: true
         memberProvider: spawn    # ctx.subagents provider
         maxMembers: 4

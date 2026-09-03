@@ -27,12 +27,27 @@ Agile engineering practices — Extreme Programming, pair programming, TDD, user
 
 ## What you get: an agile team, not a chatbot
 
+**Solo mode (the default) has two parties, and only one of them is spawned:**
+
+| Role | Who | Duty | Hard rule |
+|---|---|---|---|
+| **You** | your own session | Frame the work, write the code, run the gate | Cannot accept your own work: the verdict is a re-run of a sealed command |
+| **SPEC** | one short-lived subagent | Writes the acceptance test from the request, before any implementation exists, then retires | Holds **no reader, no shell, no search** — only `pair_oracle_write` and `pair_oracle` |
+
+That second row is the whole design. Independence never came from a reviewer having a different *name*; it came from the acceptance standard being written at a *time* when the implementation did not exist and could not be consulted. Because `pair_oracle` runs the test itself, the seat that writes one needs no repository tools at all — so "do not peek at the answer" stops being an instruction the model might forget under a long context and becomes a property of the sandbox it is in.
+
+<details><summary><b>Legacy multi-seat modes</b> (<code>light</code> / <code>full</code>) — still supported, measured expensive</summary>
+
 | Role | Who | Duty | Hard rule |
 |---|---|---|---|
 | **Captain** | *you*, in your own session | Arbitrate, plan, talk to you | Decides on evidence at the 70% bar, never writes the implementation |
 | **Driver** | spawned subagent | The hands: the only agent allowed to modify production/workspace files | No edit without an approved proposal (I1, I3) |
 | **Navigator** | spawned subagent | The independent standard: writes the acceptance artifact only in its reserved oracle directory, freezes it from the request *before* any approach exists, then closes cycles with a **computed** verdict | Cannot assert an ACCEPT — the tooling re-runs the frozen oracle (I4, I6, I8) |
-| **Challenger** | spawned subagent (legacy, `full` mode) | The red team: attacks the approach with failure modes | A P0 risk blocks the cycle; a P1 blocks task completion (I5) |
+| **Challenger** | spawned subagent (`full` mode only) | The red team: attacks the approach with failure modes | A P0 risk blocks the cycle; a P1 blocks task completion (I5) |
+
+Choose these knowingly. Across eight SWE-bench rounds and three live sessions the review seats produced **zero NO_GO and zero REJECT**; one session ran 28 proposals against 0 verifies; and on `pylint-8898` the paired arm returned a **wrong** answer for **1.375×** the tokens of a lone agent, with its declared deliverables never written. 1.375× is the shape of one Driver plus overhead, not of three agents working.
+
+</details>
 
 Eight protocol invariants are enforced **by the tools themselves, not by prompting the models to please you**:
 
@@ -80,24 +95,28 @@ pair_start ──► PLANNING ──────► CYCLING ◄──── TASK
                                                                     next session's PLANNING
 ```
 
-### Cycle level — TDD is not a suggestion, it's the step machine (`tddMode=enforce`, default)
+### Cycle level — the acceptance standard is written before the code, by something that cannot read the code
 
 ```
-Navigator write + SPEC-FORK ──► Driver [PROPOSE] ──► GO ──► GREEN ──► VERIFY ──► GATE
-(pair_oracle_write +        (small step =        minimal   computed:   replays the
- pair_oracle:
- >=2 readings of the      one file, <=80       code to   digest +    frozen oracle
- request, the chosen      net lines, opens     pass the  re-run,     itself
- one, how a hidden        straight at GO)      frozen    never an
- test could disagree,                          oracle    assertion
- written only under
- .pair-oracles/<task_id>/,
- then sealed under a digest;
- its recorded failure
- IS this cycle's RED)
+SPEC seat                          You
+─────────                          ───
+pair_oracle_write  ──►  authors the acceptance test from the REQUEST only
+pair_oracle        ──►  the plugin RUNS it and refuses the freeze unless it
+                        FAILS today, then seals the files under sha256
+     (seat retires)
+                                   pair_propose   declare files[] up front
+                                   pair_green     minimal change + report
+                                   pair_verify    ← digest recomputed,
+                                                    command re-run,
+                                                    verdict DERIVED
+                                   pair_gate_check replays the oracle,
+                                                    checks deliverables,
+                                                    checks diff scope
 ```
 
-Four steps, two seats, each seat respawned per cycle from the board digest rather than carrying a transcript — one measured v2 instance spent 7.1M input tokens on the Driver seat alone for a task a single agent finished on 138k.
+You cannot pass your own work: the verdict is whatever re-running the sealed command produces, and editing that command changes its digest into an automatic REJECT. On an ACCEPT you must additionally record `beyond_request` and `preexisting_at_risk` — a re-run proves the *requested* behaviour and is blind to behaviour nobody requested, which is exactly where a measured regression lived (a comma-handling fix silently rewrote an existing list/tuple contract while the oracle and all 18 regression tests stayed green).
+
+**What this costs:** ~1,400 tokens of protocol text and one short-lived seat, against v3's ~3,000 tokens and two-to-three durable seats each replaying a growing transcript.
 
 Every verdict moves as **structured constructive feedback** — *observation → impact → way forward* — the same triad taught to agile teams, here validated by schema. Rejections are auto-classified (`invest_violation` / `test_first_violation` / `risk_hit` / `quality`) and land in the retro stats, because **retrospectives beat post-mortems**: the team improves while the project can still benefit.
 
@@ -130,11 +149,11 @@ The Captain drafts stories (*"As a finance ops clerk, I want refund calls to be 
 | `maxCyclesPerTask` / `spikeMaxCycles` | `12` / `2` | hard budgets — no protocol spinning, no token burn |
 | `maxOpenRisks` | `15` | team-wide cap on OPEN non-P0 risk tickets; a P0 raise bypasses it |
 | `planningMaxArbitrations` | `2` | disputes resolvable per task while it is still in planning; a task with cycles is exempt |
-| `defaultMode` | `light` | `light` (Driver + Navigator) or `full` (adds the legacy Challenger seat) |
+| `defaultMode` | `solo` | `solo` (you + a short-lived SPEC seat) · `light` (legacy Driver + Navigator) · `full` (adds Challenger) |
 | `oracleFirst` | `true` | `pair_propose` refuses a task whose acceptance oracle is not frozen (spikes need `no_oracle_reason` if they skip it; recorded on the cycle) |
 | `oracleForkBudget` | `3` | freezes per task before `captain_override` is required — a soft budget that surfaces re-fork loops, never a wall |
 | `memberLifetime` | `cycle` | `cycle` respawns each seat from the board digest per Pair Cycle; `session` keeps one durable seat per role |
-| `heartbeatMs` | `60000` | liveness sweep for stalled mailboxes; `0` disables. YAML-only — its interval is wired at startup, so it is deliberately absent from the live settings surface |
+| `heartbeatMs` | `120000` | liveness sweep for stalled mailboxes; `0` disables. YAML-only — its interval is wired at startup, so it is deliberately absent from the live settings surface |
 
 Protocol overhead is engineered down, not wished away: **event-driven monitoring** (no busy-polling), an **adaptive granularity controller** (3 clean cycles in a row → widen steps; 2 rejections → force smaller), a **3-tier cache** (durable protocol state, L2 repo-evidence cache keyed to `gitHead+path+mtime`, and byte-stable versioned personas that maximize LLM provider prompt-cache hits), and cycle budgets that make spinning impossible. Every token spent is visible in the retro report.
 
@@ -158,6 +177,8 @@ dsh plugin --profile web add @ericwang1358/dsh-pair-programming
 dsh web
 ```
 
+> Not on npm yet — until the first publish, install from a local path (`dsh plugin --profile web add <path-to-dsh-pair-programming>`), which works identically (restart the app afterwards).
+
 To roll back: `dsh plugin --profile web remove @ericwang1358/dsh-pair-programming` (restart the app afterwards). Local-path installs work identically while developing.
 
 Or develop against a local checkout (`link:` install per [docs](docs/README.md)). Dual activation — the `/pair` slash command *and* a plain-text gesture boundary — covers web UI, headless CLI, and API sessions.
@@ -167,11 +188,11 @@ Or develop against a local checkout (`link:` install per [docs](docs/README.md))
 ## Verified engineering
 
 ```sh
-npm test          # 397 assertions across 15 suites, pure-logic, offline
+npm test          # 473 assertions across 17 suites, pure-logic, offline
 npm run verify    # import gate · startup gate · package gate · typecheck — all green
 ```
 
-Each fix in v3.1 and v3.2 is pinned by a regression that reproduces the measured failure it prevents: `tests/wake.test.mjs` (the O3 stall), `tests/oracle.test.mjs` (SPEC-FORK / computed verdicts / tamper / reach / bypass), `tests/obligation.test.mjs` (the 28-vs-0 propose/verify asymmetry, phase advance, spike bypass), `tests/scope.test.mjs` (risk scopes, non-gating arms, freeze count visibility).
+Each fix in v3.1 and v3.2 is pinned by a regression that reproduces the measured failure it prevents: `tests/wake.test.mjs` (the O3 stall), `tests/oracle.test.mjs` (SPEC-FORK / computed verdicts / tamper / reach / bypass), `tests/obligation.test.mjs` (the 28-vs-0 propose/verify asymmetry, phase advance, spike bypass), `tests/scope.test.mjs` (risk scopes, non-gating arms, freeze count visibility), `tests/stall.test.mjs` (the silent permanent stall), `tests/solo.test.mjs` (SPEC isolation is a sandbox property, and the builder cannot pass its own work).
 
 Zero third-party plugin dependencies: the plugin ships its own runtime (team state, task graph, JSONL mailboxes, scheduler) on plain DSH host primitives. Patterns adapted from [`@nanmicoder/dsh-agent-teams`](https://www.npmjs.com/package/@nanmicoder/dsh-agent-teams) (MIT). Full design rationale, invariants and acceptance tests (T1–T14) live in [`docs/`](docs/README.md).
 

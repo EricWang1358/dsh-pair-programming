@@ -89,5 +89,9 @@ export async function run(check) {
   const served = Object.keys(PairSettingsSchema({}));
   const missingInCard = served.filter((f) => !clientSrc.includes(`bind('${f}')`));
   check(missingInCard.length === 0, `every served setting has a card row (missing: ${missingInCard.join(', ') || 'none'})`);
-  check(DEFAULTS.defaultMode === 'light' && PairSettingsSchema({}).defaultMode === DEFAULTS.defaultMode, 'the settings schema default comes from lib/defaults.js, not a restated literal');
+  // Assert the wiring, not the value. Pinning the literal here made this test
+  // fail on a deliberate default change, which teaches people to edit the
+  // test rather than to check the wiring it exists to protect.
+  check(PairSettingsSchema({}).defaultMode === DEFAULTS.defaultMode, 'the settings schema default comes from lib/defaults.js, not a restated literal');
+  check(TEAM_MODES.includes(DEFAULTS.defaultMode), 'the default mode is one the settings surface can actually offer');
 }

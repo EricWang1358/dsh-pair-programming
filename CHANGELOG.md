@@ -5,7 +5,24 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
-## [Unreleased] — protocol v3, oracle-first
+## [Unreleased]
+
+## [0.3.1] — 2026-09-04 — solo extraction + loop-closure fixes
+
+Consolidates the in-flight v4 solo work (soloProtocol/specPersona/prompt budgets/solo suite) and closes the goal-loop and wake gaps found in live sessions. `PROTOCOL_VERSION` stays `3`.
+
+### Added
+- **v4 solo protocol extraction.** `soloProtocol()` (under half the multi-seat text), `specPersona()` sandbox isolation, prompt-size budgets, and the `solo.test.mjs` suite: the default solo path is now independently pinned instead of implied.
+- **Goal discipline on the solo path.** Idle re-entries cost a full context, the host refuses pause/resume without a human-direct message in-round, so the burn is bounded by a small `max_goal_rounds` cap and cheap idle turns — the same rules the legacy captain path carries.
+
+### Changed
+- **heartbeat sweep default 60s → 120s.** Worst-case stall bound is now ~120s (`0` still disables). Mailbox delivery lease stays 60s — separate mechanism, untouched.
+- **settled teams leave the heartbeat sweep list.** All tasks terminal + all seats idle + no pending mail + nothing owed (or phase RETRO) → untrack: a finished team costs zero future sweeps and is never woken. Self-healing — kickTeam/kickMember/task-create/mailbox-recovery all re-track first — and fresh taskless teams never count, so pair_start's explicit track still protects protocols that stall before their first kick.
+
+### Fixed
+- **F4: task creation now wakes with the workspace.** `pair_task_create` passed the state root to `kickTeam`, which double-joined the state dir and silently woke nobody; new-task wake (and sweep-list re-track) works again, pinned by a wake-test regression.
+
+## [0.3.0] — 2026-09-02 — protocol v3, oracle-first
 
 Acceptance is derived before the implementation exists, and every verdict after that is a
 re-execution. Driven by an eight-round measured comparison against a single-agent baseline

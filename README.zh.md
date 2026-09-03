@@ -27,12 +27,27 @@
 
 ## 你得到什么：一支敏捷团队，不是一个聊天机器人
 
+**solo 模式（默认）只有两方，而且只有一方是派生出来的：**
+
+| 角色 | 是谁 | 职责 | 硬规则 |
+|---|---|---|---|
+| **你** | 你自己的会话 | 拆需求、写代码、跑门禁 | **无法验收自己的工作**：判词是重跑封存命令的结果 |
+| **SPEC** | 一个短命子代理 | 仅凭需求写下验收测试——在任何实现存在之前——然后退休 | 手里**没有 reader、没有 shell、没有搜索**，只有 `pair_oracle_write` 与 `pair_oracle` |
+
+第二行就是整个设计。独立性从来不来自评审者换了个**名字**，而来自验收标准写在实现**尚不存在、无从查阅**的那个**时刻**。因为 `pair_oracle` 是插件自己跑测试，写 oracle 的席位根本不需要任何仓库工具——于是"别偷看答案"不再是一条模型在长上下文里会忘掉的指令，而变成它所处沙箱的属性。
+
+<details><summary><b>遗留多席位模式</b>（<code>light</code> / <code>full</code>）——仍然可用，但成本已被实测</summary>
+
 | 角色 | 是谁 | 职责 | 硬规则 |
 |---|---|---|---|
 | **Captain** | *你自己*的会话 | 仲裁、规划、对用户负责 | 按证据裁决、可逆决策 70% 即拍板；亲手不写实现 |
 | **Driver** | 派生子代理 | 手：唯一允许修改生产/工作区文件的代理 | 没有批准的提案就不许动手（I1、I3） |
 | **Navigator** | 派生子代理 | 独立标准：仅能在预留 oracle 目录写入验收工件，并在任何方案出现之前仅凭需求冻结验收 oracle；此后以**计算出的**判决收口每个循环 | ACCEPT 无法靠声称获得——工具会重跑冻结的 oracle（I4、I6、I8） |
 | **Challenger** | 派生子代理（遗留，仅 `full` 模式） | 红队：用失败模式攻击方案 | P0 风险阻塞当前循环，P1 阻塞任务完成（I5） |
+
+选它们要心里有数。八轮 SWE-bench + 三次实跑会话里，评审席位产出 **0 次 NO_GO、0 次 REJECT**；一次会话 28 次提案对 0 次验证；`pylint-8898` 上结对臂交出**错误答案**，花掉单代理 **1.375×** 的 token，且自己声明的交付物根本没写出来。1.375× 是"一个 Driver 加开销"的形状，不是"三个代理在干活"的形状。
+
+</details>
 
 八条协议不变量由**工具层强制执行**，不是求模型自觉：
 
@@ -127,11 +142,11 @@ Captain 把需求拆成用户故事（*"作为财务专员，我希望退款调�
 | `maxCyclesPerTask` / `spikeMaxCycles` | `12` / `2` | 硬预算——协议不空转，token 不白烧 |
 | `maxOpenRisks` | `15` | 全队 OPEN 非 P0 风险票上限；P0 提票不受此限 |
 | `planningMaxArbitrations` | `2` | 任务进入规划期时可裁决的争议上限；任务已有 cycle 即豁免 |
-| `defaultMode` | `light` | `light`（Driver + Navigator）或 `full`（另加遗留的 Challenger 席位） |
+| `defaultMode` | `solo` | `solo`（你 + 一个短命 SPEC 席位）· `light`（遗留 Driver + Navigator）· `full`（另加 Challenger） |
 | `oracleFirst` | `true` | 任务未冻结验收 oracle 时，`pair_propose` 直接拒绝（spike 若跳过必须写 `no_oracle_reason`，落在循环记录上） |
 | `oracleForkBudget` | `3` | 每任务允许的冻结次数上限，超出需 `captain_override`。软预算：可见化重复冻结循环，不阻断真实推进 |
 | `memberLifetime` | `cycle` | `cycle` 每个循环由看板摘要重派席位；`session` 保留每角色一个常驻席位 |
-| `heartbeatMs` | `60000` | 停摆邮箱的存活巡检周期；`0` 关闭。仅 YAML——巡检定时器在启动时装配，因此刻意不出现在运行时设置面里 |
+| `heartbeatMs` | `120000` | 停摆邮箱的存活巡检周期；`0` 关闭。仅 YAML——巡检定时器在启动时装配，因此刻意不出现在运行时设置面里 |
 
 协议开销是**工程压下来的，不是嘴上说说的**：事件驱动监控（无 busy-poll）、粒度自适应控制器（连过 3 环→放大步幅、两连拒→强制拆小）、三层缓存（落盘协议状态、按 `gitHead+path+mtime` 键控的 L2 仓库证据缓存、逐字稳定版本化的角色 persona 以吃满 LLM 供应商的 prompt 缓存），外加循环预算兜底。每一枚 token 花在哪，复盘报告里都有。
 
@@ -155,6 +170,8 @@ dsh plugin --profile web add @ericwang1358/dsh-pair-programming
 dsh web
 ```
 
+> 尚未发布到 npm——首次发布前请用本地路径安装（`dsh plugin --profile web add <插件目录>`），功能等价（之后重启应用）。
+
 回滚：`dsh plugin --profile web remove @ericwang1358/dsh-pair-programming`（之后重启应用）。开发期用本地路径安装，命令等价。
 
 或本地 checkout 开发（`link:` 安装，流程见 [docs](docs/README.md)）。双通道激活——`/pair` 斜杠命令 + 纯文本手势边界——覆盖 Web UI、headless CLI 与 API 会话。
@@ -164,7 +181,7 @@ dsh web
 ## 工程质量
 
 ```sh
-npm test          # 15 个套件 397 条断言，纯逻辑，离线可跑
+npm test          # 17 个套件 473 条断言，纯逻辑，离线可跑
 npm run verify    # 导入门禁 · 启动门禁 · 包门禁 · 类型检查 —— 全绿
 ```
 

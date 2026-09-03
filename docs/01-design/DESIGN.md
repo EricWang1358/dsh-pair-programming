@@ -1,5 +1,9 @@
 # DESIGN.md — dsh-pair-programming 总体设计
 
+> ⏳ **v3 导读（2026-09-03，PROTOCOL_VERSION=3）**：本文是 v1/v2 正文，保留为历史。"三角色并行去最优"的假设已被八轮双臂对照证伪；
+> 当前协议是 oracle-first：验收标准在方案出现之前仅凭需求冻结，此后每一次判决都是一次重新执行。
+> 新设计见 `dsh-pair-programming-design/01-design/DESIGN.md`（v3 正文）、`01-design/REDESIGN-v3.md`（推导）与插件 `README.md`。与代码冲突时以代码为准。
+>
 > 本文回答"做什么、为什么这么做"。技术实现细节见 `02-architecture/ARCHITECTURE.md`。
 
 > ⚠️ **v1.1 修订（关键架构决策）**：本插件**不再依赖** `@nanmicoder/dsh-agent-teams`。用户可能没装它。插件**自带独立的结对运行时**（自己的团队状态、任务图、邮箱、事件驱动调度器），直接构建在 DSH 宿主原语（`ctx.subagents` / `ctx.tools` / `ctx.systemPrompt` / `ctx.commands` / `ctx.agents` / `agent/status` 与 `agent/pre-step` 事件）之上——这些正是 agent-teams 自己使用的同一批宿主原语，属于标准 profile 的 base bundle。成熟代码（串行锁、Windows 原子写、JSONL 邮箱、attempt 能力令牌、调度器）从 agent-teams 源码复刻并适配（MIT 许可）。agent-teams 若恰好存在，仅做可选互操作（共享会话事件面板），不存在时功能完整。
