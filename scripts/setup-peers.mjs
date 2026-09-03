@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +22,10 @@ const pluginRoot = fileURLToPath(new URL('../', import.meta.url));
 const peerNM = join(pluginRoot, 'node_modules');
 const junctionTarget = join(peerNM, '@deepseek-ai');
 
+function entryExists(path) {
+  try { lstatSync(path); return true; } catch { return false; }
+}
+
 const pkg = JSON.parse(readFileSync(join(pluginRoot, 'package.json'), 'utf8'));
 const peers = Object.keys({ ...(pkg.peerDependencies ?? {}), ...(pkg.dependencies ?? {}) })
   .filter(n => n.startsWith('@deepseek-ai/'))
@@ -35,8 +39,9 @@ function locateDshSdk() {
       { encoding: 'utf8', shell: process.platform === 'win32' }).trim().split(/\r?\n/)[0] ?? '';
   } catch { /* where/which failed */ }
   bin = bin.replace(/\\/g, '/').replace(/\/(bin|dsh(\.cmd|\.ps1|\.bat)?)$/i, '');
-  const dirs = bin ? [bin] : [];
+  const dirs = bin ? [join(bin, 'node_modules')] : [];
   const fallbacks = [
+    'D:/Program Files/nodejs/node_global/node_modules',
     'D:/Program Files/nodejs/node_global/node_modules/@deepseek-ai/dsh/node_modules',
     'C:/Users/Eric1/.dsh/profiles/web/node_modules',
   ];
@@ -48,19 +53,23 @@ function locateDshSdk() {
 }
 
 // 1. If peers already resolve (e.g. a real pnpm install populated them), done.
-if (existsSync(junctionTarget) && peers.every(p => existsSync(join(junctionTarget, p, 'package.json')))) {
+const sdk = locateDshSdk();
+let pointsAtSdk = false;
+if (entryExists(junctionTarget) && sdk !== undefined) {
+  try { pointsAtSdk = realpathSync(junctionTarget) === realpathSync(sdk); } catch { /* stale link */ }
+}
+if (pointsAtSdk && peers.every(p => existsSync(join(junctionTarget, p, 'package.json')))) {
   console.log('setup:peers OK: node_modules/@deepseek-ai already resolves all peers.');
   process.exit(0);
 }
 
 // 2. Fall back to a junction at the DSH built-in @deepseek-ai.
-const sdk = locateDshSdk();
 if (!sdk) {
   console.error('setup:peers FAILED: no installed @deepseek-ai SDK found. Run `pnpm install` or ensure DSH is installed.');
   process.exit(1);
 }
 mkdirSync(peerNM, { recursive: true });
-if (existsSync(junctionTarget)) {
+if (entryExists(junctionTarget)) {
   try { rmSync(junctionTarget, { force: true, recursive: true }); } catch { /* ignore */ }
 }
 symlinkSync(sdk.replace(/\//g, '\\'), junctionTarget, 'junction');

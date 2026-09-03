@@ -73,7 +73,7 @@ function stopHarness(root, { greenBuildOnStop = false, stateDir = 'stop-state' }
 
 /** pair_start against a mock ctx; the failOnCall-th role refuses to spawn. */
 function startHarness(root, { failOnCall = 2, captainId = 'cap1', stateDir = 'start-state' } = {}) {
-  const interrupts = []; const spawns = []; const defs = [];
+  const interrupts = []; const spawns = []; const starts = []; const defs = [];
   const schemas = [{ name: 'read' }, { name: 'write' }, { name: 'edit' }, { name: 'pair_start' }, { name: 'pair_stop' }, { name: 'pair_rotate' }, { name: 'pair_arbitrate' }];
   const ctx = {
     logger: { warn: () => {}, debug: () => {}, error: () => {} },
@@ -84,7 +84,9 @@ function startHarness(root, { failOnCall = 2, captainId = 'cap1', stateDir = 'st
       interrupt: (id) => { interrupts.push(id); },
       list: () => ['pair'],
       getProvider: () => ({ prepareContinuable: () => {}, capabilities: { persona: true, toolFilter: true } }),
-      startContinuable: async ({ label }) => {
+      startContinuable: async (start) => {
+        const { label } = start;
+        starts.push(start);
         spawns.push(label);
         if (spawns.length === failOnCall) throw new Error('second role failed to spawn');
         return { childId: `child-${spawns.length}` };
@@ -92,8 +94,8 @@ function startHarness(root, { failOnCall = 2, captainId = 'cap1', stateDir = 'st
     },
   };
   registerLifecycleTools(ctx, { stateDir, memberProvider: 'pair', greenBuildOnStop: false }, { selections: { withPending: async (i, l, s, op) => op() }, scheduler: {} });
-  const captain = { id: captainId, session: { header: { cwd: root }, append: () => {}, requestHeader: () => ({ config: { provider: 'p', model: 'm' } }) } };
-  return { interrupts, spawns, defs, captain, stateRoot: join(root, stateDir) };
+  const captain = { id: captainId, session: { header: { cwd: root }, append: () => {}, requestHeader: () => ({ config: { provider: 'p', model: 'm', reasoningEffort: 'high' } }) } };
+  return { interrupts, spawns, starts, defs, captain, stateRoot: join(root, stateDir) };
 }
 
 function memberOf(id, name) {
@@ -190,7 +192,7 @@ export async function run(check) {
     await acknowledgeMailbox(ps.stateRoot, 't1', 'driver', [msgA.id, msgB.id]);
     const gauged = await status({}, { agent: ps.captain });
     check(await gauge() === 0 && typeof gauged.pending_note === 'string' && gauged.pending_note.includes('in flight'), 'ack clears the gauge and the note explains what 0 means');
-    check(rotate.description.includes('Currently refused in 0.2.x'), 'pair_rotate description carries the refusal marker');
+    check(/Currently refused in [\d.x]+/.test(rotate.description) && rotate.description.includes('bound at spawn time'), 'pair_rotate description carries the refusal marker and its reason (not pinned to one version literal)');
     // ORDER-P1 A: current_cycle must track cycles[] across JSON round-trips.
     const cb = stopHarness(root, { stateDir: 'cc-state' });
     const statusOf = cb.defs.find((x) => x.name === 'pair_status').execute;
@@ -228,6 +230,7 @@ export async function run(check) {
     const startOk = s1.defs.find((x) => x.name === 'pair_start').execute;
     const ok = await startOk({ goal: 'g', mode: 'light', name: 'a2-ok' }, { agent: s1.captain });
     check(ok.members.length === 2 && s1.spawns.length === 2 && s1.interrupts.length === 0, 'pair_start spawns both roles and interrupts nothing');
+    check(s1.starts.every(start => start.request.agentOptions?.reasoningEffort === 'high'), 'member reasoning effort is persisted in alpha.5 continuable agentOptions');
     check(await exists(join(s1.stateRoot, 'a2-ok')), 'a successful team keeps its state dir');
     // AC-A2-2..5: a later role failing rolls the earlier one back and rethrows.
     const s2 = startHarness(root, { captainId: 'cap2' });

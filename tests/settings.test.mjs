@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import { DEFAULTS, TDD_MODES, PAIR_STYLES, TEAM_MODES, MEMBER_LIFETIMES } from '../lib/defaults.js';
 /** settings surface: schema mapping, validation, and live-override plumbing. */
 import { PairSettingsSchema, SETTINGS_NAMESPACE, parseDod, toRuntimeSettings, settingsValueError, settingsEntry, installPairSettings } from '../lib/settings.js';
 
@@ -71,4 +73,21 @@ export async function run(check) {
   const viaSchema = PairSettingsSchema({});
   check(viaSchema.tddMode === 'enforce' && viaSchema.maxCyclesPerTask === 12 && viaSchema.greenBuildOnStop === true && viaSchema.dod === '', 'section schema defaults match the runtime defaults');
   check(PairSettingsSchema(entry).tddMode === 'off', 'section schema accepts the composed entry');
+
+  // The browser card is served verbatim as a classic script, so it cannot
+  // import lib/defaults.js — it mirrors those literals. Pin the mirror: a
+  // divergence must fail here rather than ship a dropdown that disagrees with
+  // what the plugin honours (the exact shape of the original defaultMode bug).
+  const clientSrc = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8');
+  const clientArray = (name) => JSON.parse(clientSrc.match(new RegExp('var ' + name + ' = (\\[[^\\]]*\\]);'))[1].split("'").join('"'));
+  check(JSON.stringify(clientArray('TDD_MODES')) === JSON.stringify(TDD_MODES), 'client TDD_MODES mirrors lib/defaults.js');
+  check(JSON.stringify(clientArray('PAIR_STYLES')) === JSON.stringify(PAIR_STYLES), 'client PAIR_STYLES mirrors lib/defaults.js');
+  check(JSON.stringify(clientArray('TEAM_MODES')) === JSON.stringify(TEAM_MODES), 'client TEAM_MODES mirrors lib/defaults.js');
+  check(JSON.stringify(clientArray('MEMBER_LIFETIMES')) === JSON.stringify(MEMBER_LIFETIMES), 'client MEMBER_LIFETIMES mirrors lib/defaults.js');
+  // Every field the plugin serves must be renderable, or the UI silently hides
+  // a knob the runtime obeys.
+  const served = Object.keys(PairSettingsSchema({}));
+  const missingInCard = served.filter((f) => !clientSrc.includes(`bind('${f}')`));
+  check(missingInCard.length === 0, `every served setting has a card row (missing: ${missingInCard.join(', ') || 'none'})`);
+  check(DEFAULTS.defaultMode === 'light' && PairSettingsSchema({}).defaultMode === DEFAULTS.defaultMode, 'the settings schema default comes from lib/defaults.js, not a restated literal');
 }

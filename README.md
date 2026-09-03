@@ -30,15 +30,42 @@ Agile engineering practices — Extreme Programming, pair programming, TDD, user
 | Role | Who | Duty | Hard rule |
 |---|---|---|---|
 | **Captain** | *you*, in your own session | Arbitrate, plan, talk to you | Decides on evidence at the 70% bar, never writes the implementation |
-| **Driver** | spawned subagent | The hands: the only agent allowed to touch files | No edit without an approved proposal (I1, I3) |
-| **Navigator** | spawned subagent | The eyes: reviews every step, independently re-runs verification | No ACCEPT by parroting the Driver's report (I4, I6) |
-| **Challenger** | spawned subagent | The red team: attacks the approach with failure modes | A P0 risk blocks the cycle; a P1 blocks task completion (I5) |
+| **Driver** | spawned subagent | The hands: the only agent allowed to modify production/workspace files | No edit without an approved proposal (I1, I3) |
+| **Navigator** | spawned subagent | The independent standard: writes the acceptance artifact only in its reserved oracle directory, freezes it from the request *before* any approach exists, then closes cycles with a **computed** verdict | Cannot assert an ACCEPT — the tooling re-runs the frozen oracle (I4, I6, I8) |
+| **Challenger** | spawned subagent (legacy, `full` mode) | The red team: attacks the approach with failure modes | A P0 risk blocks the cycle; a P1 blocks task completion (I5) |
 
 Eight protocol invariants are enforced **by the tools themselves, not by prompting the models to please you**:
 
-> **I1** single writer · **I2** small steps · **I3** propose before act · **I4** completion needs the gate · **I5** no risk left overnight · **I6** evidence over opinion · **I7** test first · **I8** constructive feedback is structured
+> **I1** single writer · **I2** small steps · **I3** propose before act (small steps auto-GO) · **I4** completion needs the gate · **I5** no risk left overnight — a blocker closes only on an executable artifact, and a P0 in the *acceptance instrument* blocks verification (not implementation) so the tool under repair does not park the work under test · **I6** evidence is a re-run, not a sentence · **I7** test first · **I8** oracle first · **I9** one unverified cycle at a time — new proposals wait for the outstanding verdict
 
-A task literally *cannot* be marked completed without a `pair_gate_check` pass. A vague rejection ("looks off") is rejected by the message schema. A production-code commit with no failing test recorded before it fails the Definition-of-Done. Ask the AI nicely and it may forget; the tooling cannot.
+A task literally *cannot* be marked completed without a `pair_gate_check` pass — and the gate **re-runs the frozen oracle itself** rather than reading a claim about it. The resulting credential is bound to that exact oracle and worktree: change either after the pass and completion stops with `GATE_STALE` until the gate is rerun. A vague rejection ("looks off") is rejected by the message schema. Editing the acceptance test you are being judged against changes its digest and becomes an automatic REJECT. Ask the AI nicely and it may forget; the tooling cannot.
+
+**Who can write what.** The Driver alone may modify production/workspace files. Navigator and Challenger are denied generic file editors **and** `pwsh` / `bash` / `Bash`, because a general shell is a write capability. The Navigator can author the independent acceptance test only with `pair_oracle_write`, whose native path guard permits `.pair-oracles/<task_id>/…` and nothing else. The plugin itself runs the frozen oracle and quality gate, so removing the Navigator's shell does not remove computed verification.
+
+### Why an oracle, and not just another reviewer
+
+Eight measured rounds against real SWE-bench issues found **zero correctness separation** between this protocol at v2 and a single agent working alone: same pass/fail sequence, one byte-identical patch, one byte-identical failing render. The reason was structural, not effort — every verification closed over the premise the code was written from. The Navigator reviewed against acceptance criteria the team had authored from its own reading; the RED test was written by the Driver under that same reading; the gate counted evidence strings. Same model, same context, same reading ⇒ correlated errors.
+
+v3 fixes the information problem rather than adding seats. The acceptance standard is derived from the **request alone, before an approach exists**, by a role that has not seen one; it is sealed under a digest; and every verdict after that is a re-execution. The full rationale, with the measurements, is in `dsh-pair-programming-design/01-design/REDESIGN-v3.md`.
+
+### v3.1 — the loop now drives itself
+
+Two full v3 sessions were replayed after the redesign shipped. The mechanisms worked where invoked; what was missing is that nothing made them happen. One session had **151 captain "now do X" prose relays** and **28 proposals against 0 verifies** — the review seat took 2 turns while the Driver took 50, and 35 greens were never verified by anyone. The captain had become the scheduler. Five fixes landed:
+
+- **The board says whose move it is.** Every protocol delivery and `pair_status` carries a derived `[PAIR:NEXT] <who> owes <tool>(<id>) — <why>` line. Turn order is read off the board, not relayed.
+- **Back-pressure (I9).** `pair_propose` refuses while an earlier cycle of the same task has no verdict. v3 gated completion on verification but never continuation — that hole is closed.
+- **The session phase actually moves.** `PLANNING → CYCLING` on the first proposal; `CYCLING → TASK_GATE` on a gate pass; back on completion. Previously status always read `PLANNING`, even at 3/3 tasks done.
+- **No silent oracle bypass.** `type=spike` used to be silently exempt from oracle-first; it now needs either an oracle or an explicit `no_oracle_reason` recorded on the cycle. `trivial` remains exempt outright.
+- **Oracle reach.** An oracle that only asserts "does this probe file exist" freezes RED, turns GREEN, and detects nothing about the code. The freeze reports its reach; a `SELF-CONTAINED` verdict is a loud warning carried in status, the digest and the retro.
+
+### v3.2 — the oracle stops recursing
+
+A live 2h 16min session produced **zero accepted increments** because a single oracle was re-forked six-plus times, each fork correct, the set divergent — the protocol had no way to say "good enough for now, ship it as-is with the doubt named". Four fixes:
+
+- **Risk scopes.** `pair_risk` accepts `scope: instrument`. A product P0 halts new cycles as before; an *instrument* P0 halts verification and the gate, not implementation — the measurement being untrustworthy is not a reason to stop producing. Both still block task completion.
+- **Non-gating oracle arms.** `pair_oracle` accepts `non_gating_arms[]` with a mandatory `non_gating_reason`. A declared known-red arm prints on every run and routes to its real gate elsewhere, so the oracle can seal instead of being held perpetually behind arms that measure something the task cannot yet fix.
+- **Arbitration attribution.** An unnamed ruling used to spend nothing; a captain wrote 18 rulings against a 2/task cap by omitting task ids. The tool now falls back to the claimed task's budget.
+- **Freeze budget with escape.** `oracleForkBudget` (default 3) requires `captain_override` past that. Not a wall — friction. Every fork past #1 shows in the summary; recursion becomes impossible to un-see.
 
 ## The workflow
 
@@ -56,13 +83,21 @@ pair_start ──► PLANNING ──────► CYCLING ◄──── TASK
 ### Cycle level — TDD is not a suggestion, it's the step machine (`tddMode=enforce`, default)
 
 ```
-Driver [PROPOSE] ──► Navigator [GO] ──► RED      write the failing test FIRST
-                                       (a compile error of the missing API counts as RED)
-                                       ──► GREEN   minimal code to pass it
-                                       ──► REFACTOR clean up under the green safety net
-                                       ──► Navigator VERIFY (independently re-runs it all)
-                                       ──► Challenger RISK_CHECK ──► GATE
+Navigator write + SPEC-FORK ──► Driver [PROPOSE] ──► GO ──► GREEN ──► VERIFY ──► GATE
+(pair_oracle_write +        (small step =        minimal   computed:   replays the
+ pair_oracle:
+ >=2 readings of the      one file, <=80       code to   digest +    frozen oracle
+ request, the chosen      net lines, opens     pass the  re-run,     itself
+ one, how a hidden        straight at GO)      frozen    never an
+ test could disagree,                          oracle    assertion
+ written only under
+ .pair-oracles/<task_id>/,
+ then sealed under a digest;
+ its recorded failure
+ IS this cycle's RED)
 ```
+
+Four steps, two seats, each seat respawned per cycle from the board digest rather than carrying a transcript — one measured v2 instance spent 7.1M input tokens on the Driver seat alone for a task a single agent finished on 138k.
 
 Every verdict moves as **structured constructive feedback** — *observation → impact → way forward* — the same triad taught to agile teams, here validated by schema. Rejections are auto-classified (`invest_violation` / `test_first_violation` / `risk_hit` / `quality`) and land in the retro stats, because **retrospectives beat post-mortems**: the team improves while the project can still benefit.
 
@@ -90,12 +125,16 @@ The Captain drafts stories (*"As a finance ops clerk, I want refund calls to be 
 |---|---|---|
 | `tddMode` | `enforce` | `enforce` tool-mandated RED→GREEN→REFACTOR · `coach` recommended, both orders accepted · `off` legacy |
 | `pairStyle` | `traditional` | `traditional` \| `strong` \| `ping-pong` |
-| `dod` | protocol defaults | comma-separated Definition-of-Done items: `all_accepted,no_blocking_risks,verify_evidence,decisions_documented,test_first,spike_outcome` |
+| `dod` | protocol defaults | comma-separated Definition-of-Done items: `all_accepted,no_blocking_risks,verify_evidence,decisions_documented,test_first,oracle_precedes_impl,oracle_replay,spike_outcome` |
 | `greenBuildOnStop` | `true` | `pair_stop` demands fresh whole-suite green evidence when changes landed |
 | `maxCyclesPerTask` / `spikeMaxCycles` | `12` / `2` | hard budgets — no protocol spinning, no token burn |
 | `maxOpenRisks` | `15` | team-wide cap on OPEN non-P0 risk tickets; a P0 raise bypasses it |
 | `planningMaxArbitrations` | `2` | disputes resolvable per task while it is still in planning; a task with cycles is exempt |
-| `defaultMode` | `full` | `full` (3 agents) or `light` (2 agents, fast lane) |
+| `defaultMode` | `light` | `light` (Driver + Navigator) or `full` (adds the legacy Challenger seat) |
+| `oracleFirst` | `true` | `pair_propose` refuses a task whose acceptance oracle is not frozen (spikes need `no_oracle_reason` if they skip it; recorded on the cycle) |
+| `oracleForkBudget` | `3` | freezes per task before `captain_override` is required — a soft budget that surfaces re-fork loops, never a wall |
+| `memberLifetime` | `cycle` | `cycle` respawns each seat from the board digest per Pair Cycle; `session` keeps one durable seat per role |
+| `heartbeatMs` | `60000` | liveness sweep for stalled mailboxes; `0` disables. YAML-only — its interval is wired at startup, so it is deliberately absent from the live settings surface |
 
 Protocol overhead is engineered down, not wished away: **event-driven monitoring** (no busy-polling), an **adaptive granularity controller** (3 clean cycles in a row → widen steps; 2 rejections → force smaller), a **3-tier cache** (durable protocol state, L2 repo-evidence cache keyed to `gitHead+path+mtime`, and byte-stable versioned personas that maximize LLM provider prompt-cache hits), and cycle budgets that make spinning impossible. Every token spent is visible in the retro report.
 
@@ -128,9 +167,11 @@ Or develop against a local checkout (`link:` install per [docs](docs/README.md))
 ## Verified engineering
 
 ```sh
-npm test          # 102 assertions across 4 suites, pure-logic, offline
+npm test          # 397 assertions across 15 suites, pure-logic, offline
 npm run verify    # import gate · startup gate · package gate · typecheck — all green
 ```
+
+Each fix in v3.1 and v3.2 is pinned by a regression that reproduces the measured failure it prevents: `tests/wake.test.mjs` (the O3 stall), `tests/oracle.test.mjs` (SPEC-FORK / computed verdicts / tamper / reach / bypass), `tests/obligation.test.mjs` (the 28-vs-0 propose/verify asymmetry, phase advance, spike bypass), `tests/scope.test.mjs` (risk scopes, non-gating arms, freeze count visibility).
 
 Zero third-party plugin dependencies: the plugin ships its own runtime (team state, task graph, JSONL mailboxes, scheduler) on plain DSH host primitives. Patterns adapted from [`@nanmicoder/dsh-agent-teams`](https://www.npmjs.com/package/@nanmicoder/dsh-agent-teams) (MIT). Full design rationale, invariants and acceptance tests (T1–T14) live in [`docs/`](docs/README.md).
 
@@ -138,7 +179,7 @@ Zero third-party plugin dependencies: the plugin ships its own runtime (team sta
 
 Every practice here comes from the playbook that made agile work — Kent Beck's XP, the Agile Manifesto's values, Scrum's artifacts and ceremonies — applied where it has never had better conditions than agent teams: agents have *no ego* to defend in a strong-style pair, *no fatigue* in a 30-minute rotation, and *no incentive* to mark a task done without the gate pass. The failure modes of lone-wolf coding don't disappear in AI-assisted development. They get a bigger keyboard.
 
-**Stop code review theater. Start shipping verified increments.**
+**Stop code-review theater. Start shipping increments whose acceptance was authored before the code was.**
 
 ## License
 

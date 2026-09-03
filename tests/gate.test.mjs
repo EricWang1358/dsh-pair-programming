@@ -1,6 +1,6 @@
 /** gate + risks: the hard completion gate and risk lifecycle. */
 import { runGate } from '../lib/protocol/gate.js';
-import { openRisk, mitigateRisk, closeRisk, wontfixRisk, openBlockingRisks, hasOpenP0 } from '../lib/protocol/risks.js';
+import { openRisk, mitigateRisk, closeRisk, wontfixRisk, openBlockingRisks, hasOpenP0, closeProblems, teamAuthoredPaths } from '../lib/protocol/risks.js';
 import { initialProtocolState, openCycle } from '../lib/protocol/machine.js';
 import { runDodCommand } from '../lib/tools/gate-exec.js';
 import { EvidenceCache } from '../lib/state/evidence-cache.js';
@@ -16,8 +16,14 @@ export async function run(check) {
   check(hasOpenP0(p), 'P0 blocks');
   check(openBlockingRisks(p).length === 1, 'one blocking risk');
   mitigateRisk(p, r.id, 'fixed in a.js:10');
-  closeRisk(p, r.id, 'verified by test');
-  check(!hasOpenP0(p), 'P0 cleared after close');
+  // N3: a MITIGATED blocker still blocks — only a confirmed close clears it.
+  check(openBlockingRisks(p).length === 1, 'N3 a MITIGATED P0 still blocks task completion');
+  let sentenceClose = 'closed';
+  try { closeRisk(p, r.id, 'verified by test'); } catch (error) { sentenceClose = String(error.message); }
+  check(sentenceClose.includes('executable artifact') && sentenceClose.includes('closing_cmd'), 'N3 a P0 cannot be closed by a sentence');
+  closeRisk(p, r.id, 'verified by test', { closingCmd: 'npm test -- regression', closingExit: 0, closingPaths: ['tests/existing_suite.mjs'] });
+  check(!hasOpenP0(p), 'P0 cleared after an artifact-backed close');
+  check(p.risks[0].closingArtifact.exit === 0 && p.risks[0].closingArtifact.cmd.includes('npm test'), 'N3 the closing artifact is recorded on the ticket');
   const r2 = openRisk(p, { severity: 'P2', scenario: 's', trigger: 't', suggestion: 'x', raisedBy: 'challenger' });
   wontfixRisk(p, r2.id, 'cosmetic only');
   check(p.risks.find(x => x.id === r2.id).status === 'WONTFIX', 'wontfix recorded');

@@ -1,0 +1,218 @@
+/**
+ * v3 oracle-first protocol: SPEC-FORK validation, the frozen digest, computed
+ * verdicts, the board digest, and the end-to-end cycle the redesign specifies.
+ */
+import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { forkProblems, redProblem, computeVerdict, freezeRecord, oracleSummary, resolveCycleOracle } from '../lib/protocol/oracle.js';
+import { digestOracleFiles, runOracleCommand, resolveInside } from '../lib/tools/oracle-exec.js';
+import { boardDigest, DIGEST_BUDGET_CHARS } from '../lib/protocol/digest.js';
+import { memberIsStale } from '../lib/runtime/recycle.js';
+import { registerFlowTools } from '../lib/tools/flow.js';
+import { registerOracleTools } from '../lib/tools/oracle.js';
+import { registerArbitrateTools } from '../lib/tools/arbitrate.js';
+import { createTeamDir, readTeam } from '../lib/state/store.js';
+import { initialProtocolState } from '../lib/protocol/machine.js';
+
+const GOOD_FORK = {
+  readings: [
+    'every valid regex must be expressible, so the splitter must not break inside a brace quantifier',
+    'the user may escape a comma to keep it, so a backslash-comma is a literal comma',
+  ],
+  chosen_reading: 'every valid regex must be expressible, so the splitter must not break inside a brace quantifier',
+  divergence_candidates: ['a hidden test may assert the unescaped form "a{1,3}" round-trips, which the escape reading fails'],
+  oracle_files: ['.pair-oracles/t-1/accept.mjs'],
+  oracle_cmd: 'node .pair-oracles/t-1/accept.mjs',
+};
+
+function memberOf(id, role) {
+  return { id, name: role, role, status: 'idle', joinedAt: 1 };
+}
+
+function taskOf(over = {}) {
+  return { id: 't-1', subject: 'fix the splitter', description: 'the request, verbatim', status: 'in_progress', assignee: 'driver', attemptId: 'a-1', dependencies: [], createdAt: 1, updatedAt: 1, ...over };
+}
+
+function teamFixture(over = {}) {
+  return {
+    id: 'ot1', name: 'OT', goal: 'fix the splitter', mode: 'light', tddMode: 'enforce', pairStyle: 'traditional',
+    captainSessionId: 'cap1', createdAt: 1, updatedAt: 1,
+    members: [memberOf('child-driver', 'driver'), memberOf('child-nav', 'navigator')],
+    tasks: [taskOf()], taskSeq: 1, protocol: initialProtocolState(), evidenceStats: { cacheHits: 0, cacheMiss: 0 }, ...over,
+  };
+}
+
+function harness(root, stateDir, cfg = {}) {
+  const defs = [];
+  const ctx = {
+    logger: { warn: () => {}, debug: () => {}, error: () => {} },
+    tools: { register: (d) => { defs.push(d); } },
+    agents: { get: (id) => (id === 'cap1' ? { id: 'cap1', session: { append: () => {} } } : undefined) },
+    subagents: { followup: async () => true },
+  };
+  const config = { stateDir, tddMode: 'enforce', maxCyclesPerTask: 12, oracleFirst: true, evidenceCache: false, ...cfg };
+  registerFlowTools(ctx, config, { scheduler: {} });
+  registerOracleTools(ctx, config);
+  registerArbitrateTools(ctx, config, { scheduler: {} });
+  const sess = (id) => ({ id, session: { header: { cwd: root }, append: () => {} } });
+  return {
+    tool: (name) => defs.find(d => d.name === name).execute,
+    driver: sess('child-driver'), navigator: sess('child-nav'), captain: sess('cap1'),
+    stateRoot: join(root, stateDir),
+  };
+}
+
+const fails = (fn, needle) => fn().then(() => `no throw (expected ${needle})`, (e) => String(e?.message ?? e));
+
+export async function run(check) {
+  const root = await mkdtemp(join(tmpdir(), 'pair-oracle-'));
+  try {
+    /* ---- pure: SPEC-FORK validation ---------------------------------- */
+    check(forkProblems(GOOD_FORK).length === 0, 'A a complete fork validates');
+    check(forkProblems({ ...GOOD_FORK, readings: [GOOD_FORK.readings[0]] })[0].includes('at least 2 distinct interpretations'), 'A one reading is refused — the fork is the point');
+    check(forkProblems({ ...GOOD_FORK, readings: [GOOD_FORK.readings[0], GOOD_FORK.readings[0].toUpperCase()] })[0].includes('restatement'), 'A a restated reading is not a second interpretation');
+    check(forkProblems({ ...GOOD_FORK, chosen_reading: 'something else entirely' })[0].includes('one of the readings'), 'A the chosen reading must be one you listed');
+    check(forkProblems({ ...GOOD_FORK, divergence_candidates: [] })[0].includes('divergence_candidates'), 'A a fork without divergence candidates is refused');
+    check(forkProblems({ ...GOOD_FORK, oracle_files: [] })[0].includes('frozen under a digest'), 'A an oracle with no files cannot be frozen');
+    check(forkProblems({ ...GOOD_FORK, oracle_cmd: '  ' })[0].includes('oracle_cmd'), 'A an oracle with no command is refused');
+
+    /* ---- pure: RED requirement and computed verdicts ------------------ */
+    check(redProblem({ exit: 0 }).includes('PASSES on the untouched tree'), 'B an oracle that already passes is not an oracle');
+    check(redProblem({ exit: 1 }) === undefined && redProblem({ exit: 'timeout' }).includes('timed out'), 'B a failing oracle is RED, a hanging one is refused');
+    check(computeVerdict({ run: { exit: 0 } }).verdict === 'accept', 'B a passing frozen oracle accepts');
+    check(computeVerdict({ run: { exit: 1 } }).verdict === 'reject', 'B a failing frozen oracle rejects');
+    const tampered = computeVerdict({ tampered: true, run: { exit: 0 } });
+    check(tampered.verdict === 'reject' && tampered.category === 'oracle_tampered', 'B a tampered oracle rejects even when it now passes');
+    check(oracleSummary(undefined) === 'none' && oracleSummary(freezeRecord(GOOD_FORK, { sha: 'abcdef0123456789', run: { exit: 1 }, by: 'navigator' })).includes('abcdef012345'), 'B the summary names the seal');
+
+    /* ---- digest: stable, sensitive, escape-proof ---------------------- */
+    await mkdir(join(root, '.pair-oracles', 't-1'), { recursive: true });
+    const oraclePath = join(root, '.pair-oracles', 't-1', 'accept.mjs');
+    await writeFile(oraclePath, 'process.exit(process.env.FIXED === "1" ? 0 : 1);\n');
+    const d1 = await digestOracleFiles(root, ['.pair-oracles/t-1/accept.mjs']);
+    const d2 = await digestOracleFiles(root, ['.pair-oracles/t-1/accept.mjs']);
+    check(d1 === d2 && d1.length === 64, 'C the digest is stable across reads');
+    await writeFile(oraclePath, 'process.exit(process.env.FIXED === "1" ? 0 : 1); // touched\n');
+    check(await digestOracleFiles(root, ['.pair-oracles/t-1/accept.mjs']) !== d1, 'C one changed character changes the digest');
+    check((await digestOracleFiles(root, ['.pair-oracles/t-1/missing.mjs'])).length === 64, 'C a missing oracle file hashes as a tombstone instead of crashing');
+    let escaped = 'allowed';
+    try { resolveInside(root, '../escape.mjs'); } catch (e) { escaped = String(e.message); }
+    check(escaped.includes('outside the workspace'), 'C an oracle path escaping the workspace is refused');
+
+    /* ---- exec: exit codes ------------------------------------------- */
+    const red = await runOracleCommand(root, 'node .pair-oracles/t-1/accept.mjs');
+    check(red.exit !== 0 && red.outputSha.length === 64, 'D the oracle command reports a nonzero exit and hashes its output');
+
+    /* ---- E2E: the v3 cycle ------------------------------------------- */
+    const h = harness(root, 'oracle-state');
+    await createTeamDir(h.stateRoot, teamFixture());
+    const nativeOracleWrite = await h.tool('pair_oracle_write')({ task_id: 't-1', path: '.pair-oracles/t-1/accept.mjs', content: 'process.exit(process.env.FIXED === "1" ? 0 : 1);\n' }, { agent: h.navigator });
+    check(nativeOracleWrite.bytes > 0, 'E0 Navigator can author a test only through the narrow oracle writer');
+    const productionWrite = await fails(() => h.tool('pair_oracle_write')({ task_id: 't-1', path: 'src/a.js', content: 'production change' }, { agent: h.navigator }), 'reserved root');
+    check(productionWrite.includes('must be under .pair-oracles/t-1/'), 'E0 oracle writer cannot target production source');
+    // E1: no oracle -> the Driver cannot open a cycle.
+    const noOracle = await fails(() => h.tool('pair_propose')({ task_id: 't-1', intent: 'fix it', files: ['src/a.js'], verify_plan: 'run tests' }, { agent: h.driver }), 'oracle');
+    check(noOracle.includes('no frozen oracle') && noOracle.includes('pair_oracle'), 'E1 pair_propose refuses a task whose acceptance standard is not frozen');
+    // E2: the Driver cannot freeze its own oracle.
+    const wrongRole = await fails(() => h.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK }, { agent: h.driver }), 'navigator');
+    check(wrongRole.includes('only the Navigator'), 'E2 only the Navigator freezes the oracle');
+    // E3: an oracle that already passes is refused at the tool boundary.
+    await writeFile(oraclePath, 'process.exit(0);\n');
+    const green0 = await fails(() => h.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK }, { agent: h.navigator }), 'passes');
+    check(green0.includes('PASSES on the untouched tree'), 'E3 the freeze is refused while the oracle already passes');
+    // E4: freeze for real.
+    await writeFile(oraclePath, 'process.exit(process.env.FIXED === "1" ? 0 : 1);\n');
+    const frozen = await h.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK }, { agent: h.navigator });
+    check(frozen.oracle_sha.length === 64 && frozen.red_exit !== 0, 'E4 the oracle freezes with a digest and a recorded RED');
+    // E5: a small step opens straight at GO and inherits the oracle RED.
+    const proposed = await h.tool('pair_propose')({ task_id: 't-1', intent: 'brace-aware split', files: ['src/a.js'], net_lines: 12, verify_plan: 'node .pair-oracles/t-1/accept.mjs' }, { agent: h.driver });
+    check(proposed.auto_go === true && proposed.step === 'GO', 'E5 a one-file, 12-line step skips the GO round (R4)');
+    let board = await readTeam(h.stateRoot, 'ot1');
+    check(board.protocol.cycles[0].red?.fromOracle === true, 'E5 the cycle inherits the frozen oracle as its RED');
+    check(board.protocol.cycles[0].oracleSha === frozen.oracle_sha, 'E5 the cycle is stamped with the seal it will be judged against');
+    // E6: GREEN must carry the report (no separate refactor round).
+    const bareGreen = await fails(() => h.tool('pair_green')({ cycle_id: proposed.cycle_id, green_evidence: ['ok'] }, { agent: h.driver }), 'diff_summary');
+    check(bareGreen.includes('folds REFACTOR into GREEN'), 'E6 an oracle cycle refuses a GREEN with no report (R5)');
+    await h.tool('pair_green')({ cycle_id: proposed.cycle_id, green_evidence: ['oracle green'], diff_summary: 'src/a.js +9/-2', test_results: 'suite ok' }, { agent: h.driver });
+    // E7: the oracle still fails -> the verdict is REJECT however it is asserted.
+    const rejected = await h.tool('pair_verify')({ cycle_id: proposed.cycle_id, verdict: 'accept', evidence: ['looks right to me'] }, { agent: h.navigator });
+    check(rejected.verdict === 'reject' && rejected.computed === true && rejected.category === 'oracle_red', 'E7 an asserted ACCEPT cannot override a failing oracle');
+    // E8: a rejected auto-GO cycle rewinds to GO, not into a dead end.
+    board = await readTeam(h.stateRoot, 'ot1');
+    check(board.protocol.cycles[0].step === 'GO', 'E8 a rejected auto-GO cycle rewinds to GO so the Driver can re-run GREEN');
+    process.env.FIXED = '1';
+    await h.tool('pair_green')({ cycle_id: proposed.cycle_id, green_evidence: ['oracle green'], diff_summary: 'src/a.js +9/-2', test_results: 'suite ok' }, { agent: h.driver });
+    const accepted = await h.tool('pair_verify')({ cycle_id: proposed.cycle_id, beyond_request: 'nothing — the hunk is the minimal brace-aware split', preexisting_at_risk: 'the list/tuple passthrough; re-ran the existing config suite' }, { agent: h.navigator });
+    check(accepted.verdict === 'accept' && accepted.computed === true, 'E8 a passing oracle accepts with no verdict argument at all');
+    // A green re-run is blind to behaviour nobody requested. In a measured
+    // run a comma fix also rewrote an existing list/tuple contract; the
+    // oracle passed and the whole regression suite passed 18/18.
+    const bareAccept = await fails(() => h.tool('pair_verify')({ cycle_id: proposed.cycle_id }, { agent: h.navigator }));
+    check(bareAccept.includes('needs a scope reading') && bareAccept.includes('beyond_request'), 'E8 an ACCEPT on a green oracle still requires someone to have read the diff');
+    // E9: the gate replays the oracle itself.
+    const pass = await h.tool('pair_gate_check')({ task_id: 't-1' }, { agent: h.captain });
+    check(pass.pass === true && pass.oracle_replay.ok === true, 'E9 the gate replays the frozen oracle and passes');
+    // A gate credential is not a reusable receipt: it is bound to both the
+    // exact oracle and the worktree that passed it.
+    await writeFile(oraclePath, 'process.exit(0); // changed after pass\n');
+    const staleOracle = await fails(() => h.tool('pair_task_update')({ task_id: 't-1', status: 'completed', attempt_id: 'a-1', gate_pass_id: pass.gate_pass_id }, { agent: h.driver }), 'oracle stale');
+    check(staleOracle.includes('GATE_STALE') && staleOracle.includes('frozen oracle changed'), 'E9 a post-gate oracle edit invalidates the credential');
+    await writeFile(oraclePath, 'process.exit(process.env.FIXED === "1" ? 0 : 1);\n');
+    const refreshed = await h.tool('pair_gate_check')({ task_id: 't-1' }, { agent: h.captain });
+    await mkdir(join(root, 'src'), { recursive: true });
+    await writeFile(join(root, 'src', 'after-gate.mjs'), 'export const changedAfterGate = true;\n');
+    const staleTree = await fails(() => h.tool('pair_task_update')({ task_id: 't-1', status: 'completed', attempt_id: 'a-1', gate_pass_id: refreshed.gate_pass_id }, { agent: h.driver }), 'tree stale');
+    check(staleTree.includes('GATE_STALE') && staleTree.includes('worktree changed'), 'E9 a post-gate source edit invalidates the credential');
+    // E10: editing the oracle is caught by the gate and by verification.
+    await writeFile(oraclePath, 'process.exit(0); // always green now\n');
+    const tamperedGate = await h.tool('pair_gate_check')({ task_id: 't-1' }, { agent: h.captain });
+    check(tamperedGate.pass === false && tamperedGate.failures.join(' ').includes('frozen oracle changed'), 'E10 a rewritten oracle fails the gate even though it now passes');
+    const nextCycle = await h.tool('pair_propose')({ task_id: 't-1', intent: 'take 3', files: ['src/a.js'], net_lines: 5, verify_plan: 'node .pair-oracles/t-1/accept.mjs' }, { agent: h.driver });
+    await h.tool('pair_green')({ cycle_id: nextCycle.cycle_id, green_evidence: ['green'], diff_summary: 'src/a.js +1/-1', test_results: 'ok' }, { agent: h.driver });
+    const tamperVerdict = await h.tool('pair_verify')({ cycle_id: nextCycle.cycle_id }, { agent: h.navigator });
+    check(tamperVerdict.verdict === 'reject' && tamperVerdict.category === 'oracle_tampered', 'E10 verification rejects a moved seal outright');
+    delete process.env.FIXED;
+
+    /* ---- board digest ------------------------------------------------ */
+    board = await readTeam(h.stateRoot, 'ot1');
+    const digest = boardDigest(board, { memberName: 'driver', role: 'driver' });
+    check(digest.includes('Task t-1') && digest.includes('SEALED') && digest.includes('Divergence candidates'), 'F the digest carries the task, the seal and the open divergences');
+    check(digest.length < DIGEST_BUDGET_CHARS, 'F the digest fits its budget');
+    const fat = boardDigest({ ...board, goal: 'g'.repeat(400), processLessons: { keep: ['k'.repeat(200)], try: ['t'.repeat(200)] } }, { budget: 400 });
+    check(fat.includes('digest truncated'), 'F an over-budget digest says what it dropped instead of truncating silently');
+
+    /* ---- seat recycling ---------------------------------------------- */
+    const accCycle = board.protocol.cycles.find(c => c.verify?.verdict === 'accept');
+    check(memberIsStale(board, { id: 'x', name: 'driver', status: 'idle', joinedAt: 1 }) === true, 'G a seat older than an accepted cycle is stale');
+    check(memberIsStale(board, { id: 'x', name: 'driver', status: 'idle', joinedAt: (accCycle.verify.at ?? 0) + 1000 }) === false, 'G a seat spawned after the last acceptance is current');
+    check(memberIsStale(board, { id: '', name: 'driver', status: 'idle', joinedAt: 1 }) === false, 'G an unspawned seat is never recycled');
+
+    /* ---- H: one source of truth, no conflicting instruction ---------- */
+    // H1: the cycle stamp and the task record are two views of one seal.
+    check(resolveCycleOracle({ id: 'c1' }, { oracle: { sha: 'a' } }).oracle === undefined, 'H1 a cycle with no stamp resolves to no oracle');
+    const agreed = resolveCycleOracle({ id: 'c1', oracleSha: 'a' }, { oracle: { sha: 'a' } });
+    check(agreed.oracle !== undefined && agreed.error === undefined, 'H1 a matching stamp and record resolve cleanly');
+    check(resolveCycleOracle({ id: 'c1', oracleSha: 'a' }, { oracle: { sha: 'b' } }).error.includes('re-forked mid-cycle'), 'H1 a re-forked oracle under a live cycle is refused, not silently preferred');
+    check(resolveCycleOracle({ id: 'c1', oracleSha: 'a' }, {}).error.includes('no longer carries'), 'H1 a vanished oracle under a stamped cycle is refused');
+    // H2: re-freezing under an in-flight cycle is refused at the tool.
+    const h2 = harness(root, 'oracle-state-2');
+    await createTeamDir(h2.stateRoot, teamFixture({ id: 'ot2' }));
+    await writeFile(oraclePath, 'process.exit(process.env.FIXED === "1" ? 0 : 1);\n');
+    delete process.env.FIXED;
+    await h2.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK }, { agent: h2.navigator });
+    const live = await h2.tool('pair_propose')({ task_id: 't-1', intent: 'i', files: ['src/a.js'], net_lines: 4, verify_plan: 'v' }, { agent: h2.driver });
+    const refork = await fails(() => h2.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK }, { agent: h2.navigator }), 'in flight');
+    check(refork.includes('is in flight') && refork.includes('never shown'), 'H2 the oracle cannot be re-forked under an in-flight cycle');
+    // H3: the legacy step tools refuse an oracle cycle by naming the right move.
+    const redAdvice = await fails(() => h2.tool('pair_red')({ cycle_id: live.cycle_id, test_files: ['t.mjs'], red_evidence: ['fails'] }, { agent: h2.driver }), 'oracle');
+    check(redAdvice.includes('IS its RED') && redAdvice.includes('pair_green'), 'H3 pair_red on an oracle cycle names the oracle, not a chain error');
+    const reportAdvice = await fails(() => h2.tool('pair_report')({ cycle_id: live.cycle_id, diff_summary: 'd', test_results: 't' }, { agent: h2.driver }), 'oracle');
+    check(reportAdvice.includes('reports through pair_green') && !reportAdvice.includes('pair_refactor'), 'H3 pair_report no longer advises the v2 chain on an oracle cycle');
+    const refactorAdvice = await fails(() => h2.tool('pair_refactor')({ cycle_id: live.cycle_id, diff_summary: 'd', test_results: 't' }, { agent: h2.driver }), 'oracle');
+    check(refactorAdvice.includes('folds REFACTOR into GREEN'), 'H3 pair_refactor on an oracle cycle names the fold');
+  } finally {
+    delete process.env.FIXED;
+    await rm(root, { recursive: true, force: true });
+  }
+}

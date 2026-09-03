@@ -25,7 +25,7 @@
 export declare const name = "agent-teams";
 export declare const inject: string[];                 // 依赖注入声明
 export interface Config { stateDir?, memberProvider?, memberModel?, memberMaxDepth?, maxMembers?, promptSectionOrder?, slashCommand? }
-export declare const Config: z<Config>;                // @deepseek-ai/schemastery
+export declare const Config: z<Config>;                // schemastery
 export declare function apply(ctx: Context, config: Config): void;
 ```
 

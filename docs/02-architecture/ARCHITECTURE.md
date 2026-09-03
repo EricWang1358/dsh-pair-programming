@@ -15,7 +15,8 @@
 │  质量门禁 Gate · 风险单管理 · 决策日志 · 粒度控制器           │
 ├────────────────────────────────────────────────────────────┤
 │ 工具层（注册进共享 tools 注册表）                             │
-│  pair_start · pair_propose · pair_review · pair_report      │
+│  pair_start · pair_oracle_write · pair_oracle · pair_propose│
+│  pair_review · pair_report                                  │
 │  pair_verify · pair_risk · pair_arbitrate · pair_gate_check │
 │  pair_task_update · pair_rotate · pair_status · pair_stop   │
 ├────────────────────────────────────────────────────────────┤
@@ -66,7 +67,8 @@
 │   ├── tools/
 │   │   ├── index.js              # 注册全部 pair_* 工具
 │   │   ├── lifecycle.js          # pair_start / pair_stop / pair_rotate / pair_status
-│   │   ├── flow.js               # pair_propose / pair_review / pair_report / pair_verify
+│   │   ├── flow.js               # pair_task_claim/update + cycle primitives / pair_verify
+│   │   ├── oracle.js             # pair_oracle_write / pair_oracle (SPEC-FORK)
 │   │   ├── risk.js               # pair_risk
 │   │   └── arbitrate.js          # pair_arbitrate / pair_gate_check / pair_task_update
 │   ├── events.js                 # session 事件追加（复刻 agent-teams events.js 的容错模式）
@@ -131,7 +133,7 @@ pair_start(goal, mode)
   ├─ 状态初始化：store.createTeam({ goal, mode, captainSessionId }) 落盘
   ├─ 派生成员（continuable 子 Agent，persona 注入角色协议）：
   │    spawnMember("driver")     — toolFilter 允许写工具
-  │    spawnMember("navigator")  — toolFilter 拒绝写工具（只读+验证）
+  │    spawnMember("navigator")  — toolFilter 拒绝编辑器和通用 Shell；仅 pair_oracle_write 可写受限 oracle 路径
   │    spawnMember("challenger") — 同 navigator（light 模式跳过）
   ├─ L1 初始化 + 落盘
   └─ 进入 PLANNING：给 Challenger 发首条邮箱消息并唤醒（产出候选方案）
@@ -139,7 +141,7 @@ pair_start(goal, mode)
 
 角色纪律的注入点：`startContinuable({ request: { persona: <角色协议全文>, toolFilter, ... } })`。persona 成为成员系统提示（整段替换部署 persona）——这是角色化的关键，且属于 L3 稳定前缀。
 
-**toolFilter 实现单写者纪律的硬约束**：navigator/challenger 的 `toolFilter.deny` 包含文件写工具（`str_replace_editor`、`write_file`、`bash` 视配置），从宿主层物理阻断非 Driver 写文件——比纯 prompt 纪律强。
+**toolFilter 实现单写者纪律的硬约束**：navigator/challenger 的 `toolFilter.deny` 包含宿主实际注册的文件编辑器和通用 Shell（如 Windows `pwsh`、Unix `bash`、Claude `Bash`）。Shell 也能重定向写文件，故不能被当作“只读工具”保留。Navigator 需要创建验收工件时，使用插件的 `pair_oracle_write`；该工具仅接受 `.pair-oracles/<task_id>/` 下的路径，不能写生产文件。oracle 的执行、验证与门禁由插件内部运行，不要求非 Driver 持有 Shell。
 
 ### 3.4 消息流转
 
@@ -153,11 +155,16 @@ pair_start(goal, mode)
 任务系统是本插件自有的，`pair_task_update` 工具有效执行完成前在工具层校验：
 
 ```js
-// pair_task_update(task_id, status, output?, gate_pass_id?)
+// pair_task_update(task_id, status, output?, attempt_id, gate_pass_id?)
 if (status === 'completed') {
   const gate = store.latestGatePass(task_id);
-  if (!gate || gate.id !== gate_pass_id || gate.stale) {
+  if (!gate || gate.id !== gate_pass_id) {
     throw new Error('GATE_FAIL: task cannot complete without a valid pair_gate_check pass — run pair_gate_check first');
+  }
+  if (fingerprint(worktree) !== gate.binding.worktreeSha
+      || digest(task.oracle.files) !== task.oracle.sha
+      || digest(task.oracle.files) !== gate.binding.oracleSha) {
+    throw new Error('GATE_STALE: the oracle or worktree changed after pair_gate_check — rerun the gate');
   }
 }
 ```
@@ -218,9 +225,11 @@ interface PairProtocolState {
 | `pair_report` | Driver | cycle_id, diff_summary, test_results, deviations | 状态→IMPLEMENTED；邮箱+唤醒 Navigator |
 | `pair_verify` | Navigator | cycle_id, verdict(accept/reject), evidence[] | 状态→VERIFIED；触发 Challenger 风险检查 |
 | `pair_risk` | Challenger | action(raise/clear), severity, scenario, trigger, suggestion, ref? | 风险单变更；P0 即时 steer Captain |
+| `pair_oracle_write` | Navigator | task_id, path, content | 仅在 `.pair-oracles/<task_id>/` 内原子写入验收工件；拒绝生产路径与已验收任务 |
+| `pair_oracle` | Navigator | task_id, readings[], chosen_reading, divergence_candidates[], oracle_files[], oracle_cmd | 运行 RED 并冻结由 Navigator 编写的验收 oracle 摘要 |
 | `pair_arbitrate` | Captain | conflict_ref, decision, evidence[], rationale | 决策日志落盘；通知相关方 |
-| `pair_gate_check` | Driver/Captain | task_id | 跑门禁清单，通过则出具 gate_pass_id（落盘） |
-| `pair_task_update` | Driver | task_id, status, output?, attempt_id, gate_pass_id? | 任务状态迁移；completed 需有效 gate_pass_id（硬校验） |
+| `pair_gate_check` | Driver/Captain | task_id | 重跑 DoD 与冻结 oracle；通过时出具绑定最终 oracle/工作树的 gate_pass_id |
+| `pair_task_update` | Driver | task_id, status, output?, attempt_id, gate_pass_id? | 任务状态迁移；completed 重验 gate 凭证绑定，变化即 `GATE_STALE` |
 | `pair_rotate` | Captain | new_driver, handoff_note | 成员角色互换（更新 toolFilter 与 persona 提示） |
 | `pair_status` | 任何人 | — | 协议快照（phase/cycle/risks/stats/邮箱预览） |
 | `pair_stop` | Captain | reason? | RETRO 报告 + 中断成员 + 清理 |

@@ -65,15 +65,10 @@ try {
   if (name !== 'pair-programming') { console.error(`verify:startup FAILED: unexpected plugin name "${name}"`); process.exit(1); }
 
   // 2. SDK symbols the plugin imports at runtime must exist (missing-export gate).
-  const dshAgent = await import('@deepseek-ai/dsh-agent');
-  const dshSubagent = await import('@deepseek-ai/dsh-subagent');
   const dshLlm = await import('@deepseek-ai/dsh-llm');
   const dshTools = await import('@deepseek-ai/dsh-tools');
   const dshSession = await import('@deepseek-ai/dsh-session');
   const needed = [
-    ['@deepseek-ai/dsh-agent', 'installModelSelection', dshAgent],
-    ['@deepseek-ai/dsh-subagent', 'foldSubagentDescriptor', dshSubagent],
-    ['@deepseek-ai/dsh-subagent', 'SubagentError', dshSubagent],
     ['@deepseek-ai/dsh-llm', 'ReasoningEffortId', dshLlm],
     ['@deepseek-ai/dsh-llm', 'createUserMessage', dshLlm],
     ['@deepseek-ai/dsh-tools', 'defineTool', dshTools],
@@ -93,7 +88,6 @@ try {
     tools: { register: (t) => { reg.tools.push(t?.name); return () => {}; } },
     llm: { async resolveCallConfig(c) { return c; } },
     subagents: {
-      registerContinuableSetup() { reg.setup += 1; return () => {}; },
       getProvider: () => ({ prepareContinuable() {}, capabilities: { persona: true, toolFilter: true } }),
       list: () => ['spawn'],
     },
@@ -106,20 +100,19 @@ try {
   };
   apply(ctx, {});
 
-  const expectTools = ['pair_start', 'pair_propose', 'pair_review', 'pair_red', 'pair_green', 'pair_refactor', 'pair_report', 'pair_verify', 'pair_risk', 'pair_arbitrate', 'pair_gate_check', 'pair_task_create', 'pair_task_claim', 'pair_task_update', 'pair_rotate', 'pair_status', 'pair_retro', 'pair_stop', 'pair_interrupt'];
+  const expectTools = ['pair_start', 'pair_oracle_write', 'pair_oracle', 'pair_propose', 'pair_review', 'pair_red', 'pair_green', 'pair_refactor', 'pair_report', 'pair_verify', 'pair_risk', 'pair_arbitrate', 'pair_gate_check', 'pair_task_create', 'pair_task_claim', 'pair_task_update', 'pair_rotate', 'pair_status', 'pair_retro', 'pair_stop', 'pair_interrupt'];
   const missingTools = expectTools.filter(t => !reg.tools.includes(t));
   const unexpectedTools = reg.tools.filter(t => !expectTools.includes(t));
   const needCommands = reg.commands.includes('pair');
   const needListeners = reg.listeners.includes('agent/status') && reg.listeners.includes('agent/pre-step');
 
-  console.log(`apply() wired: ${reg.tools.length} tools, sections=[${reg.sections}], commands=[${reg.commands}], listeners=[${reg.listeners}], setup=${reg.setup}`);
-  if (missingTools.length || unexpectedTools.length || !needCommands || !needListeners || reg.setup !== 1 || !reg.sections.includes('pair-programming:usage')) {
+  console.log(`apply() wired: ${reg.tools.length} tools, sections=[${reg.sections}], commands=[${reg.commands}], listeners=[${reg.listeners}]`);
+  if (missingTools.length || unexpectedTools.length || !needCommands || !needListeners || !reg.sections.includes('pair-programming:usage')) {
     const why = [];
     if (missingTools.length) why.push(`missing tools: ${missingTools.join(', ')}`);
     if (unexpectedTools.length) why.push(`unexpected tools not in expectTools: ${unexpectedTools.join(', ')} — update that list deliberately, or the release gate goes blind to a new tool`);
     if (!needCommands) why.push('/pair command not registered');
     if (!needListeners) why.push('gesture/status listeners not installed');
-    if (reg.setup !== 1) why.push('continuable setup not installed');
     console.error(`verify:startup FAILED: ${why.join('; ')}`);
     process.exit(1);
   }

@@ -2,7 +2,8 @@
 import { toolDenyListFor, hostToolNames } from '../lib/runtime/members.js';
 
 const CLAUDE_NAMES = ['str_replace_editor', 'write_file', 'create_file', 'edit_file', 'apply_patch'];
-const DSH_NAMES = ['write', 'edit'];
+const DSH_NAMES = ['write', 'edit', 'pwsh'];
+const SHELL_NAMES = ['pwsh', 'bash', 'Bash'];
 const PAIR_CAPTAIN_NAMES = ['pair_start', 'pair_stop', 'pair_rotate', 'pair_arbitrate', 'pair_interrupt'];
 
 /** A fail-loud refusal must name the role it protects I1 for. */
@@ -22,7 +23,7 @@ export async function run(check) {
   // win32 DSH host: read/write/edit/pwsh registered, Claude-flavored names absent.
   const win32 = ['read', 'write', 'edit', 'glob', 'grep', 'pwsh', 'todo_write', 'subagent', ...PAIR_CAPTAIN_NAMES];
   const navWin = toolDenyListFor('navigator', win32);
-  check(DSH_NAMES.every(n => navWin.includes(n)), 'win32 navigator denies DSH write+edit');
+  check(DSH_NAMES.every(n => navWin.includes(n)), 'win32 navigator denies DSH write+edit+pwsh');
   check(!CLAUDE_NAMES.some(n => navWin.includes(n)), 'win32 navigator deny excludes unregistered Claude names');
   check(navWin.every(n => win32.includes(n)), 'win32 navigator deny is a subset of known tools');
   check(PAIR_CAPTAIN_NAMES.every(n => navWin.includes(n)), 'win32 navigator denies the five captain pair_* tools');
@@ -31,6 +32,7 @@ export async function run(check) {
   const claude = ['Read', 'Bash', ...CLAUDE_NAMES, ...PAIR_CAPTAIN_NAMES];
   const navCl = toolDenyListFor('challenger', new Set(claude));
   check(CLAUDE_NAMES.every(n => navCl.includes(n)), 'claude host challenger denies the five legacy write names');
+  check(navCl.includes('Bash'), 'claude host challenger denies Bash, which is a write capability');
   check(!DSH_NAMES.some(n => navCl.includes(n)), 'claude host challenger deny excludes unregistered DSH names');
   check(navCl.every(n => claude.includes(n)), 'claude host deny list is a subset of known tools');
 
@@ -40,7 +42,7 @@ export async function run(check) {
   // Driver keeps every write tool on any host.
   const drv = toolDenyListFor('driver', win32);
   check(PAIR_CAPTAIN_NAMES.every(n => drv.includes(n)), 'driver denies captain pair_* tools');
-  check(!drv.some(n => [...DSH_NAMES, ...CLAUDE_NAMES].includes(n)), 'driver deny contains no write-tool names');
+  check(!drv.some(n => [...DSH_NAMES, ...SHELL_NAMES, ...CLAUDE_NAMES].includes(n)), 'driver deny contains no write-tool names');
   check(drv.length === PAIR_CAPTAIN_NAMES.length, 'driver deny is exactly the five pair_* tools');
 
   // AC-1: a missing registry must refuse to form a team, never silently keep

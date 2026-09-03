@@ -34,7 +34,7 @@ node scripts/verify-startup.mjs       # ← 门禁②：真实 SDK 下 import �
 
 ### 门禁①：运行时 import 依赖检查（`verify-runtime-imports.mjs`）
 扫描产物中所有**非 type-only** 的 `@deepseek-ai/*` 值导入，要求每一项都被 `dependencies` 或**必需** peer 覆盖。
-教训：`@deepseek-ai/schemastery` 被 `config.js` 实际 import，却标成 `optional` peer —— 这是错误建模，
+教训：`schemastery` 被 `config.js` 实际 import，就必须作为常规 runtime dependency，而不是可选 peer，
 profile 组合期不报错，真实 `dsh` 启动 `apply()` 时才 `ERR_MODULE_NOT_FOUND`。
 
 ### 门禁②：profile 启动冒烟（`verify-startup.mjs`）

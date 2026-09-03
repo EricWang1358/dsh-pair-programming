@@ -115,5 +115,11 @@ export async function run(check) {
   check(challengerPersona(team, m, '.pp').includes('red team'), 'personas challenger adversarial');
   check(captainProtocol({ tddMode: 'enforce' }).includes('planningMaxArbitrations') && captainProtocol({ tddMode: 'enforce' }).includes('exempt'), 'personas prose states the planning budget and its exemption');
   check(usageSectionText({ tddMode: 'enforce' }).includes('pair_interrupt') && usageSectionText({ tddMode: 'enforce' }).includes('current turn only'), 'usage prose names the interrupt hammer without over-promising');
-  check(PROTOCOL_VERSION === '2', 'personas versioned at v2');
+  check(PROTOCOL_VERSION === '3', 'personas versioned at v3');
+  // The granularity controller was dead: it filtered step==='CLOSED', which no
+  // tool ever sets, so the enlarge branch could never fire in any real session.
+  const acceptedCycles = [1, 2, 3].map((n) => ({ id: `c${n}`, step: 'VERIFIED', verify: { verdict: 'accept' }, rejections: 0, attacks: 0 }));
+  check(granularitySignal(acceptedCycles).signal === 'enlarge', 'granularity: three accepted cycles now reach the enlarge branch (it keyed on an unreachable step before)');
+  check(granularitySignal([...acceptedCycles, { id: 'c4', step: 'GO', rejections: 2 }]).signal === 'shrink', 'granularity: a twice-rejected live cycle still forces a smaller step');
+
 }

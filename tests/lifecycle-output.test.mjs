@@ -7,7 +7,7 @@ import { registerLifecycleTools } from '../lib/tools/lifecycle.js';
 import { lessonsFileOf } from '../lib/state/layout.js';
 
 /** startHarness from lifecycle.test.mjs minus failure injection: pair_start must succeed here. */
-function startHarness(root, stateDir) {
+function startHarness(root, stateDir, config = {}) {
   const spawns = []; const defs = [];
   const schemas = ['read', 'write', 'edit', 'pair_start', 'pair_stop', 'pair_rotate', 'pair_arbitrate'].map((name) => ({ name }));
   const ctx = {
@@ -21,7 +21,7 @@ function startHarness(root, stateDir) {
       startContinuable: async ({ label }) => { spawns.push(label); return { childId: 'child-' + spawns.length }; },
     },
   };
-  registerLifecycleTools(ctx, { stateDir, memberProvider: 'pair', tddMode: 'enforce', pairStyle: 'traditional', greenBuildOnStop: false }, { selections: { withPending: async (i, l, s, op) => op() }, scheduler: {} });
+  registerLifecycleTools(ctx, { stateDir, memberProvider: 'pair', tddMode: 'enforce', pairStyle: 'traditional', defaultMode: 'full', greenBuildOnStop: false, ...config }, { selections: { withPending: async (i, l, s, op) => op() }, scheduler: {} });
   const captain = { id: 'cap1', session: { header: { cwd: root }, append: () => {}, requestHeader: () => ({ config: { provider: 'p', model: 'm' } }) } };
   return { spawns, start: defs.find((d) => d.name === 'pair_start').execute, stop: defs.find((d) => d.name === 'pair_stop').execute, status: defs.find((d) => d.name === 'pair_status').execute, captain };
 }
@@ -29,6 +29,16 @@ function startHarness(root, stateDir) {
 export async function run(check) {
   const root = await mkdtemp(join(tmpdir(), 'pair-out-'));
   try {
+    // Runtime settings must affect the ordinary omitted-mode call; otherwise
+    // the advertised light fast lane is unreachable without prompt surgery.
+    const configuredLight = startHarness(root, 'out-default-light', { defaultMode: 'light' });
+    const lightByDefault = await configuredLight.start({ goal: 'g', name: 'configured-light' }, { agent: configuredLight.captain });
+    check(lightByDefault.mode === 'light' && configuredLight.spawns.length === 2, 'configured defaultMode=light is honored when pair_start omits mode');
+
+    const explicitFull = startHarness(root, 'out-explicit-full', { defaultMode: 'light' });
+    const fullOverride = await explicitFull.start({ goal: 'g', mode: 'full', name: 'explicit-full' }, { agent: explicitFull.captain });
+    check(fullOverride.mode === 'full' && explicitFull.spawns.length === 3, 'explicit mode=full overrides configured defaultMode=light');
+
     // State A: no lessons.json — the host bridge must accept the whole return value.
     const a = startHarness(root, 'out-a');
     const okA = await a.start({ goal: 'g', mode: 'light', name: 'lo-a' }, { agent: a.captain });

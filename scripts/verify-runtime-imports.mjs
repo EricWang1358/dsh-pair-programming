@@ -23,7 +23,7 @@ const runtime = new Map();
 const typeOnly = new Map();
 for (const f of walk('lib')) {
   const text = readFileSync(f, 'utf8');
-  for (const m of text.matchAll(/import([^;]*?)from\s*['"](@deepseek-ai\/[^'"]+)['"]/g)) {
+  for (const m of text.matchAll(/import([^;]*?)from\s*['"](@deepseek-ai\/[^'"]+|schemastery)['"]/g)) {
     const clause = m[1];
     const spec = m[2];
     const isTypeOnly = /^\s*type\s/.test(clause) || /import\s+type\b/.test(m[0]);
