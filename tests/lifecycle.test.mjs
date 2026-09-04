@@ -233,6 +233,22 @@ export async function run(check) {
     const last = back.protocol.cycles[back.protocol.cycles.length - 1];
     check(st.current_cycle.id === last.id && st.current_cycle.step === last.step && last.step === 'GREEN',
       'current_cycle tracks cycles[] after write/read round-trips (ORDER-P1 A)');
+    // The tuning declaration must SURFACE, or collecting it is theatre: the
+    // point is that a human, the captain and the retro all get to look at a
+    // product that was bent to fit its own measuring instrument, which no
+    // re-run can ever show them.
+    await withLock(teamLockKey(cb.stateRoot, 't1'), async () => {
+      const fresh = await readTeam(cb.stateRoot, 't1');
+      fresh.protocol.cycles[0].green = { evidence: ['g'], tunedForOracle: 'none', at: 1 };
+      fresh.protocol.cycles[1].green = { evidence: ['g'], tunedForOracle: 'rain opacity 0.4 -> 0.18 so the idle patches stay under the diff threshold', at: 1 };
+      await writeTeam(cb.stateRoot, fresh);
+    });
+    const tunedStatus = await statusOf({}, { agent: cb.captain });
+    check(tunedStatus.summary.includes('Tuned to the instrument:') && tunedStatus.summary.includes('0.4 -> 0.18'),
+      'a declared tuning-to-the-oracle is visible on the board, where the captain and the retro read it');
+    check(!tunedStatus.summary.split('Tuned to the instrument:')[1].split(String.fromCharCode(10))[0].includes('none'),
+      'and an honest "none" adds no noise to that line');
+
     // ORDER-P1 B: a legacy frozen currentCycle field is ignored (inert), not migrated.
     const bl = stopHarness(root, { stateDir: 'cc-legacy' });
     const statusLegacy = bl.defs.find((x) => x.name === 'pair_status').execute;

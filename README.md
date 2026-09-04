@@ -55,7 +55,7 @@ Nine protocol invariants are enforced **by the tools themselves, not by promptin
 
 A task literally *cannot* be marked completed without a `pair_gate_check` pass — and the gate **re-runs the frozen oracle itself** rather than reading a claim about it. The resulting credential is bound to that exact oracle and worktree: change either after the pass and completion stops with `GATE_STALE` until the gate is rerun. A vague rejection ("looks off") is rejected by the message schema. Editing the acceptance test you are being judged against changes its digest and becomes an automatic REJECT. Ask the AI nicely and it may forget; the tooling cannot.
 
-**Who can write what.** The Driver alone may modify production/workspace files. Navigator and Challenger are denied generic file editors **and** `pwsh` / `bash` / `Bash`, because a general shell is a write capability. The Navigator can author the independent acceptance test only with `pair_oracle_write`, whose native path guard permits `.pair-oracles/<task_id>/…` and nothing else. The plugin itself runs the frozen oracle and quality gate, so removing the Navigator's shell does not remove computed verification.
+**Who can write what.** The Driver alone may modify production/workspace files. Navigator and Challenger are denied every registered editor, patcher, writer **and** shell — classified by *shape*, not by a list of names we happened to guess, because a list failed open on a host that spells its shell `Pwsh` and a review seat wrote three files into the workspace through the gap. A second guard denies the same calls at execution time by what they would do, so an unfamiliar name buys nothing. The Navigator can author the independent acceptance test only with `pair_oracle_write`, whose native path guard permits `.pair-oracles/<task_id>/…` and nothing else. The plugin itself runs the frozen oracle and quality gate, so removing the Navigator's shell does not remove computed verification.
 
 ### Why an oracle, and not just another reviewer
 
@@ -200,7 +200,7 @@ Or develop against a local checkout (`link:` install per [docs](docs/README.md))
 ## Verified engineering
 
 ```sh
-npm test          # 524 assertions across 19 suites, pure-logic, offline
+npm test          # 570 assertions across 19 suites, pure-logic, offline
 npm run verify    # import gate · startup gate · package gate · typecheck — all green
 ```
 

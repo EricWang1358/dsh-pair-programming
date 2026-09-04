@@ -132,9 +132,22 @@ export async function run(check) {
     check(board.protocol.cycles[0].red?.fromOracle === true, 'E5 the cycle inherits the frozen oracle as its RED');
     check(board.protocol.cycles[0].oracleSha === frozen.oracle_sha, 'E5 the cycle is stamped with the seal it will be judged against');
     // E6: GREEN must carry the report (no separate refactor round).
-    const bareGreen = await fails(() => h.tool('pair_green')({ cycle_id: proposed.cycle_id, green_evidence: ['ok'] }, { agent: h.driver }), 'diff_summary');
+    const bareGreen = await fails(() => h.tool('pair_green')({ cycle_id: proposed.cycle_id, green_evidence: ['ok'], tuned_for_oracle: 'none' }, { agent: h.driver }), 'diff_summary');
+    // Goodhart, made declarable. A computed verdict re-runs the sealed command
+    // and passes by construction; beyond_request asks what was done BEYOND the
+    // request, and tuning to the instrument is the opposite shape — the product
+    // made smaller, dimmer or moved so a threshold clears. Measured twice in
+    // one live session: a rain effect dropped 0.4 -> 0.18 opacity "so the idle
+    // patches stay under the diff threshold", and a rain volume shrunk from
+    // +/-6 to +/-4.85 after a footprint assertion failed, then justified after
+    // the fact as "the correct look for a collectible miniature". Neither was
+    // visible anywhere on the board.
+    const untuned = await fails(() => h.tool('pair_green')({ cycle_id: proposed.cycle_id, green_evidence: ['ok'], diff_summary: 'd', test_results: 't' }, { agent: h.driver }), 'tuned_for_oracle');
+    check(untuned.includes('tuned_for_oracle') || untuned.includes('required'), 'GREEN cannot be recorded without declaring what was tuned to the oracle rather than to the request');
+    const blank = await fails(() => h.tool('pair_green')({ cycle_id: proposed.cycle_id, green_evidence: ['ok'], diff_summary: 'd', test_results: 't', tuned_for_oracle: '   ' }, { agent: h.driver }), 'blank');
+    check(blank.includes('blind'), 'and an empty declaration is refused with the reason: a re-run is structurally blind to a product bent to fit its own instrument');
     check(bareGreen.includes('folds REFACTOR into GREEN'), 'E6 an oracle cycle refuses a GREEN with no report (R5)');
-    await h.tool('pair_green')({ cycle_id: proposed.cycle_id, green_evidence: ['oracle green'], diff_summary: 'src/a.js +9/-2', test_results: 'suite ok' }, { agent: h.driver });
+    await h.tool('pair_green')({ cycle_id: proposed.cycle_id, green_evidence: ['oracle green'], diff_summary: 'src/a.js +9/-2', test_results: 'suite ok', tuned_for_oracle: 'none' }, { agent: h.driver });
     // E7: the oracle still fails -> the verdict is REJECT however it is asserted.
     const rejected = await h.tool('pair_verify')({ cycle_id: proposed.cycle_id, verdict: 'accept', evidence: ['looks right to me'] }, { agent: h.navigator });
     check(rejected.verdict === 'reject' && rejected.computed === true && rejected.category === 'oracle_red', 'E7 an asserted ACCEPT cannot override a failing oracle');
@@ -142,7 +155,7 @@ export async function run(check) {
     board = await readTeam(h.stateRoot, 'ot1');
     check(board.protocol.cycles[0].step === 'GO', 'E8 a rejected auto-GO cycle rewinds to GO so the Driver can re-run GREEN');
     process.env.FIXED = '1';
-    await h.tool('pair_green')({ cycle_id: proposed.cycle_id, green_evidence: ['oracle green'], diff_summary: 'src/a.js +9/-2', test_results: 'suite ok' }, { agent: h.driver });
+    await h.tool('pair_green')({ cycle_id: proposed.cycle_id, green_evidence: ['oracle green'], diff_summary: 'src/a.js +9/-2', test_results: 'suite ok', tuned_for_oracle: 'none' }, { agent: h.driver });
     const accepted = await h.tool('pair_verify')({ cycle_id: proposed.cycle_id, beyond_request: 'nothing — the hunk is the minimal brace-aware split', preexisting_at_risk: 'the list/tuple passthrough; re-ran the existing config suite' }, { agent: h.navigator });
     check(accepted.verdict === 'accept' && accepted.computed === true, 'E8 a passing oracle accepts with no verdict argument at all');
     // A green re-run is blind to behaviour nobody requested. In a measured
@@ -169,7 +182,7 @@ export async function run(check) {
     const tamperedGate = await h.tool('pair_gate_check')({ task_id: 't-1' }, { agent: h.captain });
     check(tamperedGate.pass === false && tamperedGate.failures.join(' ').includes('frozen oracle changed'), 'E10 a rewritten oracle fails the gate even though it now passes');
     const nextCycle = await h.tool('pair_propose')({ task_id: 't-1', intent: 'take 3', files: ['src/a.js'], net_lines: 5, verify_plan: 'node .pair-oracles/t-1/accept.mjs' }, { agent: h.driver });
-    await h.tool('pair_green')({ cycle_id: nextCycle.cycle_id, green_evidence: ['green'], diff_summary: 'src/a.js +1/-1', test_results: 'ok' }, { agent: h.driver });
+    await h.tool('pair_green')({ cycle_id: nextCycle.cycle_id, green_evidence: ['green'], diff_summary: 'src/a.js +1/-1', test_results: 'ok', tuned_for_oracle: 'none' }, { agent: h.driver });
     const tamperVerdict = await h.tool('pair_verify')({ cycle_id: nextCycle.cycle_id }, { agent: h.navigator });
     check(tamperVerdict.verdict === 'reject' && tamperVerdict.category === 'oracle_tampered', 'E10 verification rejects a moved seal outright');
     delete process.env.FIXED;

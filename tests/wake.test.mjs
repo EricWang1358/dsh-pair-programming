@@ -117,6 +117,43 @@ export async function run(check) {
     check(swept.length === 1 && swept[0] === 'h1', 'E the heartbeat sweeps live teams and skips DONE/missing ones');
     check(scheduler.trackedTeams().length === 1, 'E finished and vanished teams are dropped from the sweep list');
 
+    // H: the sweep nudges the seat that OWES the call, not only the captain.
+    //
+    // The measured stall: "Idle seats: driver, navigator, challenger. Mail
+    // pending for: driver, navigator, challenger." — every seat idle, every
+    // seat with mail, 244s of nothing. deliverProtocolMessage acknowledges the
+    // mailbox the moment the host ACCEPTS a follow-up, so an accepted-but-inert
+    // follow-up leaves the debt standing with an EMPTY inbox: the redelivery
+    // branch finds nothing, the assignment branch finds no ready task, and the
+    // sweep used to return silently. The only recovery was escalateIfStalled
+    // steering the captain — which is why a live captain hand-relayed every
+    // step, the one thing its own protocol text forbids.
+    const hRoot = join(root, 'h-state');
+    const owing = teamFixture({ id: 'n1', updatedAt: 4242 });
+    const hCycle = openCycle(owing.protocol, { taskId: 't-1', driver: 'driver', intent: 'i', files: ['a.js'], verify_plan: 'v' });
+    hCycle.step = 'GREEN';
+    hCycle.oracleSha = 'a'.repeat(64);
+    await createTeamDir(hRoot, owing);
+    const followups = [];
+    const hctx = {
+      logger: { warn: () => {}, debug: () => {} }, on: () => {},
+      agents: { get: (id) => (id === 'cap1' ? { id: 'cap1', session: { append: () => {} } } : undefined) },
+      subagents: { followup: async (_cap, childId, content) => { followups.push({ childId, text: content[0].text }); return true; } },
+    };
+    const hsched = installPairScheduler(hctx, { stateDir: 'h-state', heartbeatMs: 0 });
+    await hsched.kickMember(root, 'n1', 'navigator');
+    check(followups.length === 1 && followups[0]?.childId === 'child-nav', 'H the sweep wakes the seat that owes the step, directly — no captain in the loop');
+    check(String(followups[0]?.text).includes('[PAIR:NEXT]') && String(followups[0]?.text).includes('pair_verify'), 'H and hands it the owed call verbatim off the board');
+    check(String(followups[0]?.text).includes('YOU owe'), 'H in the second person, so the seat cannot read it as somebody else’s turn');
+    await hsched.kickMember(root, 'n1', 'navigator');
+    check(followups.length === 1, 'H one debt is one nudge — a 120s sweep must not become a 120s nag');
+    await hsched.kickMember(root, 'n1', 'driver');
+    // The Driver does get woken here, but by the pre-existing attempt-recovery
+    // branch (it still owns an in-progress t-1), not by a debt nudge. Assert
+    // the nudge specifically, or this passes for the wrong reason.
+    check(followups.filter(f => f.text.includes('the board has been waiting on you')).length === 1,
+      'H only the seat named by [PAIR:NEXT] is nudged — the Driver owes nothing here and gets its ordinary attempt recovery instead');
+
     // G: settled teams leave the sweep list (all tasks terminal, all idle,
     // no mail, nothing owed) — a finished team costs zero future sweeps, and
     // every wake path re-tracks first, so the list is self-healing.

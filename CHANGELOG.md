@@ -7,6 +7,71 @@ protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-09-04 — the invariants stop being advisory
+
+Five defects found by reading one live `full`-mode session end to end. Four of
+them were rules the prompts state and the tooling did not actually enforce; the
+fifth is a blind spot no re-run can cover.
+
+### Fixed
+- **P0 — I1 was defeated by a tool name we had not guessed.** A Challenger wrote
+  three files into the workspace and ran PowerShell, on a host that registers its
+  shell as `Pwsh`. The spawn filter intersected a list of guessed names with the
+  registry (`CANDIDATES.filter(n => known.has(n))`), so it silently DROPPED every
+  name it did not anticipate — it failed OPEN on exactly the host it had never
+  seen, and threw only when the whole registry was unreadable. Non-Driver seats
+  are now classified by SHAPE (`isWriteCapability`): any registered editor,
+  patcher, writer or shell is denied whatever generation or casing it is named
+  in. `run_code` stays exempt on purpose — it is the host's reserved transport
+  name, `restrict()` throws on those, and a restricted child resolves its
+  sub-dispatches against the same restricted map anyway.
+- **P0 — and I1 now also holds at the call, not just at spawn.** The runtime path
+  guard (`runtime/board-guard.js`) covered the captain; it now covers every
+  non-Driver seat, denying workspace writes *and shells* by what the call would
+  do rather than by what it is called. Shells stay open for the captain, which
+  needs `git`; they do not for a review seat, which I1 says in as many words. A
+  finished board (DONE/ABORTED) governs nobody — that stays the explicit,
+  recorded escape hatch.
+- **P1 — the sweep now wakes the seat that owes the step, not only the captain.**
+  Measured: `Idle seats: driver, navigator, challenger. Mail pending for: driver,
+  navigator, challenger.` — every seat idle, every seat with mail, 244s of
+  nothing, twice. `deliverProtocolMessage` acknowledges the mailbox as soon as
+  the host ACCEPTS a follow-up, so an accepted-but-inert follow-up leaves the
+  debt standing with an empty inbox: the redelivery branch found nothing, the
+  assignment branch found no ready task, and `kickMember` returned silently. The
+  only recovery was `escalateIfStalled` steering the CAPTAIN — which is why that
+  session had a captain hand-relaying every single step, the one thing its own
+  protocol text forbids. `kickMember` now delivers the board's `[PAIR:NEXT]` line
+  straight to the owing seat, in the second person, once per debt.
+
+### Added
+- **`pair_green(tuned_for_oracle)` — required.** Which values, thresholds, sizes,
+  positions or counts were chosen so the ORACLE would pass rather than because
+  the request asked. A computed verdict re-runs the sealed command and passes by
+  construction; `beyond_request` asks what was done BEYOND the request, and
+  tuning to the instrument is the opposite shape — the product made smaller,
+  dimmer or moved so a threshold clears. Measured twice in one session: a rain
+  effect dropped from 0.4 to 0.18 opacity "so the idle patches stay under the
+  diff threshold", and a rain volume shrank from ±6 to ±4.85 after a footprint
+  assertion failed, then was justified afterwards as "the correct look for a
+  collectible miniature". Neither was visible anywhere on the board. Declarations
+  surface on `pair_status` under **Tuned to the instrument** and reach the retro.
+- **`pair_propose(why_not_split)` — required above the small-step threshold.** I2
+  was prose once a proposal passed one file / 80 net lines: `net_lines` only ever
+  decided whether the GO round was skipped, so an oversized cycle was merely one
+  that waited. A measured cycle went through as three files, ~300 net lines and
+  two plainly separate concerns, GO'd in a session whose review seat issued zero
+  NO_GO. The tool still cannot judge "one concern" and does not pretend to — it
+  makes the claim explicit, which is what gives a reviewer something to refuse.
+
+### Changed
+- **Captain prompts corrected to match the runtime.** Liveness now says the sweep
+  wakes the owing seat directly, so a `[PAIR:STALL]` is information rather than a
+  relay order; goal coverage must be read from `pair_status.goal_coverage` and
+  never carried as a running count (a measured captain narrated "52/56" for
+  several turns while its own arithmetic did not close).
+
+
 ## [0.4.0] — 2026-09-04 — solo by default; DONE has to be earned
 
 Protocol v4. Two live sessions (`cec33cc5`) ended with a board reading `phase="DONE"`,

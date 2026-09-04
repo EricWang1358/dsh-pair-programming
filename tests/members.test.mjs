@@ -1,5 +1,5 @@
 /** runtime/members: toolDenyListFor — host-registry-filtered deny lists (I1). */
-import { toolDenyListFor, hostToolNames, markMemberRetired, isMemberRetired, installRetiredInboxGuard, deliverToMember } from '../lib/runtime/members.js';
+import { toolDenyListFor, hostToolNames, markMemberRetired, isMemberRetired, installRetiredInboxGuard, deliverToMember, isWriteCapability } from '../lib/runtime/members.js';
 
 const CLAUDE_NAMES = ['str_replace_editor', 'write_file', 'create_file', 'edit_file', 'apply_patch'];
 const DSH_NAMES = ['write', 'edit', 'pwsh'];
@@ -88,4 +88,23 @@ export async function run(check) {
   check(removed === 'cross-team-message', 'a generic host message to a retired pair child is removed synchronously');
   const accepted = await deliverToMember(retiredCtx, {}, 'old-child', 'stale', new AbortController().signal);
   check(accepted === false && followed === false, 'pair delivery also refuses a retired child before calling the host');
+  // The spawn filter used to be a list of GUESSED names intersected with the
+  // registry: `NON_DRIVER_WRITE_TOOL_CANDIDATES.filter(n => known.has(n))`.
+  // That drops every name it did not anticipate, so it failed OPEN on exactly
+  // the host it had never seen — and one did: a Challenger ran PowerShell on a
+  // host registering its shell as `Pwsh` (capital P, not in the list) and wrote
+  // three files into the workspace. Classification is by SHAPE now.
+  for (const denied of ['Pwsh', 'PowerShell', 'Write', 'MultiEdit', 'edit_file', 'apply_patch',
+    'str_replace_editor', 'run_shell_command', 'execute_command', 'search_and_replace', 'Bash']) {
+    check(isWriteCapability(denied), `a non-Driver seat loses "${denied}" — the classifier reads the shape, not a list of names it happens to know`);
+  }
+  for (const kept of ['read', 'Read', 'glob', 'grep', 'search_files', 'list_directory', 'read_image', 'web_search']) {
+    check(!isWriteCapability(kept), `and keeps "${kept}" — a review seat that cannot read cannot review`);
+  }
+  check(!isWriteCapability('run_code'), 'run_code is exempt and must stay so: it is the host RESERVED TRANSPORT name, restrict() throws on those, and a restricted child resolves its sub-dispatches against the same restricted map anyway');
+  check(!isWriteCapability('pair_oracle_write'), 'pair_* tools are governed by role, never by shape — the Navigator authors oracles through exactly this one');
+  const navDenied = new Set(toolDenyListFor('navigator', ['read', 'Pwsh', 'Write', 'grep', 'pair_oracle_write', 'run_code']));
+  check(navDenied.has('Pwsh') && navDenied.has('Write'), 'the deny list built for a real registry now contains the unguessed names');
+  check(!navDenied.has('read') && !navDenied.has('grep') && !navDenied.has('pair_oracle_write') && !navDenied.has('run_code'), 'and nothing the seat needs to do its job');
+
 }

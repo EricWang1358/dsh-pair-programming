@@ -110,18 +110,34 @@ export async function run(check) {
 
     const proposed = await h.tool('pair_propose')({ task_id: 't-1', intent: 'brace-aware split', files: ['a.js'], net_lines: 4, verify_plan: 'run the oracle' }, { agent: h.captain });
     check(proposed.cycle_id !== undefined, 'C the builder proposes without needing a Driver seat to exist');
-    await h.tool('pair_green')({ cycle_id: proposed.cycle_id, green_evidence: ['ok'], diff_summary: 'a.js +4/-1', test_results: 'suite ok' }, { agent: h.captain });
+    await h.tool('pair_green')({ cycle_id: proposed.cycle_id, green_evidence: ['ok'], diff_summary: 'a.js +4/-1', test_results: 'suite ok', tuned_for_oracle: 'none' }, { agent: h.captain });
 
     const stillRed = await h.tool('pair_verify')({ cycle_id: proposed.cycle_id, beyond_request: 'nothing', preexisting_at_risk: 'none; ran the suite' }, { agent: h.captain });
     check(stillRed.verdict === 'reject' && stillRed.computed === true, 'C THE point: the builder cannot pass its own work — the sealed command still fails, so the verdict is REJECT');
 
     process.env.FIXED = '1';
-    await h.tool('pair_green')({ cycle_id: proposed.cycle_id, green_evidence: ['green'], diff_summary: 'a.js +4/-1', test_results: 'suite ok' }, { agent: h.captain });
+    await h.tool('pair_green')({ cycle_id: proposed.cycle_id, green_evidence: ['green'], diff_summary: 'a.js +4/-1', test_results: 'suite ok', tuned_for_oracle: 'the shell inflation stayed at 1.02 because the request asked for a visible rim; nothing was sized to the oracle' }, { agent: h.captain });
     const passed = await h.tool('pair_verify')({ cycle_id: proposed.cycle_id, beyond_request: 'nothing beyond brace handling', preexisting_at_risk: 'the list/tuple passthrough; re-ran the config suite' }, { agent: h.captain });
     check(passed.verdict === 'accept' && passed.computed === true, 'C and it passes only when the independently-authored command actually passes');
     const board = await readTeam(h.stateRoot, 'sv1');
     check(board.protocol.cycles[0].verify.beyondRequest.includes('brace'), 'C the scope reading is recorded — a computed verdict is blind to behaviour nobody requested');
     delete process.env.FIXED;
+
+    /* ---- I2 above the auto-GO threshold is no longer prose ------------ */
+    // Measured: three files, ~300 net lines, two plainly separate concerns
+    // (weather and life) proposed as one cycle — and GO'd, in a session whose
+    // review seat issued zero NO_GO all run. net_lines only ever decided
+    // whether the GO round was skipped; an oversized proposal was simply one
+    // that waited. The tool still cannot judge "one concern" and does not
+    // pretend to; it makes the claim explicit so a reviewer has something to
+    // refuse.
+    const oversized = await fails(() => h.tool('pair_propose')({ task_id: 't-1', intent: 'weather and life', files: ['weather.js', 'life.js', 'buildScene.js'], net_lines: 300, verify_plan: 'run the oracle' }, { agent: h.captain }));
+    check(oversized.includes('why_not_split') && oversized.includes('verified independently'), 'a multi-file, 300-line cycle must state why it is still ONE concern');
+    check(oversized.includes('split it'), 'and the refusal says what to do when that sentence cannot be written');
+    const justified = await h.tool('pair_propose')({ task_id: 't-1', intent: 'weather and life', files: ['weather.js', 'life.js'], net_lines: 300, verify_plan: 'run the oracle', why_not_split: 'both halves register against the same animator array; split, neither half has a runnable frame loop to assert on' }, { agent: h.captain });
+    check(justified.cycle_id !== undefined, 'a stated rationale lets the oversized step through — this is friction, not a wall');
+    const boardSplit = await readTeam(h.stateRoot, 'sv1');
+    check(boardSplit.protocol.cycles.at(-1).proposal.whyNotSplit.includes('animator array'), 'and the claim is recorded on the cycle, where a reviewer and the retro can weigh it');
 
     /* ---- D: no oracle, no self-acceptance ----------------------------- */
     const h2 = harness(root, 'solo-state-2');

@@ -55,7 +55,7 @@
 
 没有 `pair_gate_check` 通过记录，任务在工具层**根本标记不了 completed**——而且门禁会**亲自重跑冻结的 oracle**，不采信任何关于它的说法。通过凭证同时绑定该 oracle 和当时的工作树；二者任一在通过后发生变化，完成会以 `GATE_STALE` 被拒绝，必须重跑门禁。空泛的拒绝意见（"感觉不太对"）会被消息 schema 直接拒收；改动你正被其评判的那份验收测试，会改变它的摘要并被自动判为 REJECT。你可以跟 AI 讲道理，但工具不讲情面。
 
-**谁能写什么。** 只有 Driver 可修改生产/工作区文件。Navigator 和 Challenger 不仅没有通用文件编辑器，`pwsh` / `bash` / `Bash` 也会被拒绝，因为通用 Shell 本身就是写入能力。Navigator 只可通过 `pair_oracle_write` 创建独立验收工件，原生路径校验仅允许 `.pair-oracles/<task_id>/…`，不能触及生产路径。冻结 oracle 与质量门禁由插件自身执行，因此移除 Navigator 的 Shell 不会取消计算验收。
+**谁能写什么。** 只有 Driver 可修改生产/工作区文件。Navigator 和 Challenger 被拒绝**所有**已注册的编辑器、补丁器、写入器与 Shell——按**形状**判定，而不是按我们碰巧猜到的名字清单：清单曾在一台把 Shell 注册成 `Pwsh` 的宿主上 fail-open，评审席位就从那个缝里往工作区写了三个文件。第二道守卫在执行时按「这次调用会做什么」再拦一次，所以陌生名字买不到任何东西。Navigator 只可通过 `pair_oracle_write` 创建独立验收工件，原生路径校验仅允许 `.pair-oracles/<task_id>/…`，不能触及生产路径。冻结 oracle 与质量门禁由插件自身执行，因此移除 Navigator 的 Shell 不会取消计算验收。
 
 ### 为什么是 oracle，而不是再加一个评审者
 
@@ -193,7 +193,7 @@ dsh web
 ## 工程质量
 
 ```sh
-npm test          # 19 个套件 524 条断言，纯逻辑，离线可跑
+npm test          # 19 个套件 570 条断言，纯逻辑，离线可跑
 npm run verify    # 导入门禁 · 启动门禁 · 包门禁 · 类型检查 —— 全绿
 ```
 

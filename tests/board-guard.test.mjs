@@ -10,13 +10,16 @@
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { captainWriteDenial, targetPaths, insideWorkspace, installBoardWriteGuard } from '../lib/runtime/board-guard.js';
+import { captainWriteDenial, boardWriteDenial, targetPaths, insideWorkspace, installBoardWriteGuard } from '../lib/runtime/board-guard.js';
 import { createTeamDir } from '../lib/state/store.js';
 import { initialProtocolState } from '../lib/protocol/machine.js';
 
+const seat = (id, role) => ({ id, name: role, role, status: 'idle', joinedAt: 1 });
+const SEATS = [seat('drv', 'driver'), seat('nav', 'navigator'), seat('chal', 'challenger')];
+
 const team = (over = {}) => ({
   id: 'tg1', name: 'TG', goal: 'g', mode: 'full', tddMode: 'enforce', pairStyle: 'traditional',
-  captainSessionId: 'cap1', createdAt: 1, updatedAt: 1, members: [], tasks: [], taskSeq: 0,
+  captainSessionId: 'cap1', createdAt: 1, updatedAt: 1, members: SEATS, tasks: [], taskSeq: 0,
   protocol: initialProtocolState(), evidenceStats: { cacheHits: 0, cacheMiss: 0 }, ...over,
 });
 
@@ -44,6 +47,25 @@ export async function run(check) {
     check(captainWriteDenial(team({ mode: 'solo' }), ws, 'edit', { file_path: 'src/a.js' }) === undefined, 'THE exemption: in solo the captain IS the builder, and what keeps it honest is the frozen oracle, not a seat');
     check(captainWriteDenial(undefined, ws, 'edit', { file_path: 'src/a.js' }) === undefined, 'an agent leading no team is an ordinary agent');
     check(captainWriteDenial(team({ mode: 'light' }), ws, 'edit', { file_path: 'src/a.js' }) !== undefined, 'light mode has a Driver too, so it holds the same way');
+
+    /* ---- the seat half: I1 for members, not just for the captain -------- */
+    // Measured: a Challenger wrote .pair-probes/webgl-probe.html plus two PNGs
+    // into the workspace and ran PowerShell, after reasoning in as many words
+    // that "a throwaway probe file is not production code". The spawn filter
+    // was meant to make that impossible and failed open on a host that names
+    // its shell `Pwsh`. Every assertion here fails on the pre-fix build.
+    const live = team();
+    const probe = boardWriteDenial(live, 'chal', ws, 'write', { file_path: '.pair-probes/webgl-probe.html' });
+    check(String(probe).includes('role=challenger'), 'a non-Driver seat cannot write a probe file into the workspace — I1 is about who may change the tree, not about what the change is for');
+    check(String(probe).includes('pair_oracle_write'), 'the refusal points at the one write channel a review seat does have');
+    check(typeof boardWriteDenial(live, 'nav', ws, 'Pwsh', { command: 'Copy-Item a b' }) === 'string', 'THE bypass that was measured: a shell under an unguessed name is refused for a review seat, because I1 says a general shell IS a write capability');
+    check(boardWriteDenial(live, 'drv', ws, 'write', { file_path: 'src/a.js' }) === undefined, 'the Driver writes freely — it is the single writer, not an exception to the rule');
+    check(boardWriteDenial(live, 'drv', ws, 'Pwsh', { command: 'npm test' }) === undefined, 'and keeps its shell');
+    check(boardWriteDenial(live, 'nav', ws, 'read', { file_path: 'src/a.js' }) === undefined, 'a review seat still reads — a Navigator that cannot read cannot review');
+    check(boardWriteDenial(live, 'nav', ws, 'write', { file_path: join(tmpdir(), 'scratch.txt') }) === undefined, 'and may write outside the tree, where it changes nothing anyone is judged on');
+    check(boardWriteDenial(live, 'ghost', ws, 'write', { file_path: 'src/a.js' }) === undefined, 'an agent that holds no seat on this board is untouched by the seat rule');
+    check(boardWriteDenial(team({ protocol: { ...initialProtocolState(), phase: 'ABORTED' } }), 'chal', ws, 'write', { file_path: 'a.js' }) === undefined, 'a finished board governs nobody — the same escape hatch the captain has');
+    check(String(boardWriteDenial(live, 'cap1', ws, 'edit', { file_path: 'src/a.js' })).includes('captain of team'), 'the captain still routes to the captain rule, which keeps shells open');
 
     /* ---- installed on a real board -------------------------------------- */
     const stateRoot = join(ws, '.pair-programming');
