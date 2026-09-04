@@ -43,8 +43,12 @@ export async function run(check) {
     check(task.status === 'claimed' && task.attemptId === att, 'attempt activates');
     invalidateTaskAttempt(task);
     check(task.attemptId === undefined && task.status === 'pending', 'invalidate revokes');
-    const gp = recordGatePass(back, 't-1', { ok: true });
+    const gp = recordGatePass(back, 't-1', { ok: true, at: 1 }, { worktreeSha: 'tree', gateStateSha: 'board' });
+    const replayed = recordGatePass(back, 't-1', { ok: true, at: 999 }, { worktreeSha: 'tree', gateStateSha: 'board' });
     check(latestGatePass(back, 't-1')?.id === gp.id, 'gate pass recorded');
+    check(replayed.id === gp.id && back.protocol.gatePasses.length === 1, 'an identical gate replay returns the same credential instead of appending a random id');
+    const changedPass = recordGatePass(back, 't-1', { ok: true, at: 1000 }, { worktreeSha: 'tree-2', gateStateSha: 'board' });
+    check(changedPass.id !== gp.id && back.protocol.gatePasses.length === 2, 'a changed gate binding issues a new credential');
 
     // mailbox
     await appendMailbox(stateRoot, 't1', 'navigator', createMessage('driver', 'navigator', '[PAIR:PROPOSE] {}'));

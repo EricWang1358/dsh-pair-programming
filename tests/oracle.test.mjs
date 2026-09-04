@@ -14,6 +14,7 @@ import { registerOracleTools } from '../lib/tools/oracle.js';
 import { registerArbitrateTools } from '../lib/tools/arbitrate.js';
 import { createTeamDir, readTeam } from '../lib/state/store.js';
 import { initialProtocolState } from '../lib/protocol/machine.js';
+import { gateStateFingerprint } from '../lib/protocol/gate.js';
 
 const GOOD_FORK = {
   readings: [
@@ -224,6 +225,40 @@ export async function run(check) {
     check(reportAdvice.includes('reports through pair_green') && !reportAdvice.includes('pair_refactor'), 'H3 pair_report no longer advises the v2 chain on an oracle cycle');
     const refactorAdvice = await fails(() => h2.tool('pair_refactor')({ cycle_id: live.cycle_id, diff_summary: 'd', test_results: 't' }, { agent: h2.driver }), 'oracle');
     check(refactorAdvice.includes('folds REFACTOR into GREEN'), 'H3 pair_refactor on an oracle cycle names the fold');
+
+    /* ---- I: staged verification preserves small cycles --------------- */
+    const h3 = harness(root, 'oracle-state-3');
+    await createTeamDir(h3.stateRoot, teamFixture({ id: 'ot3' }));
+    const stagedOracle = `import { readFileSync } from 'node:fs';\nlet value = '';\ntry { value = readFileSync('src/staged.txt', 'utf8').trim(); } catch {}\nprocess.exit(value === 'complete' ? 0 : 1);\n`;
+    await h3.tool('pair_oracle_write')({ task_id: 't-1', path: '.pair-oracles/t-1/accept.mjs', content: stagedOracle }, { agent: h3.navigator });
+    await h3.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK }, { agent: h3.navigator });
+    const slice1 = await h3.tool('pair_propose')({
+      task_id: 't-1', intent: 'land the first independently checkable slice', files: ['src/staged.txt'], net_lines: 1,
+      verify_plan: `node -e "const f=require('fs');process.exit(f.readFileSync('src/staged.txt','utf8').includes('partial')?0:1)"`,
+    }, { agent: h3.driver });
+    await mkdir(join(root, 'src'), { recursive: true });
+    await writeFile(join(root, 'src', 'staged.txt'), 'partial\n');
+    await h3.tool('pair_green')({ cycle_id: slice1.cycle_id, green_evidence: ['slice command green'], diff_summary: 'partial slice', test_results: 'slice green', tuned_for_oracle: 'none' }, { agent: h3.driver });
+    const checkpoint = await h3.tool('pair_verify')({ cycle_id: slice1.cycle_id, stage: 'checkpoint' }, { agent: h3.navigator });
+    check(checkpoint.verdict === 'checkpoint' && checkpoint.category === 'checkpoint_green', 'I a checkpoint executes the predeclared slice command and closes the cycle without claiming final acceptance');
+    let stagedBoard = await readTeam(h3.stateRoot, 'ot3');
+    check(stagedBoard.protocol.cycles[0].step === 'VERIFIED' && stagedBoard.protocol.cycles[0].verify.verdict === 'checkpoint', 'I the checkpoint is durable and releases back-pressure');
+    const prematureGate = await h3.tool('pair_gate_check')({ task_id: 't-1' }, { agent: h3.captain });
+    check(prematureGate.pass === false && prematureGate.failures.join(' ').includes('no final oracle ACCEPT'), 'I checkpoints alone cannot pass the task gate');
+
+    const slice2 = await h3.tool('pair_propose')({ task_id: 't-1', intent: 'complete the contract', files: ['src/staged.txt'], net_lines: 1, verify_plan: 'node .pair-oracles/t-1/accept.mjs' }, { agent: h3.driver });
+    await writeFile(join(root, 'src', 'staged.txt'), 'complete\n');
+    await h3.tool('pair_green')({ cycle_id: slice2.cycle_id, green_evidence: ['full oracle green'], diff_summary: 'complete slice', test_results: 'full green', tuned_for_oracle: 'none' }, { agent: h3.driver });
+    const final = await h3.tool('pair_verify')({ cycle_id: slice2.cycle_id, stage: 'final', beyond_request: 'nothing', preexisting_at_risk: 'staged file only; full oracle rerun' }, { agent: h3.navigator });
+    check(final.verdict === 'accept', 'I the final stage still requires the full frozen oracle');
+    const stagedPass = await h3.tool('pair_gate_check')({ task_id: 't-1' }, { agent: h3.captain });
+    check(stagedPass.pass === true && stagedPass.checklist.checkpointCycles.includes(slice1.cycle_id), 'I the gate accepts settled checkpoints only alongside a final ACCEPT and records them');
+    const completed = await h3.tool('pair_task_update')({ task_id: 't-1', status: 'completed', attempt_id: 'a-1', gate_pass_id: stagedPass.gate_pass_id, output: 'two small verified slices' }, { agent: h3.driver });
+    stagedBoard = await readTeam(h3.stateRoot, 'ot3');
+    const storedPass = stagedBoard.protocol.gatePasses.find(pass => pass.id === stagedPass.gate_pass_id);
+    check(completed.status === 'completed' && stagedBoard.tasks[0].gatePassId === stagedPass.gate_pass_id
+      && gateStateFingerprint(stagedBoard, 't-1') === storedPass.binding.gateStateSha,
+    'I the board-bound gate credential remains authoritative across the legitimate completion transition');
   } finally {
     delete process.env.FIXED;
     await rm(root, { recursive: true, force: true });

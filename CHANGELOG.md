@@ -7,6 +7,60 @@ protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 
 ## [Unreleased]
 
+### Protocol v5 — disclosed gaps have an owner
+
+Built from a measured visual-project retrospective: 9/9 cards and 132/132
+structural assertions passed while rain still rendered as squares, puddle
+reflections were unreadable, and only the initial camera had been inspected.
+The gaps had been disclosed, but the protocol did not turn disclosure into work.
+
+### Added
+- **Amendable planning cards.** `pair_task_amend` can replace story fields,
+  acceptance allocation, deliverables, dependencies, subject, and description
+  before the first cycle. It records a revision trail and atomically revokes a
+  live attempt. Acceptance-changing edits invalidate a frozen oracle;
+  scheduling and deliverable-only changes preserve it.
+- **Staged computed verification.** `pair_verify(stage="checkpoint")` settles a
+  deliberately partial cycle by executing the proposal's predeclared
+  `verify_plan`. It never claims final acceptance. `stage="final"` still runs
+  the complete sealed oracle, and the gate requires at least one final ACCEPT.
+- **Disclosure obligations.** Non-gating oracle arms, oracle-directed tuning,
+  deviations from the approved proposal, beyond-request behaviour, and explicit
+  oracle bypasses now appear in `pair_status.open_disclosures` and the board
+  digest. The next-obligation engine assigns them to the captain, and successful
+  stop is blocked until each ref is closed by an auditable
+  `pair_arbitrate(closes_disclosure=...)` ruling.
+- **Planning and control-plane regressions.** New suites cover task amendment,
+  disclosure ownership/closure, staged verification, idempotent gate replay,
+  credential staleness, and completion-time board binding.
+
+### Fixed
+- **Gate credential identity and binding.** Replaying an unchanged gate reuses
+  the same `gate_pass_id`. A pass is bound to the task contract, cycles, task
+  decisions, P0/P1 risk state, oracle, worktree, and executed gate command.
+  Material post-gate changes produce `GATE_STALE`; a legitimate transition to
+  `completed` does not stale its own credential. Successful stop rechecks every
+  credential against the final board and worktree. The task carries the id as
+  soon as the gate passes instead of relying on a later seat report.
+- **Status board drift.** The versioned structured result always exposes
+  `cycles`, the complete durable `risks` register, and canonical `coverage`;
+  `goal_coverage` remains as an equal compatibility alias and `open_risks` as
+  the filtered view. `gate_credentials` names the latest pass, the id bound to
+  each task, and whether the board-state binding is current.
+- **Acceptance criteria disappeared from the board digest.** The digest read a
+  nonexistent top-level `acceptanceCriteria` property. It now reads the stored
+  `story.acceptance_criteria` contract.
+
+### Changed
+- **Granularity only tightens automatically.** Two rejections still force a
+  smaller next cycle. A clean streak no longer widens implementation scope;
+  that suggestion contradicted the small-step invariant in the session that
+  exposed it.
+- **I1 now names its complete workspace boundary.** Tooling, provisioning,
+  vendor, probe, and scratch files inside the workspace follow the same
+  single-writer rule as production files. There is no role-dependent setup-file
+  exception.
+
 ## [0.4.1] — 2026-09-04 — the invariants stop being advisory
 
 Five defects found by reading one live `full`-mode session end to end. Four of
