@@ -54,14 +54,32 @@ function fakeCtx() {
     set: (field, value) => { writes.push(['set', field, value]); user[field] = value; listeners.forEach(l => l()); return Promise.resolve(); },
     unset: (field) => { writes.push(['unset', field]); delete user[field]; listeners.forEach(l => l()); return Promise.resolve(); },
   };
+  // The host-written CE detection namespace: read-only for the card.
+  const ceStatus = {
+    status: 'found', summary: 'detected v3.24.0 at /tmp/ce (33 skills, 415181d)',
+    path: '/tmp/ce', version: '3.24.0', commitSha: '415181d', source: 'dsh-packages',
+    skillCount: 33, fingerprint: 'abc123', reviewNeeded: false, probedAt: 5, token: 't-1',
+  };
+  const statusScope = {
+    getSnapshot: () => ({ status: 'ready', value: ceStatus, base: ceStatus, user: {}, revision: 1, writable: false, mode: 'host' }),
+    subscribe: () => () => {},
+    set: () => Promise.resolve(),
+    unset: () => Promise.resolve(),
+  };
   const locale = { registered: null };
   const slots = { injectedName: null, registration: null };
   return {
     scope, writes, locale, slots,
     ctx: {
       effect: (fn) => fn(),
-      settingsScope: { bind: ({ namespace }) => { slots.boundNamespace = namespace; return scope; }, },
-      locale: { register: (ns, copy) => { locale.registered = { ns, copy }; }, },
+      settingsScope: {
+        bind: ({ namespace }) => {
+          slots.boundNamespace = namespace;
+          (slots.bound ??= []).push(namespace);
+          return namespace === 'pair-programming-ce' ? statusScope : scope;
+        },
+      },
+      locale: { register: (ns, copy) => { locale.registered = { ns, copy }; }, bind: (ns) => (key) => key, },
       slots: {
         inject: (name, gen) => { slots.injectedName = name; for (const reg of gen()) slots.registration = reg; },
         register: (meta, component) => meta,
@@ -77,13 +95,16 @@ export async function run(check) {
   const env = fakeCtx();
   api.apply(env.ctx);
 
-  check(env.slots.boundNamespace === 'pair-programming', 'binds the host settings namespace pair-programming');
+  check(env.slots.bound.includes('pair-programming'), 'binds the host settings namespace pair-programming');
+  check(env.slots.bound.includes('pair-programming-ce'), 'binds the host-written CE detection namespace separately from the user config section');
   check(env.locale.registered?.ns === 'settings.pair-programming', 'locale registered under its own namespace');
   const copy = env.locale.registered?.copy;
   const needed = ['cardTitle', 'tddMode', 'pairStyle', 'defaultMode', 'maxCyclesPerTask', 'maxOpenRisks', 'planningMaxArbitrations', 'spikeMaxCycles', 'greenBuildOnStop', 'dod', 'save', 'discard', 'reset', 'overridden', 'baseLabel', 'readOnly', 'saveFailed', 'unsaved', 'saving', 'invalidNumber'];
   check(needed.every(k => typeof copy?.zh?.[k] === 'string' && typeof copy?.en?.[k] === 'string'), 'both locales cover every needed key');
-  check(env.slots.injectedName === 'settings.plugin.item', 'injected into settings.plugin.item slot');
-  check(env.slots.registration?.key === 'pair-programming', 'card keyed by the settings namespace');
+  check(env.slots.injectedName === 'settings.section', 'injected into the top-level settings.section slot');
+  check(env.slots.registration?.id === 'pair-programming', 'section id is the settings namespace');
+  check(typeof env.slots.registration?.label === 'function' && env.slots.registration.label() === 'nav', 'nav label resolves through the locale binder');
+  check(typeof env.slots.registration.inject().t === 'function', 'section supplies its own copy binder to the card');
 
   // drive the card through the store the slot would hand to React
   const store = env.slots.registration.inject().hooks.pairCard;
@@ -115,6 +136,16 @@ export async function run(check) {
   actions.save();
   await new Promise(r => setTimeout(r, 0));
   check(userCleared(env), 'reset writes the composed value back');
+
+  // CE: the Detect button is an action, not a staged draft.
+  const beforeProbe = env.writes.length;
+  actions.probe();
+  await new Promise(r => setTimeout(r, 0));
+  const probeWrite = env.writes.slice(beforeProbe).find(w => w[0] === 'set' && w[1] === 'ceProbeToken');
+  check(probeWrite !== undefined && /^\d+$/.test(String(probeWrite[2])), 'Detect writes a fresh probe token straight through the scope');
+  check(store.getSnapshot().dirty === false, 'Detect leaves no unsaved draft behind — it is a request, not an edit');
+  check(store.getSnapshot().ceStatus?.summary.includes('3.24.0'), 'the card renders detection facts from the host-written namespace');
+  check(store.getSnapshot().fields.ceLanes.text === 'off', 'the CE lane defaults to off, so an untouched deployment exposes nothing');
 
   // unavailable namespace => card silent
   const quiet = fakeCtx();

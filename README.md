@@ -53,9 +53,9 @@ Nine protocol invariants are enforced **by the tools themselves, not by promptin
 
 > **I1** single writer · **I2** small steps · **I3** propose before act (small steps auto-GO) · **I4** completion needs the gate · **I5** no risk left overnight — a blocker closes only on an executable artifact, and a P0 in the *acceptance instrument* blocks verification (not implementation) so the tool under repair does not park the work under test · **I6** evidence is a re-run, not a sentence · **I7** test first · **I8** oracle first · **I9** one unverified cycle at a time — new proposals wait for the outstanding verdict
 
-A task literally *cannot* be marked completed without a `pair_gate_check` pass — and the gate **re-runs the frozen oracle itself** rather than reading a claim about it. The resulting credential is bound to that exact oracle and worktree: change either after the pass and completion stops with `GATE_STALE` until the gate is rerun. A vague rejection ("looks off") is rejected by the message schema. Editing the acceptance test you are being judged against changes its digest and becomes an automatic REJECT. Ask the AI nicely and it may forget; the tooling cannot.
+A task literally *cannot* be marked completed without a `pair_gate_check` pass — and the gate **re-runs the frozen oracle itself** rather than reading a claim about it. The resulting credential is bound to that exact oracle, worktree, task contract, cycle record, and blocking-risk state: change any of them after the pass and completion stops with `GATE_STALE` until the gate is rerun. An identical replay reuses the credential instead of minting a conflicting id, and `pair_status.gate_credentials` names both the latest pass and the id bound to the task. A vague rejection ("looks off") is rejected by the message schema. Editing the acceptance test you are being judged against changes its digest and becomes an automatic REJECT. Ask the AI nicely and it may forget; the tooling cannot.
 
-**Who can write what.** The Driver alone may modify production/workspace files. Navigator and Challenger are denied every registered editor, patcher, writer **and** shell — classified by *shape*, not by a list of names we happened to guess, because a list failed open on a host that spells its shell `Pwsh` and a review seat wrote three files into the workspace through the gap. A second guard denies the same calls at execution time by what they would do, so an unfamiliar name buys nothing. The Navigator can author the independent acceptance test only with `pair_oracle_write`, whose native path guard permits `.pair-oracles/<task_id>/…` and nothing else. The plugin itself runs the frozen oracle and quality gate, so removing the Navigator's shell does not remove computed verification.
+**Who can write what.** The Driver alone may modify production/workspace files. Tooling, provisioning scripts, vendored files, probes, and scratch artifacts inside the workspace are workspace files too; there is no setup exception. Navigator and Challenger are denied every registered editor, patcher, writer **and** shell — classified by *shape*, not by a list of names we happened to guess, because a list failed open on a host that spells its shell `Pwsh` and a review seat wrote three files into the workspace through the gap. A second guard denies the same calls at execution time by what they would do, so an unfamiliar name buys nothing. The Navigator can author the independent acceptance test only with `pair_oracle_write`, whose native path guard permits `.pair-oracles/<task_id>/…` and nothing else. The plugin itself runs the frozen oracle and quality gate, so removing the Navigator's shell does not remove computed verification.
 
 ### Why an oracle, and not just another reviewer
 
@@ -78,7 +78,7 @@ Two full v3 sessions were replayed after the redesign shipped. The mechanisms wo
 A live 2h 16min session produced **zero accepted increments** because a single oracle was re-forked six-plus times, each fork correct, the set divergent — the protocol had no way to say "good enough for now, ship it as-is with the doubt named". Four fixes:
 
 - **Risk scopes.** `pair_risk` accepts `scope: instrument`. A product P0 halts new cycles as before; an *instrument* P0 halts verification and the gate, not implementation — the measurement being untrustworthy is not a reason to stop producing. Both still block task completion.
-- **Non-gating oracle arms.** `pair_oracle` accepts `non_gating_arms[]` with a mandatory `non_gating_reason`. A declared known-red arm prints on every run and routes to its real gate elsewhere, so the oracle can seal instead of being held perpetually behind arms that measure something the task cannot yet fix.
+- **Non-gating oracle arms.** `pair_oracle` accepts `non_gating_arms[]` with a mandatory `non_gating_reason`. A declared known-red arm prints on every run, so the oracle can seal instead of being held perpetually behind arms that measure something the task cannot yet fix. v5 also keeps that arm open on the board until a captain ruling records how it was resolved or why the residual gap is accepted.
 - **Arbitration attribution.** An unnamed ruling used to spend nothing; a captain wrote 18 rulings against a 2/task cap by omitting task ids. The tool now falls back to the claimed task's budget.
 - **Freeze budget with escape.** `oracleForkBudget` (default 3) requires `captain_override` past that. Not a wall — friction. Every fork past #1 shows in the summary; recursion becomes impossible to un-see.
 
@@ -88,10 +88,20 @@ Two live sessions ended with a board reading `phase="DONE"`, `cycles=[]`, `gateP
 
 - **`solo` is the default composition.** One short-lived SPEC seat writes the acceptance oracle with *no repository tools at all* — no reader, no shell, no editor — then retires; you implement against the frozen standard yourself. Independence never came from a different **name** holding the pen. It came from the pen moving **before the implementation existed**, and that is the only part worth paying for. `light` and `full` remain available.
 - **A requirement coverage matrix, frozen at `pair_start`.** The goal is decomposed into `UC-N.AC-N` criteria on the board; cards bind to them through `acceptance_refs`, and the first cycle is **refused** while any criterion is unallocated. Enumerated request items — four presets, 21 controls, the 0–9 debug keys — can no longer be collapsed into one "UI complete" card that nobody can fail.
-- **`DONE` means the goal was met, not that the members went home.** `pair_stop(outcome="complete")` is a machine verdict: every task terminal, every completed task carrying its exact `gate_pass_id`, coverage 100 %, no open P0/P1, RETRO done — and the plugin **runs `green_build_command` itself**, accepting only exit 0. Pasted "all tests pass" was never evidence. It returns a `completion_receipt`, the only artefact that may close a host goal. An abandoned board stops as `ABORTED` and issues none.
+- **`DONE` means the goal was met, not that the members went home.** `pair_stop(outcome="complete")` is a machine verdict: every task terminal, every completed task carrying a gate credential current against the final board and worktree, coverage 100 %, no open P0/P1 or unruled disclosure, RETRO done — and the plugin **runs `green_build_command` itself**, accepting only exit 0. Pasted "all tests pass" was never evidence. It returns a `completion_receipt`, the only artefact that may close a host goal. An abandoned board stops as `ABORTED` and issues none.
 - **The captain cannot quietly become the Driver.** While a `full`/`light` team is live, workspace file mutations are denied to the captain — I1 already gave them to the Driver, and this makes the sentence a property of the sandbox rather than a line in a prompt. Writes outside the workspace are untouched, shells stay open (a coordinator needs `git`), and the way out is explicit and recorded: `pair_stop(outcome="aborted")`.
 - **The captain wakes on board events, not on a clock.** A running captain gets a nearest-step steer; an *idle* one gets a real follow-up turn, deduplicated per `{team, board revision, obligation}`. Goal rounds had been serving as a wait loop: two pure waiting rounds cost **572,554 tokens** and produced nothing, and the "let's wait two more rounds" they bought was **21 seconds** long. A host goal now holds the epic and completes only from the receipt; a schedule is a host-death watchdog, never a `pair_status` poller.
 - **A long turn is no longer mistaken for a dead one.** Seats carry `lastTurn` (`endReason`, `toolCalls`, `boardMutations`, `lastError`) and renew a working lease while their session is still emitting events. `idle` used to flatten *finished*, *aborted by the parent* and *crashed* into one state — which is how two Navigator turns of 480 s and 300 s, both killed mid-oracle by the parent, read as silence.
+
+### v5 — measured gaps become board obligations
+
+A visual build reached 9/9 cards and replayed 132/132 structural assertions while its rain still looked like white squares, puddles carried no readable reflections, and only the default camera had ever been inspected. Those gaps had all been disclosed; the protocol simply had no downstream owner. The same session exposed four control-plane defects that made the board harder to trust. v5 closes that measured set:
+
+- **Planning cards can be corrected.** `pair_task_amend` replaces story fields, acceptance allocation, deliverables, or dependencies before the first cycle and records a revision trail. A live claim is revoked atomically. Acceptance-changing edits invalidate the oracle; scheduling and deliverable-only edits preserve it. This replaces arbitration-budget workarounds for stale card text.
+- **Small cycles can verify small increments.** `pair_verify(stage="checkpoint")` executes the proposal's predeclared `verify_plan` and settles that cycle without claiming the task is accepted. `stage="final"` still runs the entire sealed oracle, and the gate requires at least one final ACCEPT. The granularity controller can force smaller steps after repeated rejection but never widens scope after a clean streak.
+- **Disclosure creates an obligation.** Non-gating oracle arms, oracle tuning, proposal deviations, beyond-request behaviour, and oracle bypass reasons appear under `open_disclosures`. The next-obligation engine assigns them to the captain, the digest carries them, and a successful stop is refused until each one is fixed or explicitly accepted through `pair_arbitrate(closes_disclosure=…)`.
+- **The status board has stable authority.** The versioned structured result always carries `cycles`, `risks`, and `coverage`; `goal_coverage` remains as an equal compatibility alias, while `open_risks` is the filtered view. `gate_credentials` shows the latest pass, the id bound to each task, and whether its board-state binding is current. Gate replay is idempotent; task, cycle, P0/P1-risk, oracle, or worktree changes stale the credential instead of leaving competing ids to interpret.
+- **I1's boundary is explicit.** Provisioning, vendor, probe, and scratch files inside the workspace follow the same single-writer rule as production files. Legitimate setup work goes through the Driver instead of depending on which plugin version happened to guard a path.
 
 ## The workflow
 
@@ -117,8 +127,8 @@ pair_oracle        ──►  the plugin RUNS it and refuses the freeze unless i
      (seat retires)
                                    pair_propose   declare files[] up front
                                    pair_green     minimal change + report
-                                   pair_verify    ← digest recomputed,
-                                                    command re-run,
+                                   pair_verify    ← checkpoint: proposal verify_plan
+                                                    final: digest + full oracle,
                                                     verdict DERIVED
                                    pair_gate_check replays the oracle,
                                                     checks deliverables,
@@ -140,7 +150,7 @@ Progress is reported in **accepted working increments** — never lines of code,
 /pair migrate the payment webhook to the new provider --tdd=enforce --style=ping-pong
 ```
 
-The Captain drafts stories (*"As a finance ops clerk, I want refund calls to be idempotent, so that double-charges can never hit a customer"* — a generic "As a user" or a benefit that restates the goal is **rejected by the tool** with an actionable error). The Navigator rules on every cycle. The Challenger attacks: *"P0: replayed webhook with the same id refunds twice if the idempotency check is non-atomic — use a conditional update."* Only when every cycle is ACCEPTed, no blocking risks remain, the test-first chain holds, and the DoD passes — *then* the task completes.
+The Captain drafts stories (*"As a finance ops clerk, I want refund calls to be idempotent, so that double-charges can never hit a customer"* — a generic "As a user" or a benefit that restates the goal is **rejected by the tool** with an actionable error). The Navigator rules on every cycle. The Challenger attacks: *"P0: replayed webhook with the same id refunds twice if the idempotency check is non-atomic — use a conditional update."* Only when every cycle is settled, at least one final ACCEPT exists, no blocking risks remain, the test-first chain holds, and the DoD passes — *then* the task completes.
 
 **Pairing styles** (real XP, adapted to agents):
 - `traditional` — one Driver types, one Navigator watches ahead; the Captain rotates the role so knowledge doesn't pool in one head (raises your **truck factor**).
@@ -167,7 +177,7 @@ The Captain drafts stories (*"As a finance ops clerk, I want refund calls to be 
 | `heartbeatMs` | `120000` | liveness sweep for stalled mailboxes; `0` disables. YAML-only — its interval is wired at startup, so it is deliberately absent from the live settings surface |
 | `workingLeaseMs` | `600000` | how long a seat may hold `working` without emitting a session event before the watchdog treats it as stalled; a genuinely long turn renews it. `0` disables. YAML-only |
 
-Protocol overhead is engineered down, not wished away: **event-driven monitoring** (no busy-polling), an **adaptive granularity controller** (3 clean cycles in a row → widen steps; 2 rejections → force smaller), a **3-tier cache** (durable protocol state, L2 repo-evidence cache keyed to `gitHead+path+mtime`, and byte-stable versioned personas that maximize LLM provider prompt-cache hits), and cycle budgets that make spinning impossible. Every token spent is visible in the retro report.
+Protocol overhead is engineered down, not wished away: **event-driven monitoring** (no busy-polling), a **one-way granularity brake** (2 rejections → force smaller; clean cycles never widen the approved scope), a **3-tier cache** (durable protocol state, L2 repo-evidence cache keyed to `gitHead+path+mtime`, and byte-stable versioned personas that maximize LLM provider prompt-cache hits), and cycle budgets that make spinning impossible. Every token spent is visible in the retro report.
 
 ### Runtime overrides without touching YAML (Scrum not everyone's cup of tea)
 
@@ -180,7 +190,7 @@ pair-programming:
   maxCyclesPerTask: 8   # leaner budget for exploratory work
 ```
 
-Boots without a settings provider are unaffected (the plugin keeps working exactly as composed). Boot-only fields (`stateDir`, `slashCommand`, member-spawn options) intentionally stay in the profile YAML. The fields above also ship as a **Settings → Plugins card** in the web UI: staged edits, per-field *overridden* badges with the composed value shown and a reset button, save/discard with revision fencing — no YAML required.
+Boots without a settings provider are unaffected (the plugin keeps working exactly as composed). Boot-only fields (`stateDir`, `slashCommand`, member-spawn options) intentionally stay in the profile YAML. The fields above also ship as a **top-level Settings section** (“Pair programming”, its own entry in the settings sidebar) in the web UI: staged edits, per-field *overridden* badges with the composed value shown and a reset button, save/discard with revision fencing — no YAML required.
 
 ## Install
 
@@ -200,7 +210,7 @@ Or develop against a local checkout (`link:` install per [docs](docs/README.md))
 ## Verified engineering
 
 ```sh
-npm test          # 575 assertions across 19 suites, pure-logic, offline
+npm test          # 938 assertions across 28 suites, pure-logic, offline
 npm run verify    # import gate · startup gate · package gate · typecheck — all green
 ```
 

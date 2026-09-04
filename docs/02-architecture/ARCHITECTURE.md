@@ -51,7 +51,7 @@
 │   ├── config.js                 # Config schema（schemastery）
 │   ├── defaults.js               # 默认值与枚举的唯一真源（DEFAULTS / TEAM_MODES / …）
 │   ├── settings.js               # 运行时设置命名空间（dsh-settings）
-│   ├── client.js                 # Settings → Plugins 卡片（浏览器端，逐字提供）
+│   ├── client.js                 # 设置侧栏顶级「结对编程」分区（浏览器端，逐字提供）
 │   ├── command.js                # /pair slash command + 手势边界
 │   ├── prompt.js                 # systemPrompt section：协议使用策略（稳定前缀）
 │   ├── protocol/                 # 纯逻辑，可单测，不 import runtime/tools/cordis

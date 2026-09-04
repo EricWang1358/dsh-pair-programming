@@ -1,6 +1,7 @@
 import { normalizeUseCases, allocationProblems, goalCoverage, planningCoverageError, oracleCoverageProblems } from '../lib/protocol/coverage.js';
 import { completionReadiness, makeCompletionReceipt } from '../lib/protocol/completion.js';
 import { initialProtocolState } from '../lib/protocol/machine.js';
+import { gateStateFingerprint } from '../lib/protocol/gate.js';
 
 const fails = (fn) => { try { fn(); return ''; } catch (error) { return String(error?.message ?? error); } };
 
@@ -33,8 +34,14 @@ export async function run(check) {
   check(!ready.ready && ready.failures.some(f => f.includes('t-1[in_progress]')) && ready.failures.some(f => f.includes('UC-1.AC-2')), 'D terminal success reports both unfinished work and missing executable coverage');
   team.tasks[0].status = 'completed'; team.tasks[0].gatePassId = 'g1'; team.tasks[0].oracle.caseRefs.push('UC-1.AC-2');
   team.protocol.gatePasses.push({ id: 'g1', taskId: 't-1' }); team.protocol.phase = 'RETRO';
-  ready = completionReadiness(team, { greenEvidence: '473 passed' });
+  for (const pass of team.protocol.gatePasses) {
+    pass.binding = { gateStateSha: gateStateFingerprint(team, pass.taskId), worktreeSha: 'final-tree' };
+  }
+  ready = completionReadiness(team, { greenEvidence: '473 passed', worktreeSha: 'final-tree' });
   check(ready.ready && ready.coverage.completed === 4, 'D success requires every listed criterion through a completed gated card');
+  const stale = structuredClone(team);
+  stale.protocol.decisions.push({ id: 'late', taskId: 't-1', rationale: 'changed after gate' });
+  check(!completionReadiness(stale, { greenEvidence: '473 passed', worktreeSha: 'final-tree' }).ready, 'D successful stop rejects a task credential stale against late board changes');
   const receipt = makeCompletionReceipt(team, '473 passed', 9);
   check(receipt.id.startsWith('pair-complete:') && receipt.tasks.every(t => t.gatePassId?.startsWith('g')), 'D receipt binds the epic coverage to exact task gate credentials');
   const altered = structuredClone(team); altered.tasks[0].gatePassId = 'different';

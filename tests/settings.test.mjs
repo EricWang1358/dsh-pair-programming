@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { DEFAULTS, TDD_MODES, PAIR_STYLES, TEAM_MODES, MEMBER_LIFETIMES } from '../lib/defaults.js';
+import { DEFAULTS, TDD_MODES, PAIR_STYLES, TEAM_MODES, MEMBER_LIFETIMES, CE_LANES } from '../lib/defaults.js';
 /** settings surface: schema mapping, validation, and live-override plumbing. */
 import { PairSettingsSchema, SETTINGS_NAMESPACE, parseDod, toRuntimeSettings, settingsValueError, settingsEntry, installPairSettings } from '../lib/settings.js';
 
@@ -84,6 +84,7 @@ export async function run(check) {
   check(JSON.stringify(clientArray('PAIR_STYLES')) === JSON.stringify(PAIR_STYLES), 'client PAIR_STYLES mirrors lib/defaults.js');
   check(JSON.stringify(clientArray('TEAM_MODES')) === JSON.stringify(TEAM_MODES), 'client TEAM_MODES mirrors lib/defaults.js');
   check(JSON.stringify(clientArray('MEMBER_LIFETIMES')) === JSON.stringify(MEMBER_LIFETIMES), 'client MEMBER_LIFETIMES mirrors lib/defaults.js');
+  check(JSON.stringify(clientArray('CE_LANES')) === JSON.stringify(CE_LANES), 'client CE_LANES mirrors lib/defaults.js');
   // Every field the plugin serves must be renderable, or the UI silently hides
   // a knob the runtime obeys.
   const served = Object.keys(PairSettingsSchema({}));

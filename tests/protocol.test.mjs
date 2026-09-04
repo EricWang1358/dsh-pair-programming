@@ -129,11 +129,11 @@ export async function run(check) {
   // Carrying the hammer text there would be describing a control for a party
   // that does not exist, which is the prompt bloat this mode set out to cut.
   check(!usageSectionText({ tddMode: 'enforce' }).includes('queued work by default'), 'the solo protocol omits controls for seats it does not have');
-  check(PROTOCOL_VERSION === '4', 'personas versioned at v4 after the liveness/terminal contract change');
-  // The granularity controller was dead: it filtered step==='CLOSED', which no
-  // tool ever sets, so the enlarge branch could never fire in any real session.
+  check(PROTOCOL_VERSION === '5', 'personas versioned at v5 after task amendments, checkpoints, and disclosure ownership');
+  // A clean streak says the current size worked; it cannot prove a larger
+  // patch remains reviewable. The old enlarge advice contradicted I2 live.
   const acceptedCycles = [1, 2, 3].map((n) => ({ id: `c${n}`, step: 'VERIFIED', verify: { verdict: 'accept' }, rejections: 0, attacks: 0 }));
-  check(granularitySignal(acceptedCycles).signal === 'enlarge', 'granularity: three accepted cycles now reach the enlarge branch (it keyed on an unreachable step before)');
+  check(granularitySignal(acceptedCycles).signal === 'steady', 'granularity: clean cycles stay small instead of widening implementation scope');
   check(granularitySignal([...acceptedCycles, { id: 'c4', step: 'GO', rejections: 2 }]).signal === 'shrink', 'granularity: a twice-rejected live cycle still forces a smaller step');
 
 }

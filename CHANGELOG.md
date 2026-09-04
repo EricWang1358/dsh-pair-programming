@@ -7,6 +7,517 @@ protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 
 ## [Unreleased]
 
+## [0.12.5] — 2026-09-04
+
+### Changed — the settings card is now a top-level settings section
+
+- `lib/client.js` registers on the `settings.section` slot (id
+  `pair-programming`) instead of `settings.plugin.item`: **结对编程** gets its
+  own entry in the settings sidebar instead of living inside
+  插件 → 插件配置. The card component, staged-edit form and revision fencing
+  are unchanged; the section supplies its own locale binder (`t`) because the
+  section shell passes only `close`.
+- This intentionally supersedes the 0.12.4 pin "the settings slot name —
+  `settings.plugin.item` matches the shell": that described the shell this
+  release replaces.
+
+### Added — a captain key-moment table for the armed CE lane
+
+- With a pair lane on (`advisory`/`full`), the system-prompt prefix now names
+  the four moments where the captain — the seat with the widest board view —
+  is expected to load an analytical CE skill: **ce-proof** against the
+  evidence chain before every `pair_gate_check` pass, **ce-pov** before a
+  `pair_arbitrate` ruling that picks between two live readings, **ce-debug**
+  before closing a P0/P1 risk ticket and after a second stalled round on the
+  same seat, and **ce-code-review** over the finished diff surface at
+  `pair_retro`. Routine GO/step traffic never justifies a load — the cadence
+  is pinned in the prefix, not left to taste.
+- Lane `off` renders nothing (byte-identical prefix); lane `captain` renders
+  no table either, because gesture-served skills cannot be self-loaded by a
+  seat. Every load is still recorded on the board, so cadence is auditable.
+
+### Fixed — the member wake called an API the host never had
+
+- `deliverToMember` called `ctx.subagents.followup(captain, childId, …)`. The
+  service has **no `followup`** — it lives on Agent *handles* only — so the
+  plugin's auto-wake leg was a phantom and **never once succeeded**: the
+  surrounding try/catch swallowed the TypeError into
+  `{ ok: false, "the host refused the wake" }`, every mailbox delivery
+  starved into the 120s heartbeat sweep, handoffs degraded to sweep-cadence
+  (one member working at a time, everyone idle in between), and recovery ran
+  through the captain relaying `send_message` by hand. Five live-session
+  STALL reports could not say why; this is why — and part of the 151-captain-
+  relay / zero-`pair_verify` ledger in `obligation.js` was this bug, not the
+  protocol.
+- `deliverToMember` now calls `ctx.subagents.sendMessage(sender, targetId,
+  content, { signal })` — model-authored mail between adjacent Agents. Chosen
+  over the `prompt` control face deliberately: `prompt` records **one human
+  message**, so protocol mail would impersonate the user in the child's
+  session history, and it refuses an absent child (`subagent/not-resumable`)
+  where `sendMessage` documents the **cold resume** the scheduler's recovery
+  path needs. The returned inbox `MessageId` surfaces in the ok result, so a
+  wake that landed is distinguishable from one that did not. Seven test
+  fixtures migrated off the phantom shape; new assertions pin the adjacency
+  contract (exact live captain Agent as sender, member session id as target,
+  single text ContentBlock, caller signal passed through).
+- New static guard in `host-contract.test.mjs`: every `ctx.subagents.<method>`
+  literal call in `lib/` is asserted to exist in the host package's declared
+  surface — the whole phantom-API family, not just this one, is now machine-
+  checked. Literal-scan limitation (aliases) stated in the guard's comment.
+- Effect: handoff latency returns from "up to one sweep + captain relay" to
+  event-driven; the designed pre-work overlap (navigator pre-reads while the
+  driver writes, challenger pre-arms) works again without captain relay.
+
+## [0.12.4] — 2026-09-04
+
+### The audit behind 0.12.3: why 893 tests missed a four-release outage
+
+Not one test, and not `scripts/verify-startup.mjs` either, had ever mounted a
+real host service. Every suite handed `apply()` a hand-written object per
+service, and a stub agrees with the code that wrote it by construction: it can
+check that we call `register`, never that what we pass is something the host
+would accept. Three host contracts were audited by mounting the real
+registries; two held, one was already broken (0.12.3), and one turned out to be
+a documentation landmine.
+
+### Added — tests that go through the host
+
+- **`host-contract.test.mjs`** mounts the real `ToolRuntime`, `SystemPromptService`,
+  `CommandRuntime` and `SkillRegistry` on a real Cordis context and runs the
+  real `apply()`. It pins all 22 tool schemas as the registry accepts them, the
+  `/pair` descriptor including `input.images`, the prompt section, and that a
+  catalog fetch never throws and every candidate carries a string `provider`.
+- **`events.test.mjs`** pins the session-event guard and, more importantly, the
+  harness facts that make it correct.
+
+### Fixed — a comment that invited a catastrophic change
+
+`lib/events.js` claimed the plugin's events let "the web client fold a protocol
+timeline from the session log". They cannot, and the guard that drops all six
+`pair/*` types is load-bearing rather than a defect:
+
+- `Session.append()` does not check the type and would write ours happily;
+- `KNOWN_SESSION_EVENT_TYPES` is a READ-path set whose own header says
+  downstream plugin events are outside it **by construction**;
+- `dsh-session-persistence.assertEventsSupported` then **throws
+  `SessionFormatUnsupportedError`** on any persisted event outside that set,
+  refusing to interpret the entire log;
+- `ignorable` is the designed escape hatch and `append()` offers no way to set it.
+
+So "fixing" the guard to make events appear would trade a UI panel nobody has
+for sessions that cannot be resumed. The comment now says that, and the test
+fails if a future harness changes it — making the change deliberate.
+
+### Audited and sound
+
+- **Tool schemas** — all 22 accepted by the real `ToolRuntime`.
+- **Settings** — both namespaces register on the real file-backed provider;
+  schema, base layer and validation round-trip. Cross-checked that no schema
+  field is missing from `settingsEntry` or `toRuntimeSettings`, which would
+  silently ignore a composed YAML value.
+- **The command descriptor** — accepted by the real `CommandRuntime`.
+- **The settings slot name** — `settings.plugin.item` matches the shell.
+
+### Still unverified by tests, stated rather than implied
+
+`llm`, `agents` and `subagents` have no standalone mount (they need a live
+model, a session store and a child-agent driver), so `startContinuable`'s
+request shape and the browser card's contract with the real web shell remain
+covered only by live runs.
+
+## [0.12.3] — 2026-09-04
+
+### Fixed — the CE catalog was dead in a live session
+
+A real run failed with:
+
+    skill provider "pair-ce" returned skill "ce-code-review" with a non-string provider
+
+`dsh-skill` validates every listed candidate and requires `provider` to be a
+string equal to the registering provider's own name. Our `list()` never set it,
+so the FIRST catalog fetch in a live session threw and no CE skill was ever
+served — from V5.3b (0.8.0) until a user hit it.
+
+- Candidates now carry `provider: CE_PROVIDER_NAME`.
+- **New `ce-registry.test.mjs` drives the real `SkillRegistry` on a real Cordis
+  context**, because that is the only thing that checks: 45 assertions across
+  the CE suites called `makeCeProvider(...)` directly and inspected the object
+  we returned, which is exactly the shape of test that cannot see a host
+  contract violation. It asserts the accepted catalog, the invocation split
+  through the host's own predicates, the loaded body with its boundary, the
+  solo lane, and disposal — and pins the broken shape as a regression with the
+  registry's own error text.
+
+This is the second dead composition under green unit tests in this integration
+(the persona push was the first, fixed in 0.12.1). The rule now recorded in the
+design notes: **when a contract belongs to the host, test through the host.**
+
+## [0.12.2] — 2026-09-04
+
+### Fixed — `/pair` refused image attachments
+
+Submitting `/pair` with a screenshot was rejected by the composer with "/pair
+does not accept image attachments". The message comes from the host
+(`dsh-client-ui-commands`), but this plugin caused it: a command admits images
+only by declaring `input.images: true`, and `/pair` declared only a hint. The
+gate is enforced twice — the composer refuses before dispatch, and the registry
+refuses again at execution — so the goal never reached the handler.
+
+That closed the front door on precisely the work this protocol was hardened on.
+The retrospective quoted throughout this codebase is a visual project that
+shipped rain as white squares and puddles with no reflections; a goal about how
+something LOOKS has to be able to show it.
+
+- `/pair` now declares `input.images: true` and forwards
+  `invocation.attachments` into the activation follow-up, text first so the
+  gesture boundary still matches on the activation line.
+- A goal with images but no text stays a usage error, and says the images are
+  retained — returning an error is what makes the composer keep the originals,
+  so a refused submission never costs the user their screenshots.
+- New `command.test.mjs` pins the declaration, the ordering, the retention on
+  refusal, and that the no-attachment path is unchanged.
+
+## [0.12.1] — 2026-09-04
+
+### Fixed — the persona push was unreachable, and its contract comment was false
+
+An external review found the flagship push path dead in the default
+configuration. It was worse than reported: three independent reasons, each
+invisible to a unit test on the function itself.
+
+- **The loader did not state its lane.** `ce.load` called the provider with no
+  `cwd`, the resolver read that as "no team live", and the solo lane answered —
+  which at the shipped default (`ceSoloLane: off`) serves nothing, so the push
+  silently produced an empty appendix. With a solo lane on it was worse: it
+  would have pushed a body with NO ownership boundary into a live team's seat,
+  the exact misread the boundary exists to prevent. The loader now states
+  `teamLive: true`, which is a fact about a respawn rather than something to
+  infer, and the provider honours an explicit override.
+- **The trigger named a step that cannot exist.** `cycleStep === 'REFACTOR'`
+  never matches under `oracleFirst` (the default), because an oracle cycle
+  folds REFACTOR into GREEN and `pair_refactor` refuses a separate round.
+- **And no step is current at a respawn anyway.** A seat is recycled only after
+  a cycle was ACCEPTED, so the last cycle always carries a verdict and
+  `currentStepOf` returns `undefined` at exactly the moment the persona is
+  composed. The trigger is now a board phase — `post-green`: the live task has
+  an accepted cycle and is still open — which is reachable, and is the same
+  intent ("advice about shape, once behaviour holds").
+- **An integration test now covers the assembly**, not the pieces: the real
+  loader wiring, a live team, and an assertion that the pushed body carries the
+  boundary and lands in the ledger as `teamLive: true`. The dead shape is
+  pinned as a regression.
+
+### Fixed — other review findings
+
+- **`get()` reads the lane through the cache.** A team going live inside the
+  5s resolver TTL could otherwise be served a solo body; that is the one
+  staleness that matters, since the body is what carries the boundary.
+- **The write-lane refusal now names a way out.** It states the false-positive
+  edge (attribution is workspace-and-window, so an unrelated load in the same
+  workspace lands there too), lists three executable exits, and says plainly
+  that there is no exemption flag, so nobody hunts for one.
+
+### Verified, not changed
+
+- **`modelInvocable: false` is enforced, not merely declared.** The review
+  flagged it as an unverified claim. `dsh-tool-skill` filters the catalog with
+  `isModelInvocable` and refuses a `skill` call with it twice (on the summary
+  and again after load). A test now pins our invocation objects against the
+  host's own predicates from `@deepseek-ai/dsh-skill`.
+
+### Known limitations, now written down
+
+- **Semantic drift is not guarded.** The closed allowlist stops a CE upgrade
+  from adding skills, and a changed version or count raises `reviewNeeded`, but
+  an existing skill whose body changes meaning under the same name is served
+  verbatim behind a routing line we authored. The fingerprint records the
+  commit; the provider serves whatever the checkout currently holds.
+- **Attribution is workspace-scoped.** With one workspace and several
+  concurrent tasks, a legitimate write-lane load can refuse an unrelated card's
+  credential. Deliberate: the gate errs toward refusing.
+
+## [0.12.0] — 2026-09-04
+
+### V5.5 — two CE lanes, chosen by whether a pair team is live
+
+Standalone CE and CE-inside-the-protocol are different tools with different
+risks, and until now one setting had to serve both. With no team running there
+is no single-writer invariant to protect and no completion receipt to keep
+fresh, so `ce-work` and the shipping family are exactly what CE is for. The
+moment a team goes live those same skills would put a second execution loop
+behind the same worktree. So the lane is no longer a knob anyone has to
+remember to flip — it follows the board.
+
+- **`ceSoloLane`** (`off` | `gesture` | `curated` | `full`) governs a session
+  with no live pair team; **`ceLanes`** governs one with a team. The provider
+  resolves which applies per workspace on every catalog fetch, cached for a few
+  seconds, and an unreadable state directory errs narrow (assume a team is live)
+  rather than widening the lane.
+- **Measured cost of each lane** — `gesture` 0 tokens/step (every skill, human
+  `/name` only), `curated` ~160, `full` ~744 for all 33. CE's own frontmatter
+  for the same 33 is 7,487 characters (~1,870/step), so the authored routing
+  lines cut the widest lane to roughly 40% of forwarding them.
+- **The ownership preamble is pair-mode only.** Prefixing "the pair protocol
+  owns every write" onto a skill running in a session with no protocol would be
+  a claim the model then has to reconcile against a workspace where it is false.
+- **The catalog is one table** of all 33 rows with their lane placement, so the
+  three-way partition and the two lanes cannot drift apart, and the allowlist
+  digest covers every row.
+
+## [0.11.1] — 2026-09-04
+
+### Fixed
+
+- **The write-lane refusal could not actually fire.** V5.3d's gate check read a
+  ledger written only by this plugin's own `provider.get()`, and this plugin
+  never serves a write-lane skill — so the refusal was unreachable on exactly
+  the configuration it was written for: a CE checkout wired into an ordinary
+  skill root (`~/.agents/skills`, `~/.dsh/skills`, `customSkillDirs`), where
+  every load is served by `dsh-skill-filesystem` instead. The rule was right;
+  the observation was in the wrong place.
+- **Loads are now observed at the tool pipeline.** Every skill load from every
+  provider is a `skill` tool call, so a `tools/pre-execute` listener — the same
+  hook the board write guard uses, for the same reason — records CE loads into
+  the ledger regardless of who served the body. It is installed unconditionally
+  (including with `ceLanes: off`, since a user can wire CE into a skill root
+  without telling this plugin anything), costs one string compare per tool
+  call, and never denies a call: loading a skill is not the violation, issuing
+  a completion credential afterwards is.
+
+## [0.11.0] — 2026-09-04
+
+### V5.4 — a retro entry earns its place in the long-lived store
+
+The failure this closes is not a missing retrospective. It is one that works:
+every session produces keep/try items, every one is carried into the next
+session's planning and into the board digest every recycled seat reads, and
+nothing ever removes one. The store grows monotonically while each individual
+entry looked reasonable on the day it was written.
+
+- **Two destinations, not one.** `retro.md` takes everything and costs nothing
+  later. The cross-session store is a prompt input, so an entry reaches it only
+  as an object answering the counterfactual: `{lesson, counterfactual,
+  reuse_trigger, evidence[]}`, and `rederivable_from` disqualifies anything the
+  repository already says. A bare string is archived rather than carried, and
+  the tool reports what it archived and why — nothing a captain wrote is lost.
+- **A cap that forces ranking.** At most `maxCarriedLessons` (default 3)
+  entries are carried; a retro that proposes more admissible entries is refused
+  with the candidates listed, because which ones matter is a judgement the
+  captain has to make and a silent truncation would make it invisibly.
+- **The answers travel with the entry,** so a later session can judge whether a
+  carried lesson still holds instead of inheriting an unattributed assertion.
+  The board digest renders structured entries as their text.
+
+## [0.10.0] — 2026-09-04
+
+### V5.3d — every load is on the record, and a second loop refuses the credential
+
+- **The load ledger.** Every CE body this plugin serves is appended to
+  `<stateDir>/ce-loads.jsonl`. `get()` is our code, which is the whole reason
+  to own the provider; a failed audit line never breaks a working skill.
+- **The gate reads it.** `pair_gate_check` inspects the window from the task's
+  earliest cycle: if a skill that owns an execution loop or a shipping action
+  (`ce-work`, `lfg`, the commit/PR/worktree family) was loaded in that window,
+  no gate credential is issued — a credential binds a claim to a worktree, and
+  a second scheduler behind that worktree makes the binding describe a state
+  nobody owned. `pair_stop` applies the same rule to the completion receipt
+  over the team's whole window.
+- **Two honesty rules in that check.** This plugin never serves those skills,
+  so a hit always means another skill root, and the refusal says so. And an
+  unreadable ledger fails: "we could not look" must never resolve the same way
+  as "nothing happened". A deployment that never wired a ledger is unaffected.
+- **Attribution is stated, not implied.** `get()` receives a cwd and no caller
+  identity, so a load is attributed to a workspace and a time window rather
+  than to a seat, and the refusal text says exactly that.
+- **The one push case.** Lane `full` hands the Driver `ce-simplify-code` in its
+  persona at respawn, and only while the open cycle is at REFACTOR. It loads
+  through the same provider — same allowlist check, same boundary preamble,
+  same ledger entry — is capped at 2,400 characters with the cut declared, and
+  is cached per CE commit so a per-cycle respawn does not re-read it. A failing
+  or missing body pushes nothing rather than half a persona.
+
+## [0.9.0] — 2026-09-04
+
+### V5.3c — the advisory catalog, with its price on the label
+
+- **`pair_status` names the lane.** The active CE lane, the size of the model
+  catalog it publishes, the detection it serves from, and the advisory boundary
+  are one board line — because a lane changes what a seat can load mid-cycle,
+  and that is protocol state a captain must read without leaving the tools.
+- **Cost is reported, not assumed.** `catalogCost(lane)` measures what a lane
+  adds to the per-step catalog; the Settings card shows it beside the lane
+  selector, and the derived namespace carries it. Lane `advisory` publishes 7
+  skills for ~140 repeated tokens per step, against the 4,571 characters CE's
+  own frontmatter would cost for the same set. This is the number the
+  integration's measurement gate is meant to be argued with.
+- **The system prompt gains a CE paragraph only when a lane is on.** With
+  `ceLanes: off` the section is byte-identical to a build without the
+  integration, so nobody pays a prefix for a feature they never enabled.
+- **A lane switch republishes the price without re-reading the disk** — nothing
+  on disk changed, so a re-probe would be theatre.
+
+## [0.8.0] — 2026-09-04
+
+### V5.3b — the CE skill provider, and the user/model surface split
+
+- **This plugin owns the provider** (`ctx.skills.registerProvider`) instead of
+  pointing `dsh-skill-filesystem` at CE's `skills/`. That buys the closed
+  allowlist, a rank (700) that can never shadow a local skill of the same name,
+  descriptions we author, and one observation point: `get()` is our code.
+- **The surface split is the token story.** The five constructive skills
+  (`ce-brainstorm`, `ce-ideate`, `ce-strategy`, `ce-plan`, `ce-compound`) are
+  served with `modelInvocable: false` — they never enter a model catalog and
+  cost zero repeated tokens, reachable only when a human types `/<name>`. The
+  seven analytical skills enter the catalog for 532 characters of authored
+  routing lines, against 4,571 characters for CE's own frontmatter.
+- **Every served body carries the ownership boundary first:** the pair protocol
+  owns all writes to product code, the skill's own execute/commit/PR steps are
+  not to be run here, findings return through the pair tools, and the frozen
+  oracle is sealed. CE's own text then follows verbatim, with its frontmatter
+  stripped.
+- **The provider is registered once and reports an empty catalog** when the
+  lane is `off` or no checkout was detected. `dsh-tool-skill` sends no catalog
+  tokens for an empty list, so an idle integration costs nothing, while a
+  provider that appeared and disappeared would append a full replacement
+  catalog to every live session on each toggle.
+- **Known limit, stated rather than papered over:** `SkillProvider.list/get`
+  receive no caller identity and the registry's scope layers belong to
+  agent-preset compositions, not to members spawned through `startContinuable`.
+  Per-role filtering is therefore impossible in the provider; it lives in the
+  member `toolFilter` and in the gate that reads the load record (V5.3d).
+
+## [0.7.0] — 2026-09-04
+
+### V5.3a — read-only Compound Engineering detection
+
+- **Detect button in the Settings card.** The card is browser code with three
+  services and no filesystem, so the button cannot detect anything itself: it
+  writes `ceProbeToken`, the host observes that committed change, probes the
+  filesystem read-only, and publishes the result into a second, host-owned
+  namespace (`pair-programming-ce`) the card renders. Settings as a one-shot
+  RPC; a typert Remote is the documented upgrade path, not a V5.3 dependency.
+- **Detection is read-only, always.** Candidate roots are an explicit `cePath`,
+  `~/.dsh/packages/compound-engineering-plugin`, and the Claude Code v2
+  registry's `installPath`. Identity is CE's own manifest plus a non-empty
+  `skills/`; the commit is resolved by reading `.git` (ref, detached, or
+  `packed-refs`) rather than spawning git. Nothing is downloaded, cloned, or
+  written into a skill root — installing CE stays the user's own action.
+- **A fingerprint, not a boolean.** `path + version + commit + skill count +
+  our own allowlist digest` identifies a detection, so a CE upgrade *or* an
+  edit to our allowlist invalidates a recorded link, exactly as a gate
+  credential is invalidated by a moved board or worktree.
+- **The allowlist (`lib/integrations/ce-catalog.js`) is closed** and accounts
+  for the whole reviewed release: 12 exposed, 9 refused as write-lane/shipping
+  (`ce-work`, `lfg`, the commit/PR/worktree family), 12 reviewed-but-deferred.
+  A CE upgrade that adds a skill exposes nothing until a human adds a row, and
+  a changed skill count raises `reviewNeeded` on the card. Descriptions are
+  authored here rather than forwarded: a model catalog costs repeated input
+  tokens on every step, and CE's own frontmatter for these skills runs 4,571
+  characters.
+- **`ceLanes` defaults to `off`,** which registers no provider at all — a
+  deployment without CE, or one that does not want it, pays exactly zero
+  tokens. `captain` exposes only the user-gesture surface, which is still zero
+  model-facing tokens.
+
+## [0.6.0] — 2026-09-04
+
+### V5.2 — a ruling says what happened to the gap, and where the residual lives
+
+- **`disposition` is required** on any `pair_arbitrate(closes_disclosure=...)`:
+  `fixed` (the gap is gone and the evidence shows it), `accepted` (it ships
+  as-is, knowingly), or `deferred` (postponed to named later work).
+- **A residual must have a durable home.** `accepted` and `deferred` also
+  require `sink` (`board | issue | document | pr`) and a traceable `sink_ref`.
+  The measured failure this closes is a real ruling — "accept visual arm as
+  backlog" on a board that had no backlog: it read as settled, the disclosure
+  left the open list, and the residual survived only in a session transcript.
+  `fixed` needs no sink; its evidence is the record.
+- **Residual ledger.** `pair_status` renders `Residual ledger:` and returns
+  `residual_ledger`; the `completion_receipt` carries every non-`fixed`
+  residual with its sink, so a receipt can be audited against a board that
+  legitimately accepted or deferred something.
+- **Legacy rulings stay visible without being retroactively fatal.** A pre-V5.2
+  decision that closed a gap with no disposition appears in the attention set
+  as `unsunk-residual` and never blocks completion — the enforcement point is
+  the tool, and no ruling written from here on can reach that state.
+
+## [0.5.0] — 2026-09-04
+
+### V5.1 — one attention set, and a bounded resume after a token cut-off
+
+- **Attention Set (`lib/protocol/attention.js`).** One projection recomputed
+  from the board at every wake, replacing three independent readers of the same
+  state: blocking P0/P1 risks, gate credentials that stopped binding, seats cut
+  off at the token ceiling, the owed protocol call, and every unruled
+  disclosure — ordered by urgency. `pair_status` prints it, its structured
+  result carries `attention_set`, the board digest carries the top five, and the
+  stall escalation carries it verbatim, so a captain can no longer be told one
+  thing and refused at `pair_stop` for a reason nothing had shown.
+- **Bounded resume after `max-tokens`.** A turn truncated at the output-token
+  ceiling ends *normally*: the seat goes idle, the board never moved, and the
+  nudge dedupe (keyed on an unchanged debt) suppressed the one message that
+  would have restarted it. The scheduler now recognises the cut-off, continues
+  the seat from the current board state at most `maxTokenResumes` times (default
+  2) for the same owed call on the same board revision, and then parks it as a
+  captain ruling. A board that actually moved refunds the budget; long
+  truncated prose does not, because only a board mutation changes `updatedAt`.
+- **`maxTokenResumes`** joins `heartbeatMs`/`workingLeaseMs` as YAML-only
+  liveness tuning; `0` escalates on the first truncation.
+
+### Protocol v5 — disclosed gaps have an owner
+
+Built from a measured visual-project retrospective: 9/9 cards and 132/132
+structural assertions passed while rain still rendered as squares, puddle
+reflections were unreadable, and only the initial camera had been inspected.
+The gaps had been disclosed, but the protocol did not turn disclosure into work.
+
+### Added
+- **Amendable planning cards.** `pair_task_amend` can replace story fields,
+  acceptance allocation, deliverables, dependencies, subject, and description
+  before the first cycle. It records a revision trail and atomically revokes a
+  live attempt. Acceptance-changing edits invalidate a frozen oracle;
+  scheduling and deliverable-only changes preserve it.
+- **Staged computed verification.** `pair_verify(stage="checkpoint")` settles a
+  deliberately partial cycle by executing the proposal's predeclared
+  `verify_plan`. It never claims final acceptance. `stage="final"` still runs
+  the complete sealed oracle, and the gate requires at least one final ACCEPT.
+- **Disclosure obligations.** Non-gating oracle arms, oracle-directed tuning,
+  deviations from the approved proposal, beyond-request behaviour, and explicit
+  oracle bypasses now appear in `pair_status.open_disclosures` and the board
+  digest. The next-obligation engine assigns them to the captain, and successful
+  stop is blocked until each ref is closed by an auditable
+  `pair_arbitrate(closes_disclosure=...)` ruling.
+- **Planning and control-plane regressions.** New suites cover task amendment,
+  disclosure ownership/closure, staged verification, idempotent gate replay,
+  credential staleness, and completion-time board binding.
+
+### Fixed
+- **Gate credential identity and binding.** Replaying an unchanged gate reuses
+  the same `gate_pass_id`. A pass is bound to the task contract, cycles, task
+  decisions, P0/P1 risk state, oracle, worktree, and executed gate command.
+  Material post-gate changes produce `GATE_STALE`; a legitimate transition to
+  `completed` does not stale its own credential. Successful stop rechecks every
+  credential against the final board and worktree. The task carries the id as
+  soon as the gate passes instead of relying on a later seat report.
+- **Status board drift.** The versioned structured result always exposes
+  `cycles`, the complete durable `risks` register, and canonical `coverage`;
+  `goal_coverage` remains as an equal compatibility alias and `open_risks` as
+  the filtered view. `gate_credentials` names the latest pass, the id bound to
+  each task, and whether the board-state binding is current.
+- **Acceptance criteria disappeared from the board digest.** The digest read a
+  nonexistent top-level `acceptanceCriteria` property. It now reads the stored
+  `story.acceptance_criteria` contract.
+
+### Changed
+- **Granularity only tightens automatically.** Two rejections still force a
+  smaller next cycle. A clean streak no longer widens implementation scope;
+  that suggestion contradicted the small-step invariant in the session that
+  exposed it.
+- **I1 now names its complete workspace boundary.** Tooling, provisioning,
+  vendor, probe, and scratch files inside the workspace follow the same
+  single-writer rule as production files. There is no role-dependent setup-file
+  exception.
+
 ## [0.4.1] — 2026-09-04 — the invariants stop being advisory
 
 Five defects found by reading one live `full`-mode session end to end. Four of

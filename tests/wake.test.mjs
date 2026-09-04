@@ -38,7 +38,7 @@ function stalledHarness(root, kicks, { followupOk = false, captainLive = true, s
     logger: { warn: () => {}, debug: () => {}, error: () => {} },
     tools: { register: (d) => { defs.push(d); } },
     agents: { get: (id) => (captainLive && id === 'cap1' ? { id: 'cap1', session: { append: () => {} } } : undefined) },
-    subagents: { followup: async () => { if (!followupOk) throw new Error('followup refused'); return true; } },
+    subagents: { sendMessage: async () => { if (!followupOk) throw new Error('followup refused'); return 'm-1'; } },
   };
   registerWakeRuntime(ctx, { kickMember: async (workspace, teamId, memberName) => { kicks.push(`${teamId}/${memberName}`); } });
   registerFlowTools(ctx, { stateDir, tddMode: 'enforce', maxCyclesPerTask: 12 }, { scheduler: {} });
@@ -138,7 +138,7 @@ export async function run(check) {
     const hctx = {
       logger: { warn: () => {}, debug: () => {} }, on: () => {},
       agents: { get: (id) => (id === 'cap1' ? { id: 'cap1', session: { append: () => {} } } : undefined) },
-      subagents: { followup: async (_cap, childId, content) => { followups.push({ childId, text: content[0].text }); return true; } },
+      subagents: { sendMessage: async (_sender, targetId, content) => { followups.push({ childId: targetId, text: content[0].text }); return 'm-1'; } },
     };
     const hsched = installPairScheduler(hctx, { stateDir: 'h-state', heartbeatMs: 0 });
     await hsched.kickMember(root, 'n1', 'navigator');
@@ -178,7 +178,7 @@ export async function run(check) {
     const rctx = {
       logger: { warn: () => {}, debug: () => {} }, on: () => {},
       agents: { get: (id) => (id === 'cap1' ? { id: 'cap1', status: 'idle', followup: (m) => { steers.push(m.content[0].text); }, session: { append: () => {} } } : undefined) },
-      subagents: { followup: async () => { throw new Error('continuable subagents are draining; the operation was not admitted'); } },
+      subagents: { sendMessage: async () => { throw new Error('continuable subagents are draining; the operation was not admitted'); } },
     };
     const rsched = installPairScheduler(rctx, { stateDir: 'r-state', heartbeatMs: 0 });
     await rsched.kickMember(root, 'r1', 'navigator');
