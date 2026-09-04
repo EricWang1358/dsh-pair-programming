@@ -15,7 +15,17 @@ export interface Config {
   maxOpenRisks?: number;
   planningMaxArbitrations?: number;
   dodCommand?: string;
-  defaultMode?: 'full' | 'light';
+  defaultMode?: 'solo' | 'light' | 'full';
+  tddMode?: 'enforce' | 'coach' | 'off';
+  pairStyle?: 'traditional' | 'strong' | 'ping-pong';
+  spikeMaxCycles?: number;
+  greenBuildOnStop?: boolean;
+  dod?: string;
+  oracleFirst?: boolean;
+  memberLifetime?: 'cycle' | 'session';
+  oracleForkBudget?: number;
+  heartbeatMs?: number;
+  workingLeaseMs?: number;
   evidenceCache?: boolean;
   promptSectionOrder?: number;
   slashCommand?: boolean;

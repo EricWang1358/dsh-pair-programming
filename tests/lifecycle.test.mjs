@@ -10,7 +10,7 @@ import { registerRiskTools } from '../lib/tools/risk.js';
 import { registerArbitrateTools } from '../lib/tools/arbitrate.js';
 import { registerFlowTools } from '../lib/tools/flow.js';
 import { openRisk } from '../lib/protocol/risks.js';
-import { appendMailbox, createMessage, claimMailboxDelivery, releaseMailboxDelivery, acknowledgeMailbox } from '../lib/state/mailbox.js';
+import { appendMailbox, createMessage, claimMailboxDelivery, releaseMailboxDelivery, acknowledgeMailbox, readUnreadMailbox } from '../lib/state/mailbox.js';
 import { initialProtocolState, openCycle } from '../lib/protocol/machine.js';
 
 function mockCtx() {
@@ -68,7 +68,7 @@ function stopHarness(root, { greenBuildOnStop = false, stateDir = 'stop-state' }
   };
   registerLifecycleTools(ctx, { stateDir, greenBuildOnStop }, { selections: {}, scheduler: {} });
   const captain = { id: 'cap1', session: { header: { cwd: root }, append: () => {} } };
-  return { interrupts, defs, captain, stateRoot: join(root, stateDir) };
+  return { interrupts, defs, captain, ctx, stateRoot: join(root, stateDir) };
 }
 
 /** pair_start against a mock ctx; the failOnCall-th role refuses to spawn. */
@@ -106,6 +106,16 @@ function teamFixture(over = {}) {
   return { id: 't1', name: 'T1', goal: 'g', mode: 'full', captainSessionId: 'cap1', createdAt: Date.now(), updatedAt: Date.now(),
     members: [memberOf('child-1', 'driver'), memberOf('', 'navigator')], tasks: [], taskSeq: 0,
     protocol: initialProtocolState(), evidenceStats: { cacheHits: 0, cacheMiss: 0 }, ...over };
+}
+
+const USE_CASES = [{ actor: 'maintainer', intent: 'change the plugin', outcome: 'ship verified behavior', acceptance_criteria: ['the requested behavior passes'] }];
+function successfulTeam(over = {}) {
+  const protocol = { ...initialProtocolState(), phase: 'RETRO', gatePasses: [{ id: 'gp-1', taskId: 't-1', at: 1 }] };
+  return teamFixture({
+    useCases: [{ id: 'UC-1', actor: 'maintainer', intent: 'change', outcome: 'ship', acceptanceCriteria: [{ id: 'UC-1.AC-1', text: 'passes' }] }],
+    tasks: [{ id: 't-1', subject: 's', status: 'completed', gatePassId: 'gp-1', acceptanceRefs: ['UC-1.AC-1'], oracle: { caseRefs: ['UC-1.AC-1'] }, dependencies: [], createdAt: 1, updatedAt: 1 }],
+    protocol, processLessons: { at: 1, keep: ['x'], try: [] }, ...over,
+  });
 }
 
 export async function run(check) {
@@ -151,30 +161,37 @@ export async function run(check) {
     const stop = h.defs.find((x) => x.name === 'pair_stop');
     check(!!stop && typeof stop.execute === 'function', 'pair_stop definition captured from ctx.tools.register');
     await createTeamDir(h.stateRoot, teamFixture());
-    const res = await stop.execute({ reason: 'wrap up' }, { agent: h.captain });
+    const res = await stop.execute({ outcome: 'aborted', reason: 'wrap up' }, { agent: h.captain });
     check(res.retired === 1, 'pair_stop counts only members with a real session id');
     check(JSON.stringify(h.interrupts) === '["child-1"]', 'pair_stop interrupts the spawned member only');
-    check((await readTeam(h.stateRoot, 't1')).protocol.phase === 'DONE', 'pair_stop persists DONE');
+    const aborted = await readTeam(h.stateRoot, 't1');
+    check(aborted.protocol.phase === 'ABORTED' && aborted.protocol.completionReceipt === undefined, 'pair_stop persists honest ABORTED without a success receipt');
+    check(aborted.members.every(m => m.id === '' || m.status === 'removed'), 'pair_stop marks retired seats removed on the canonical board');
     check(JSON.stringify(JSON.parse(await readFile(join(h.stateRoot, 'retired-members.json'), 'utf8'))) === '["child-1"]', 'pair_stop audit record holds the spawned id');
     const stranger = { id: 'cap9', session: { header: { cwd: root }, append: () => {} } };
     check(await rejects(() => stop.execute({}, { agent: stranger }), 'do not belong'), 'a caller with no team fails loudly');
     const member = { id: 'child-1', session: { header: { cwd: root }, append: () => {} } };
-    check(await rejects(() => stop.execute({}, { agent: member }), 'only the captain'), 'a non-captain caller is refused');
+    check(await rejects(() => stop.execute({}, { agent: member }), 'do not belong'), 'a retired member is disconnected from the archived team');
     // B-1: pair_rotate is refused outright until capabilities follow the role (M2').
     const rotate = h.defs.find((x) => x.name === 'pair_rotate');
     check(await rejects(() => rotate.execute({ new_driver: 'navigator', handoff_note: 'x' }, { agent: h.captain }), 'bound at spawn'), 'pair_rotate refuses its own captain');
-    check(await rejects(() => rotate.execute({ new_driver: 'navigator', handoff_note: 'x' }, { agent: member }), 'only the captain'), 'a non-captain hits the permission guard first');
+    check(await rejects(() => rotate.execute({ new_driver: 'navigator', handoff_note: 'x' }, { agent: member }), 'do not belong'), 'a retired member cannot route back into lifecycle tools');
     // F1-a: pair_interrupt is the captain's hammer over exactly one live turn.
     const hi = stopHarness(root, { stateDir: 'int-state' });
     const hammer = hi.defs.find((x) => x.name === 'pair_interrupt');
     await createTeamDir(hi.stateRoot, teamFixture());
+    const queued = createMessage('captain', 'driver', '[PAIR:INFO] stale');
+    await appendMailbox(hi.stateRoot, 't1', 'driver', queued);
+    let cleared = false;
+    hi.ctx.agents.get = (id) => id === 'child-1' ? { cancel: () => { cleared = true; } } : undefined;
     const ir = await hammer.execute({ member: 'driver', reason: 'cycle stuck' }, { agent: hi.captain });
     check(JSON.stringify(hi.interrupts) === '["child-1"]' && ir.interrupted === 'driver' && ir.reason === 'cycle stuck' && ir.delivered === true, 'pair_interrupt reports the session it cancelled and that delivery worked');
+    check(cleared && ir.discarded === 1 && (await readUnreadMailbox(hi.stateRoot, 't1', 'driver')).length === 0, 'pair_interrupt atomically clears the host inbox and durable pair backlog by default');
     check(await rejects(() => hammer.execute({ member: 'driver', reason: 'x' }, { agent: member }), 'only the captain'), 'a non-captain cannot pull the hammer');
     check(await rejects(() => hammer.execute({ member: 'ghost', reason: 'x' }, { agent: hi.captain }), 'member named "ghost"'), 'an unknown member is named in the refusal');
     check(await rejects(() => hammer.execute({ member: 'navigator', reason: 'x' }, { agent: hi.captain }), 'no live session'), 'a member without a session id is refused by name');
     check(await rejects(() => hammer.execute({ member: 'driver', reason: '   ' }, { agent: hi.captain }), 'needs a reason'), 'a blank reason is refused');
-    check(hammer.description.includes('not cleared') && !/clears? the queue/i.test(hammer.description), 'the description is honest about the queue');
+    check(hammer.description.includes('clears') && !hammer.description.includes('not cleared'), 'the description promises the queue flush the handler now performs');
     // F1-b: pair_status carries the honest queue gauge, lease-aware.
     const ps = stopHarness(root, { stateDir: 'ps-state' });
     const status = ps.defs.find((x) => x.name === 'pair_status').execute;
@@ -228,26 +245,32 @@ export async function run(check) {
     // AC-A2-1: the sunny path must not regress behind the new rollback catch.
     const s1 = startHarness(root, { failOnCall: -1 });
     const startOk = s1.defs.find((x) => x.name === 'pair_start').execute;
-    const ok = await startOk({ goal: 'g', mode: 'light', name: 'a2-ok' }, { agent: s1.captain });
+    const ok = await startOk({ goal: 'g', mode: 'light', name: 'a2-ok', use_cases: USE_CASES }, { agent: s1.captain });
     check(ok.members.length === 2 && s1.spawns.length === 2 && s1.interrupts.length === 0, 'pair_start spawns both roles and interrupts nothing');
     check(s1.starts.every(start => start.request.agentOptions?.reasoningEffort === 'high'), 'member reasoning effort is persisted in alpha.5 continuable agentOptions');
     check(await exists(join(s1.stateRoot, 'a2-ok')), 'a successful team keeps its state dir');
+    const sm = startHarness(root, { failOnCall: -1, captainId: 'cap-solo', stateDir: 'solo-start' });
+    const soloStarted = await sm.defs.find(x => x.name === 'pair_start').execute({ goal: 'g', mode: 'solo', name: 'explicit-solo', use_cases: USE_CASES }, { agent: sm.captain });
+    check(soloStarted.mode === 'solo' && sm.spawns.length === 1 && sm.spawns[0].endsWith(':spec'), 'explicit mode=solo is reachable and spawns only the SPEC seat');
+    const noScope = startHarness(root, { failOnCall: -1, captainId: 'cap-no-scope', stateDir: 'no-scope-start' });
+    check(await rejects(() => noScope.defs.find(x => x.name === 'pair_start').execute({ goal: 'g', mode: 'solo', name: 'no-scope' }, { agent: noScope.captain }), 'missing required property "use_cases"'), 'pair_start refuses to lose the request before a team exists');
     // AC-A2-2..5: a later role failing rolls the earlier one back and rethrows.
     const s2 = startHarness(root, { captainId: 'cap2' });
     const startBad = s2.defs.find((x) => x.name === 'pair_start').execute;
-    check(await rejects(() => startBad({ goal: 'g', mode: 'light', name: 'a2-fail' }, { agent: s2.captain }), 'second role failed to spawn'), 'the spawn error propagates unchanged');
+    check(await rejects(() => startBad({ goal: 'g', mode: 'light', name: 'a2-fail', use_cases: USE_CASES }, { agent: s2.captain }), 'second role failed to spawn'), 'the spawn error propagates unchanged');
     check(JSON.stringify(s2.interrupts) === '["child-1"]', 'the already-spawned driver is interrupted exactly once');
     check(await exists(join(s2.stateRoot, 'a2-fail')) === false, 'the rolled-back team dir is gone');
     check(JSON.stringify(JSON.parse(await readFile(join(s2.stateRoot, 'retired-members.json'), 'utf8'))) === '["child-1"]', 'the rollback audit record holds the interrupted member');
     // AC-A2-6/7: the green-build branch of pair_stop gates before it writes.
     const g = stopHarness(root, { greenBuildOnStop: true, stateDir: 'gb-state' });
     const stopG = g.defs.find((x) => x.name === 'pair_stop').execute;
-    await createTeamDir(g.stateRoot, teamFixture({ protocol: { ...initialProtocolState(), cycles: [{ id: 'c1' }] } }));
-    check(await rejects(() => stopG({ reason: 'x' }, { agent: g.captain }), 'GREEN BUILD CHECK'), 'a shipped team cannot stop without green evidence');
+    await createTeamDir(g.stateRoot, successfulTeam());
+    check(await rejects(() => stopG({ reason: 'x', green_build_evidence: 'trust me: green' }, { agent: g.captain }), 'machine-run whole-suite command'), 'a successful team rejects pasted green prose without executing a command');
     check((await readTeam(g.stateRoot, 't1')).protocol.phase !== 'DONE', 'the green-build check fires before any write');
-    await stopG({ reason: 'x', green_build_evidence: 'suite green' }, { agent: g.captain });
+    const completion = await stopG({ reason: 'x', green_build_command: 'node --version' }, { agent: g.captain });
     const closed = await readTeam(g.stateRoot, 't1');
-    check(closed.protocol.greenBuild?.evidence === 'suite green' && closed.protocol.phase === 'DONE', 'supplied evidence is stored and the team closes');
+    check(closed.protocol.greenBuild?.evidence.includes('command: node --version') && closed.protocol.greenBuild?.evidence.includes('exit: 0') && closed.protocol.phase === 'DONE', 'the plugin-run command result is stored and the team closes');
+    check(typeof closed.protocol.completionReceipt?.id === 'string' && closed.protocol.completionReceipt.id === completion.completion_receipt?.id, 'successful stop persists and returns the same completion receipt');
     // F2-b1: the raise budget enforced through the real pair_risk handler.
     const rh = riskHarness(root, { maxOpenRisks: 2 });
     const raise = rh.defs.find((x) => x.name === 'pair_risk').execute;

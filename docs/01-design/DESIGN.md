@@ -1,5 +1,9 @@
 # DESIGN.md — dsh-pair-programming 总体设计
 
+> ⏳ **v3 导读（2026-09-03，PROTOCOL_VERSION=3）**（当前协议为 PROTOCOL_VERSION=4；v4 增量见插件 `README.md` §v4 与 `CHANGELOG.md` 0.4.0）：本文是 v1/v2 正文，保留为历史。"三角色并行去最优"的假设已被八轮双臂对照证伪；
+> 当前协议是 oracle-first：验收标准在方案出现之前仅凭需求冻结，此后每一次判决都是一次重新执行。
+> 新设计见 `dsh-pair-programming-design/01-design/DESIGN.md`（v3 正文）、`01-design/REDESIGN-v3.md`（推导）与插件 `README.md`。与代码冲突时以代码为准。
+>
 > 本文回答"做什么、为什么这么做"。技术实现细节见 `02-architecture/ARCHITECTURE.md`。
 
 > ⚠️ **v1.1 修订（关键架构决策）**：本插件**不再依赖** `@nanmicoder/dsh-agent-teams`。用户可能没装它。插件**自带独立的结对运行时**（自己的团队状态、任务图、邮箱、事件驱动调度器），直接构建在 DSH 宿主原语（`ctx.subagents` / `ctx.tools` / `ctx.systemPrompt` / `ctx.commands` / `ctx.agents` / `agent/status` 与 `agent/pre-step` 事件）之上——这些正是 agent-teams 自己使用的同一批宿主原语，属于标准 profile 的 base bundle。成熟代码（串行锁、Windows 原子写、JSONL 邮箱、attempt 能力令牌、调度器）从 agent-teams 源码复刻并适配（MIT 许可）。agent-teams 若恰好存在，仅做可选互操作（共享会话事件面板），不存在时功能完整。
@@ -155,7 +159,7 @@ Captain（当前会话，队长）
 [ ] spike_outcome        (type=spike) 任务完成前必须记录 go/no-go 决策或估算结论
 ```
 
-会话收尾另有**绿构建规则**（green-build，v1.2）：本轮有过被验收的改动时，`pair_stop` 必须附新鲜的全量测试通过证据（或用户显式确认后 force）。"没有人带着坏构建回家"——防止队友第二天检出红代码库。
+会话收尾另有**绿构建规则**（green-build，v1.2；v4 起改为机判）：`pair_stop(outcome="complete")` 由**插件自己执行** `green_build_command`（或配置的 `dodCommand`），只接受退出码 0；粘贴的文字从来不算证据，`force` 只保留为 `outcome="aborted"` 的兼容别名，永远造不出 DONE 或凭证。"没有人带着坏构建回家"——防止队友第二天检出红代码库。
 
 ### 4.3 门禁失败的行为
 
@@ -302,7 +306,7 @@ L3 LLM prompt 缓存友好化（provider 端命中）
 | Spike：缺技术/领域知识时的固定小时间盒（1.5 Q9） | `type=spike` 任务：默认 2 循环预算；门禁 `spike_outcome` 要求记录 go/no-go 决策 | 工具+门禁 |
 | 建设性反馈三段式：观察→影响→改进方向（1.1 Q16）；"模糊反馈非法" | 不变量 I8；NO_GO/REJECT 消息 schema `feedbackProblems` 硬校验（含空泛 wish 正则） | 消息 schema |
 | Definition of Done（1.2 Q21） | 门禁清单改为可配置 `config.dod`（DEFAULT_DOD 六项） | 门禁 |
-| 绿构建规则：没有人带着红构建回家（1.3 Q3） | `pair_stop` 要求新鲜全量验证证据（可 force，需用户确认） | 工具 |
+| 绿构建规则：没有人带着红构建回家（1.3 Q3） | `pair_stop(outcome="complete")` 亲自执行 `green_build_command` 并只认退出码 0；放弃只能停成 `ABORTED` | 工具 |
 | 三种结对风格 traditional/strong/ping-pong（1.4 Q10）；30 分钟轮换（1.4 Q8） | `pair_start --style` / `pair_rotate --style`；styleNote 注入 persona；ping-pong 以提案文本交接所有权、维持 I1 | prompt 语义+记录 |
 | 何时不该结对（1.4 Q12） | `trivial=true` 任务走短链、免 test-first | 状态机+门禁 |
 | 敏捷测试四象限：Q1/Q2 自动化进循环、Q3/Q4 专项（1.6 Q5） | Navigator verify_plan 期待 + Challenger 攻击面职责（quadrants 3/4） | prompt 语义 |

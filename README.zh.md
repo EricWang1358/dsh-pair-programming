@@ -27,6 +27,17 @@
 
 ## 你得到什么：一支敏捷团队，不是一个聊天机器人
 
+**solo 模式（默认）只有两方，而且只有一方是派生出来的：**
+
+| 角色 | 是谁 | 职责 | 硬规则 |
+|---|---|---|---|
+| **你** | 你自己的会话 | 拆需求、写代码、跑门禁 | **无法验收自己的工作**：判词是重跑封存命令的结果 |
+| **SPEC** | 一个短命子代理 | 仅凭需求写下验收测试——在任何实现存在之前——然后退休 | 手里**没有 reader、没有 shell、没有搜索**，只有 `pair_oracle_write` 与 `pair_oracle` |
+
+第二行就是整个设计。独立性从来不来自评审者换了个**名字**，而来自验收标准写在实现**尚不存在、无从查阅**的那个**时刻**。因为 `pair_oracle` 是插件自己跑测试，写 oracle 的席位根本不需要任何仓库工具——于是"别偷看答案"不再是一条模型在长上下文里会忘掉的指令，而变成它所处沙箱的属性。
+
+<details><summary><b>遗留多席位模式</b>（<code>light</code> / <code>full</code>）——仍然可用，但成本已被实测</summary>
+
 | 角色 | 是谁 | 职责 | 硬规则 |
 |---|---|---|---|
 | **Captain** | *你自己*的会话 | 仲裁、规划、对用户负责 | 按证据裁决、可逆决策 70% 即拍板；亲手不写实现 |
@@ -34,7 +45,11 @@
 | **Navigator** | 派生子代理 | 独立标准：仅能在预留 oracle 目录写入验收工件，并在任何方案出现之前仅凭需求冻结验收 oracle；此后以**计算出的**判决收口每个循环 | ACCEPT 无法靠声称获得——工具会重跑冻结的 oracle（I4、I6、I8） |
 | **Challenger** | 派生子代理（遗留，仅 `full` 模式） | 红队：用失败模式攻击方案 | P0 风险阻塞当前循环，P1 阻塞任务完成（I5） |
 
-八条协议不变量由**工具层强制执行**，不是求模型自觉：
+选它们要心里有数。八轮 SWE-bench + 三次实跑会话里，评审席位产出 **0 次 NO_GO、0 次 REJECT**；一次会话 28 次提案对 0 次验证；`pylint-8898` 上结对臂交出**错误答案**，花掉单代理 **1.375×** 的 token，且自己声明的交付物根本没写出来。1.375× 是"一个 Driver 加开销"的形状，不是"三个代理在干活"的形状。
+
+</details>
+
+九条协议不变量由**工具层强制执行**，不是求模型自觉：
 
 > **I1** 单写者 · **I2** 小步快走 · **I3** 先提案后动手（小步自动 GO） · **I4** 完成需过门禁 · **I5** 风险不过夜——阻塞票只能靠可执行产物关闭；**验收仪器（oracle/量具）的 P0 只阻塞验证，不阻塞开发**，量具在修不会连带把被测代码一起停 · **I6** 证据是一次重跑，不是一句话 · **I7** 测试先行 · **I8** oracle 先行 · **I9** 一个未验收的循环 = 一次未结账——新提案要先等上一环的裁决
 
@@ -67,17 +82,28 @@ v3 落地后回放了两次完整会话。机制在被调用时都工作，但**
 - **仲裁归属。** 未命名任务的裁决曾"什么都不花"；一位 Captain 靠"故意不写 task_id"在 2/任务 的额度下签了 18 条裁决。现在未命名裁决自动归属到"当前 claim 的任务"。
 - **冻结预算与逃生门。** `oracleForkBudget`（默认 3）超出后需要一句 `captain_override`。不是硬墙，是摩擦：第 1 次之后的每次冻结都会在摘要里显示 `freeze #N`，递归看得见就避免得开。
 
+### v4——DONE 必须挣来
+
+两次真实会话结束时，看板写着 `phase="DONE"`、`cycles=[]`、`gatePasses=[]`，任务完成度 **0/10**。机长先调了 `pair_stop`，然后在协议之外用 24 次 `write`、51 次 `edit` 亲手把整个产品建了出来，手填了一份 todo，宿主 goal 就此收下。上面每一条规则都仍然成立，也都没有生效——因为那些工作根本没碰过看板。v4 把这条逃逸路径的两端都堵上，并且砍掉了那些事实上没在干活的席位。
+
+- **`solo` 成为默认编队。** 一个短命的 SPEC 席位在**完全没有仓库工具**的条件下写下验收 oracle——没有 reader、没有 shell、没有编辑器——然后退场；代码由你自己对着冻结的标准实现。独立性从来不是靠评审者换个**名字**得到的，而是靠这支笔在**实现还不存在的时刻**落下。那才是唯一值得付钱的部分。`light` 与 `full` 仍然保留。
+- **需求覆盖矩阵在 `pair_start` 时冻结。** 目标被拆成看板上的 `UC-N.AC-N` 验收条目；任务卡通过 `acceptance_refs` 与之绑定，只要还有条目无人认领，第一个 cycle 就会被**机判拒绝**。请求里逐条列举的东西——四种预设、21 个控件、0–9 调试键——再也无法被压缩成一张谁都无法判失败的「UI 完成」卡。
+- **`DONE` 表示目标达成，而不是成员散伙。** `pair_stop(outcome="complete")` 现在是机器裁决：所有任务终态、每个已完成任务持有它自己那份 `gate_pass_id`、覆盖率 100%、无未清 P0/P1、RETRO 已做——并且由插件**亲自执行 `green_build_command`**，只认退出码 0。粘贴的「测试全过」从来都不是证据。它返回 `completion_receipt`，那是唯一可以用来完成宿主 goal 的凭证。半途放弃的看板只能停成 `ABORTED`，不发凭证。
+- **机长无法悄悄变成 Driver。** 只要 `full`/`light` 队还活着，机长对工作区文件的写操作即被拒绝——I1 本来就把写权判给了 Driver，这一步把那句话从提示词里的一行变成沙箱的性质。工作区之外的写不受影响，shell 保持开放（协调者需要 `git`），出口明确且留痕：`pair_stop(outcome="aborted")`。
+- **机长由看板事件唤醒，而不是由时钟。** 运行中的机长收到就近 steer，**空闲**的机长收到一个真正的新回合，按 `{团队, 看板版本, 待办义务}` 去重。此前 goal round 被当成了等待循环：两个纯等待轮烧掉 **572,554 token** 且一无所出，而它们换来的「再观察两轮」实际只有 **21 秒**。现在宿主 goal 只承载 epic，且只能凭 receipt 完成；schedule 只是宿主死亡的看门狗，绝不是 `pair_status` 轮询器。
+- **长回合不再被误判成死回合。** 席位携带 `lastTurn`（`endReason`、`toolCalls`、`boardMutations`、`lastError`），并在其会话仍在产出事件时续租 working lease。此前 `idle` 把*正常结束*、*被父级中止*、*崩溃*压成同一个状态——两个分别跑了 480 秒和 300 秒、都在写 oracle 途中被父级杀掉的 Navigator 回合，就是这样读起来像沉默的。
+
 ## 工作流
 
 ### 会话级——每个故事任务用增量说话
 
 ```
 pair_start ──► PLANNING ──────► CYCLING ◄──── TASK_GATE ──► 绿构建 ──► RETRO ──► pair_stop
-             用户故事 +                 (可配置的       全量测试      keep/try
-             INVEST 校验              Definition      不过不许      行动项
-             + spike/triage 每改动     of Done)        "回家")        自动带入
-             70% 规则仲裁                                                  ▼
-                                                                    下一会话的 PLANNING
+             UC-N.AC-N                  (可配置的      全量测试     keep/try      │
+             冻结           每次改动      Definition    不过不许     行动项        ├─► DONE + completion_receipt
+             用户故事 +     一个循环      of Done)      "回家"）     自动带入      └─► ABORTED（不发凭证）
+             INVEST 校验                                                  ▼
+             70% 规则仲裁                                        下一会话的 PLANNING
 ```
 
 ### 循环级——TDD 不是建议，是状态机（`tddMode=enforce`，默认）
@@ -122,16 +148,17 @@ Captain 把需求拆成用户故事（*"作为财务专员，我希望退款调�
 |---|---|---|
 | `tddMode` | `enforce` | `enforce` 工具强制 RED→GREEN→REFACTOR · `coach` 推荐不强制 · `off` 旧模式 |
 | `pairStyle` | `traditional` | `traditional` \| `strong` \| `ping-pong` |
-| `dod` | 协议默认 | DoD 门禁项（逗号分隔）：`all_accepted,no_blocking_risks,verify_evidence,decisions_documented,test_first,oracle_precedes_impl,oracle_replay,spike_outcome` |
-| `greenBuildOnStop` | `true` | 有落地改动时，`pair_stop` 必须附新鲜的全量测试通过证据 |
+| `dod` | 协议默认 | DoD 门禁项（逗号分隔）：`all_accepted,no_blocking_risks,verify_evidence,decisions_documented,test_first,oracle_precedes_impl,oracle_replay,spike_outcome,deliverables_present,scope_declared,goal_criteria_traced` |
+| `greenBuildOnStop` | `true` | `pair_stop(outcome="complete")` **亲自执行** `green_build_command`，只认退出码 0——粘贴的文字不算证据 |
 | `maxCyclesPerTask` / `spikeMaxCycles` | `12` / `2` | 硬预算——协议不空转，token 不白烧 |
 | `maxOpenRisks` | `15` | 全队 OPEN 非 P0 风险票上限；P0 提票不受此限 |
 | `planningMaxArbitrations` | `2` | 任务进入规划期时可裁决的争议上限；任务已有 cycle 即豁免 |
-| `defaultMode` | `light` | `light`（Driver + Navigator）或 `full`（另加遗留的 Challenger 席位） |
+| `defaultMode` | `solo` | `solo`（你 + 一个短命 SPEC 席位）· `light`（遗留 Driver + Navigator）· `full`（另加 Challenger） |
 | `oracleFirst` | `true` | 任务未冻结验收 oracle 时，`pair_propose` 直接拒绝（spike 若跳过必须写 `no_oracle_reason`，落在循环记录上） |
 | `oracleForkBudget` | `3` | 每任务允许的冻结次数上限，超出需 `captain_override`。软预算：可见化重复冻结循环，不阻断真实推进 |
 | `memberLifetime` | `cycle` | `cycle` 每个循环由看板摘要重派席位；`session` 保留每角色一个常驻席位 |
-| `heartbeatMs` | `60000` | 停摆邮箱的存活巡检周期；`0` 关闭。仅 YAML——巡检定时器在启动时装配，因此刻意不出现在运行时设置面里 |
+| `heartbeatMs` | `120000` | 停摆邮箱的存活巡检周期；`0` 关闭。仅 YAML——巡检定时器在启动时装配，因此刻意不出现在运行时设置面里 |
+| `workingLeaseMs` | `600000` | 一个席位可以在不产出任何会话事件的情况下保持 `working` 多久，超时才被看门狗判为停摆；真正在干活的长回合会自动续租。`0` 关闭。仅 YAML |
 
 协议开销是**工程压下来的，不是嘴上说说的**：事件驱动监控（无 busy-poll）、粒度自适应控制器（连过 3 环→放大步幅、两连拒→强制拆小）、三层缓存（落盘协议状态、按 `gitHead+path+mtime` 键控的 L2 仓库证据缓存、逐字稳定版本化的角色 persona 以吃满 LLM 供应商的 prompt 缓存），外加循环预算兜底。每一枚 token 花在哪，复盘报告里都有。
 
@@ -155,6 +182,8 @@ dsh plugin --profile web add @ericwang1358/dsh-pair-programming
 dsh web
 ```
 
+> 尚未发布到 npm——首次发布前请用本地路径安装（`dsh plugin --profile web add <插件目录>`），功能等价（之后重启应用）。
+
 回滚：`dsh plugin --profile web remove @ericwang1358/dsh-pair-programming`（之后重启应用）。开发期用本地路径安装，命令等价。
 
 或本地 checkout 开发（`link:` 安装，流程见 [docs](docs/README.md)）。双通道激活——`/pair` 斜杠命令 + 纯文本手势边界——覆盖 Web UI、headless CLI 与 API 会话。
@@ -164,7 +193,7 @@ dsh web
 ## 工程质量
 
 ```sh
-npm test          # 15 个套件 397 条断言，纯逻辑，离线可跑
+npm test          # 19 个套件 524 条断言，纯逻辑，离线可跑
 npm run verify    # 导入门禁 · 启动门禁 · 包门禁 · 类型检查 —— 全绿
 ```
 

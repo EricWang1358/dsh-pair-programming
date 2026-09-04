@@ -7,7 +7,7 @@
  * The plugin cannot restart a conversation the harness has ended. These pin
  * the two things it can do: recognise the fixed point, and refuse to be quiet.
  */
-import { stallDiagnosis, lastProgressAt, stallEscalation, goalLoopAdvice, STALL_AFTER_MS } from '../lib/protocol/stall.js';
+import { stallDiagnosis, lastProgressAt, stallEscalation, goalLoopAdvice, STALL_AFTER_MS, WORKING_LEASE_MS } from '../lib/protocol/stall.js';
 import { initialProtocolState } from '../lib/protocol/machine.js';
 
 const T0 = 1_000_000;
@@ -37,7 +37,11 @@ export async function run(check) {
 
   const working = team();
   working.members[0].status = 'working';
+  working.members[0].activity = { lastActivityAt: quiet.now - 1000 };
   check(stallDiagnosis(working, { ...quiet, unread: { navigator: 3 }, obligation: owed }).stalled === false, 'B a seat still mid-turn is not a stall — it may yet act');
+  working.members[0].activity.lastActivityAt = quiet.now - WORKING_LEASE_MS - 1;
+  const expired = stallDiagnosis(working, { ...quiet, unread: { navigator: 3 }, obligation: owed });
+  check(expired.stalled === true && expired.expiredWorking[0] === 'driver', 'B working is a renewable lease, not an infinite exemption from stall detection');
 
   const resting = team();
   check(stallDiagnosis(resting, { ...quiet, unread: { driver: 0, navigator: 0 } }).stalled === false, 'B everyone idle with nothing owed is rest, not a stall');
@@ -61,14 +65,13 @@ export async function run(check) {
   const text = stallEscalation('st1', d, '[PAIR:NEXT] navigator owes pair_verify(cycle_id=c1) — because');
   check(text.startsWith('[PAIR:STALL]'), 'C the escalation is a protocol message the captain can key off');
   check(text.includes('pair_verify(cycle_id=c1)'), 'C it carries the exact owed call, verbatim');
-  check(text.includes('Do this now, in this turn'), 'C it tells the captain to act inside the live turn');
-  check(text.includes('Do not reply to the user and end your turn'), 'C THE key instruction: the reply-and-stop move is what created the fixed point');
-  check(text.includes('create_goal') || goalLoopAdvice('st1').includes('create_goal'), 'C harness-level liveness is named as the actual remedy');
+  check(text.includes('board outranks'), 'C it tells the captain to re-check the canonical board before forwarding an old call');
+  check(!text.includes('create_goal') && !goalLoopAdvice('st1').includes('create_goal'), 'C goal polling is removed from the liveness path');
 
   /* ---- D: the honest boundary ----------------------------------------- */
   const advice = goalLoopAdvice('st1');
-  check(advice.includes('only while your turn is live'), 'D pair_start states plainly what the scheduler can and cannot do');
-  check(advice.includes('never busy-poll'), 'D and does not trade the stall for a polling loop');
+  check(advice.includes('board-event driven') && advice.includes('idle captain'), 'D pair_start states that real board events re-enter the captain');
+  check(advice.includes('Do not create a goal') && advice.includes('external watchdog'), 'D goal stays an epic and schedule stays a host-death watchdog');
 }
 
 /**

@@ -1,5 +1,5 @@
 /** runtime/members: toolDenyListFor — host-registry-filtered deny lists (I1). */
-import { toolDenyListFor, hostToolNames } from '../lib/runtime/members.js';
+import { toolDenyListFor, hostToolNames, markMemberRetired, isMemberRetired, installRetiredInboxGuard, deliverToMember } from '../lib/runtime/members.js';
 
 const CLAUDE_NAMES = ['str_replace_editor', 'write_file', 'create_file', 'edit_file', 'apply_patch'];
 const DSH_NAMES = ['write', 'edit', 'pwsh'];
@@ -72,4 +72,20 @@ export async function run(check) {
   const mixed = hostToolNames({ tools: { schemas: () => [{ name: 'read' }, { nope: 1 }, { name: 'write' }] } });
   check(mixed instanceof Set && mixed.size === 2 && mixed.has('write'), 'hostToolNames: usable names kept, malformed entries dropped');
   check(refusesFor('challenger', () => toolDenyListFor('challenger', hostToolNames({ tools: { schemas: () => [] } }))), 'wiring: empty registry reaches toolDenyListFor as undefined and refuses');
+
+  // Retired children are tombstoned at the host inbox boundary, so even a
+  // generic cross-team send cannot wake a zombie session.
+  const handlers = new Map(); let removed; let followed = false;
+  const retiredCtx = {
+    on: (name, fn) => { handlers.set(name, fn); },
+    logger: { warn: () => {} },
+    subagents: { followup: async () => { followed = true; } },
+  };
+  installRetiredInboxGuard(retiredCtx, { stateDir: '.pair-programming' });
+  markMemberRetired(retiredCtx, 'old-child');
+  check(isMemberRetired(retiredCtx, 'old-child'), 'retirement tombstone is visible in the live plugin context');
+  handlers.get('agent/inbox/inserted')({ agent: { id: 'old-child', inbox: { remove: id => { removed = id; } } }, message: { id: 'cross-team-message' } });
+  check(removed === 'cross-team-message', 'a generic host message to a retired pair child is removed synchronously');
+  const accepted = await deliverToMember(retiredCtx, {}, 'old-child', 'stale', new AbortController().signal);
+  check(accepted === false && followed === false, 'pair delivery also refuses a retired child before calling the host');
 }

@@ -5,7 +5,73 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
-## [Unreleased] — protocol v3, oracle-first
+## [Unreleased]
+
+## [0.4.0] — 2026-09-04 — solo by default; DONE has to be earned
+
+Protocol v4. Two live sessions (`cec33cc5`) ended with a board reading `phase="DONE"`,
+`cycles=[]`, `gatePasses=[]` and **0/10 tasks completed** — the captain had called
+`pair_stop`, then built the product itself with 24 `write` and 51 `edit` calls outside the
+protocol entirely, and the host goal accepted a hand-filled todo list as proof. Every rule
+the protocol enforces was still true, and none of them applied, because none of that work
+ever touched the board. v4 closes both ends of that escape and drops the seats that were
+never doing the work. `PROTOCOL_VERSION` is now `4`.
+
+**Breaking:** `defaultMode` is now `solo` (was `light`); `DONE` now means *the goal was met
+and machine-checked*, not *the members were dismissed* — an incomplete board stops as
+`ABORTED`; `pair_stop(outcome="complete")` requires `green_build_command` and executes it.
+
+### Added
+- **A requirement coverage matrix, frozen at `pair_start` (M17').** The goal is decomposed
+  into `UC-N.AC-N` criteria on the board; `pair_task_create` binds cards to them through
+  `acceptance_refs`, and the first cycle is mechanically refused while any criterion is
+  unallocated. Enumerated request items can no longer be collapsed into one "UI complete"
+  card that nobody can fail.
+- **Completion receipts.** `pair_stop(outcome="complete")` is now a machine verdict: every
+  task terminal, every completed task carrying its exact `gate_pass_id`, coverage 100%, no
+  open P0/P1, RETRO done — and the plugin runs `green_build_command` itself, accepting only
+  exit 0. Pasted "all tests pass" text is not evidence and never was. The returned
+  `completion_receipt` is the only artefact that may close a host goal; an abandoned board
+  stops as `ABORTED` and issues none.
+- **The captain's write guard.** While a `full`/`light` team is live, the captain is denied
+  workspace file mutations (`write`/`edit`/`apply_patch`/…): invariant I1 already gave those
+  to the Driver, and this makes the sentence a property of the sandbox. Writes outside the
+  workspace are untouched, shells are deliberately left open (a coordinator needs `git`), and
+  the escape hatch is explicit — `pair_stop(outcome="aborted")`, which is recorded. Silent in
+  `solo`, where the captain *is* the builder and the frozen oracle is what keeps it honest.
+- **Member turn telemetry.** A seat's `lastTurn` records `startedAt`/`endedAt`/`endReason`/
+  `toolCalls`/`boardMutations`/`lastError`. `idle` no longer flattens *finished*, *aborted by
+  the parent* and *crashed* into one indistinguishable state — the reason two 480s and 300s
+  Navigator turns looked like silence when they were actually parent-aborted mid-oracle.
+- **A working lease (`workingLeaseMs`, default 600s).** A seat that is still emitting session
+  events renews it, so a genuinely long turn is never called stalled; only an expired lease
+  reaches the watchdog. Replaces wall-clock guessing about how long an oracle "should" take.
+- **v4 solo protocol extraction.** `soloProtocol()` (under half the multi-seat text), `specPersona()` sandbox isolation, prompt-size budgets, and the `solo.test.mjs` suite: the default solo path is now independently pinned instead of implied.
+
+### Changed
+- **`defaultMode` is `solo`; `TEAM_MODES` lists cheapest first.** `light`/`full` remain
+  supported and are documented with what they measured.
+- **Captain re-entry is board-event driven, not goal-round driven (M18').** `wakeCaptain`
+  replaces `steerCaptain`: a *running* captain gets a nearest-step steer, an *idle* one gets a
+  real follow-up turn, deduplicated per `{team, board revision, obligation}`. Goal rounds were
+  being spent as a wait clock — two pure waiting rounds cost 572,554 tokens and produced
+  nothing, and the "wait two more rounds" they were spent on was 21 seconds long. The prompts
+  now say plainly that a host goal holds the epic and completes only from the receipt, and
+  that a schedule is a host-death watchdog, never a `pair_status` poller.
+- **heartbeat sweep default 60s → 120s.** Worst-case stall bound is now ~120s (`0` still disables). Mailbox delivery lease stays 60s — separate mechanism, untouched.
+- **settled teams leave the heartbeat sweep list.** All tasks terminal + all seats idle + no pending mail + nothing owed (or phase RETRO) → untrack: a finished team costs zero future sweeps and is never woken. Self-healing — kickTeam/kickMember/task-create/mailbox-recovery all re-track first — and fresh taskless teams never count, so pair_start's explicit track still protects protocols that stall before their first kick.
+
+### Fixed
+- **Cross-team zombie delivery.** Retired members are tombstoned for the live context and
+  rehydrated from the durable deny-list at session start; generic host inbox inserts to a
+  retired child are dropped and `deliverToMember` refuses outright. A re-fork instruction aimed
+  at one team's Navigator landed in a *stopped* team's Driver log, under the same message id.
+- **`pair_interrupt` is atomic.** It cancels the current turn *and* discards that seat's unread
+  queue by default (`discard_queued=false` retains it), instead of leaving queued work to
+  resume against a board that has moved on.
+- **F4: task creation now wakes with the workspace.** `pair_task_create` passed the state root to `kickTeam`, which double-joined the state dir and silently woke nobody; new-task wake (and sweep-list re-track) works again, pinned by a wake-test regression.
+
+## [0.3.0] — 2026-09-02 — protocol v3, oracle-first
 
 Acceptance is derived before the implementation exists, and every verdict after that is a
 re-execution. Driven by an eight-round measured comparison against a single-agent baseline

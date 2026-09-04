@@ -1,5 +1,9 @@
 # ARCHITECTURE.md — dsh-pair-programming 技术架构
 
+> ⏳ **v3 导读（2026-09-03，PROTOCOL_VERSION=3）**（当前协议为 PROTOCOL_VERSION=4；v4 增量见插件 `README.md` §v4 与 `CHANGELOG.md` 0.4.0）：本文是 v1/v2 正文，保留为历史。当前架构见
+> `dsh-pair-programming-design/02-architecture/ARCHITECTURE.md`（v3 正文）：协议层已改为"状态机 + oracle 冻结与判决 + 亲跑命令的门禁"，
+> 默认入口是 solo（SPEC 短命席位），工具共 20 个 `pair_*`（完整清单以 `verify-startup` 为准）。与代码冲突时以代码为准。
+>
 > 本文回答"怎么实现"。模块划分、数据流、API 契约、与 DSH 宿主原语的集成点。
 > **v1.1 修订**：零第三方插件依赖。插件自带完整结对运行时（团队状态、任务图、邮箱、事件驱动调度器），直接构建在 DSH 宿主原语上。成熟模式从 agent-teams 源码复刻适配（见 `05-reference/AGENT_TEAMS_API.md`，记录每个模式的出处）。
 
@@ -14,11 +18,11 @@
 │  PairProtocol 状态机 · 角色 persona 模板 · 消息 DSL 解析     │
 │  质量门禁 Gate · 风险单管理 · 决策日志 · 粒度控制器           │
 ├────────────────────────────────────────────────────────────┤
-│ 工具层（注册进共享 tools 注册表）                             │
+│ 工具层（注册进共享 tools 注册表；20 个 pair_*，以 verify-startup 为准）│
 │  pair_start · pair_oracle_write · pair_oracle · pair_propose│
-│  pair_review · pair_report                                  │
-│  pair_verify · pair_risk · pair_arbitrate · pair_gate_check │
-│  pair_task_update · pair_rotate · pair_status · pair_stop   │
+│  pair_review · pair_red/green · pair_report · pair_verify   │
+│  pair_risk · pair_arbitrate · pair_gate_check · pair_status │
+│  pair_task_create/claim/update · pair_rotate · pair_retro/stop│
 ├────────────────────────────────────────────────────────────┤
 │ 运行时层（自含，复刻 agent-teams 成熟模式）                   │
 │  members: continuable 子 Agent 派生/唤醒/persona 注入        │
@@ -45,33 +49,49 @@
 ├── lib/
 │   ├── index.js                  # apply(ctx, config)：装配一切
 │   ├── config.js                 # Config schema（schemastery）
+│   ├── defaults.js               # 默认值与枚举的唯一真源（DEFAULTS / TEAM_MODES / …）
+│   ├── settings.js               # 运行时设置命名空间（dsh-settings）
+│   ├── client.js                 # Settings → Plugins 卡片（浏览器端，逐字提供）
 │   ├── command.js                # /pair slash command + 手势边界
 │   ├── prompt.js                 # systemPrompt section：协议使用策略（稳定前缀）
-│   ├── protocol/
+│   ├── protocol/                 # 纯逻辑，可单测，不 import runtime/tools/cordis
 │   │   ├── machine.js            # 会话级状态机
-│   │   ├── cycle.js              # Pair Cycle 编排
 │   │   ├── messages.js           # [PAIR:*] DSL 编解码 + 校验
-│   │   ├── gate.js               # 门禁检查清单执行器
+│   │   ├── gate.js               # 门禁检查清单执行器（DEFAULT_DOD）
 │   │   ├── risks.js              # 风险单生命周期
-│   │   └── personas.js           # 四角色模板（版本化）
-│   ├── runtime/
-│   │   ├── members.js            # 子 Agent 派生/唤醒/persona（复刻 agent-teams members.js）
-│   │   ├── scheduler.js          # 事件驱动调度器（复刻 agent-teams scheduler.js）
-│   │   └── mailbox.js            # JSONL 邮箱（复刻 agent-teams state.js 邮箱部分）
-│   ├── state/
-│   │   ├── lock.js               # withLock 串行队列 + sanitizeKey（复刻）
-│   │   ├── atomic.js             # Windows 兼容原子写（复刻 replaceFileAtomicOrDirect）
+│   │   ├── story.js              # 用户故事 / INVEST 校验
+│   │   ├── digest.js             # 看板摘要（成员按循环重生时读的那份记忆）
+│   │   ├── coverage.js           # 需求覆盖矩阵：goal → UC-N.AC-N → 卡 → oracle 用例
+│   │   ├── completion.js         # 终态判定：complete 需要哪些证据才算数
+│   │   ├── obligation.js         # [PAIR:NEXT] 派生：看板决定谁欠哪一步
+│   │   ├── oracle.js             # SPEC-FORK 纯逻辑（分叉 / 计算判词 / 冻结记录）
+│   │   ├── stall.js              # 停摆诊断 + working lease 判定
+│   │   └── personas.js           # solo + SPEC + 遗留席位模板（版本化，缓存稳定前缀）
+│   ├── runtime/                  # 依赖 state/ 与宿主原语
+│   │   ├── members.js            # 子 Agent 派生/唤醒/persona + 工具沙箱（I1、SPEC 隔离）
+│   │   ├── board-guard.js        # 机长写守卫：full/light 活队中拒绝机长直接改工作区文件
+│   │   ├── scheduler.js          # 看板事件驱动调度器 + 心跳巡检 + 席位遥测
+│   │   ├── wake.js               # 投递失败后的恢复唤醒
+│   │   ├── collapse.js           # 未读邮件折叠
+│   │   └── recycle.js            # 席位按循环回收
+│   ├── state/                    # 不 import cordis
+│   │   ├── lock.js               # withLock 串行队列 + sanitizeKey
+│   │   ├── atomic.js             # Windows 兼容原子写
 │   │   ├── store.js              # L1 团队+协议状态读写、状态机校验、attempt 令牌
+│   │   ├── mailbox.js            # JSONL 邮箱（投递租约 / ack / 丢弃未读）
 │   │   ├── evidence-cache.js     # L2 证据缓存
 │   │   └── layout.js             # .pair-programming/ 目录布局
-│   ├── tools/
-│   │   ├── index.js              # 注册全部 pair_* 工具
-│   │   ├── lifecycle.js          # pair_start / pair_stop / pair_rotate / pair_status
+│   ├── tools/                    # 薄壳：参数校验 + 调 protocol/state
+│   │   ├── lifecycle.js          # pair_start / pair_stop / pair_rotate / pair_status / pair_interrupt
 │   │   ├── flow.js               # pair_task_claim/update + cycle primitives / pair_verify
+│   │   ├── task.js               # pair_task_create / 任务图
 │   │   ├── oracle.js             # pair_oracle_write / pair_oracle (SPEC-FORK)
+│   │   ├── oracle-exec.js        # oracle 的 fs/exec 半边（摘要、执行、触达评估）
+│   │   ├── gate-exec.js          # 门禁的 fs/exec 半边（重跑、交付物、范围基线）
 │   │   ├── risk.js               # pair_risk
-│   │   └── arbitrate.js          # pair_arbitrate / pair_gate_check / pair_task_update
-│   ├── events.js                 # session 事件追加（复刻 agent-teams events.js 的容错模式）
+│   │   ├── arbitrate.js          # pair_arbitrate / pair_gate_check
+│   │   └── shared.js             # 调用方解析 + 投递扇出 + wakeCaptain
+│   ├── events.js                 # session 事件追加（容错：报告静默的模块自己不能静默）
 │   └── types/
 │       └── index.d.ts
 └── README.md
@@ -90,7 +110,7 @@
       config:
         stateDir: .pair-programming
         maxCyclesPerTask: 12
-        defaultMode: full        # full | light
+        defaultMode: solo        # solo（默认，你 + 一个短命 SPEC 席位） | light | full（遗留多席位）
         evidenceCache: true
         memberProvider: spawn    # ctx.subagents provider
         maxMembers: 4
@@ -232,7 +252,7 @@ interface PairProtocolState {
 | `pair_task_update` | Driver | task_id, status, output?, attempt_id, gate_pass_id? | 任务状态迁移；completed 重验 gate 凭证绑定，变化即 `GATE_STALE` |
 | `pair_rotate` | Captain | new_driver, handoff_note | 成员角色互换（更新 toolFilter 与 persona 提示） |
 | `pair_status` | 任何人 | — | 协议快照（phase/cycle/risks/stats/邮箱预览） |
-| `pair_stop` | Captain | reason? | RETRO 报告 + 中断成员 + 清理 |
+| `pair_stop` | Captain | outcome (`complete`\|`aborted`), green_build_command?, reason? | 终态门禁：`complete` 机判全覆盖 + 每卡门禁凭证 + 无 P0/P1 + RETRO + 插件亲跑全量绿 → `DONE` + `completion_receipt`；否则 `ABORTED`（不发凭证）。两者都退役成员并清理 |
 
 任务认领：`pair_task_claim(task_id)` 返回 `attempt_id`（能力令牌），后续 `pair_task_update` 必须携带；reassign/rotate 撤销旧令牌防过期写入（复刻 agent-teams attempt 模式）。
 

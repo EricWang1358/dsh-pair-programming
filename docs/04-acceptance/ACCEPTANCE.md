@@ -1,6 +1,10 @@
 # ACCEPTANCE.md — 验收标准与测试计划
 
-> 实现完成 = 本文件全部勾选项通过。
+> ⏳ **v3 导读（2026-09-03，PROTOCOL_VERSION=3）**（当前协议为 PROTOCOL_VERSION=4；v4 增量见插件 `README.md` §v4 与 `CHANGELOG.md` 0.4.0）：下文 T1–T14 是 v1/v2 验收，保留为历史，不再是完成定义。
+> 当前完成定义见设计侧 `04-acceptance/ACCEPTANCE.md`（v3 正文，T1–T20，自动化项标注覆盖套件）：验收标准先于实现冻结，每一次判决都是一次重新执行；
+> 在 v3 对三个已封存失败实例重跑之前，不宣称正确性提升，只宣称关掉了那些失败经由的机制。
+>
+> 实现完成 = 本文件全部勾选项通过。（v1/v2 口径，历史）
 > **v1.1 修订**：插件自带结对运行时，**不再依赖** `@nanmicoder/dsh-agent-teams`；测试在装有 `@deepseek-ai/dsh` 的 profile 上进行即可（agent-teams 若存在仅作共存检查）。
 > **v1.2 修订**：新增课程理念层验收项 T11–T14（Test-First 循环、INVEST 故事、结构化反馈、绿构建+复盘继承）。
 
@@ -79,7 +83,7 @@
 - [ ] REJECT 记录 reason_category，`pair_status` 的 stats.reasons 聚合可见
 
 ### T14 绿构建与复盘继承
-- [ ] 有被验收改动时 `pair_stop` 无 `green_build_evidence` → 拒绝；`force=true` 可过
+- [ ] `pair_stop(outcome="complete")` 无 `green_build_command`（且未配置 `dodCommand`）→ 拒绝；命令退出非 0 → 拒绝；`force=true` 不再放行，只等价于 `outcome="aborted"`（写 `ABORTED`、不发 `completion_receipt`）
 - [ ] `pair_retro` 的 keep/try 写入 `lessons.json`；下一次 `pair_start` 返回值携带 carried_lessons 并入 PLANNING 职责
 
 ## 5. 性能与缓存验收

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { registerLifecycleTools } from '../lib/tools/lifecycle.js';
 import { lessonsFileOf } from '../lib/state/layout.js';
+const USE_CASES = [{ actor: 'maintainer', intent: 'exercise lifecycle', outcome: 'observe correct state', acceptance_criteria: ['lifecycle call succeeds'] }];
 
 /** startHarness from lifecycle.test.mjs minus failure injection: pair_start must succeed here. */
 function startHarness(root, stateDir, config = {}) {
@@ -32,28 +33,28 @@ export async function run(check) {
     // Runtime settings must affect the ordinary omitted-mode call; otherwise
     // the advertised light fast lane is unreachable without prompt surgery.
     const configuredLight = startHarness(root, 'out-default-light', { defaultMode: 'light' });
-    const lightByDefault = await configuredLight.start({ goal: 'g', name: 'configured-light' }, { agent: configuredLight.captain });
+    const lightByDefault = await configuredLight.start({ goal: 'g', name: 'configured-light', use_cases: USE_CASES }, { agent: configuredLight.captain });
     check(lightByDefault.mode === 'light' && configuredLight.spawns.length === 2, 'configured defaultMode=light is honored when pair_start omits mode');
 
     const explicitFull = startHarness(root, 'out-explicit-full', { defaultMode: 'light' });
-    const fullOverride = await explicitFull.start({ goal: 'g', mode: 'full', name: 'explicit-full' }, { agent: explicitFull.captain });
+    const fullOverride = await explicitFull.start({ goal: 'g', mode: 'full', name: 'explicit-full', use_cases: USE_CASES }, { agent: explicitFull.captain });
     check(fullOverride.mode === 'full' && explicitFull.spawns.length === 3, 'explicit mode=full overrides configured defaultMode=light');
 
     // State A: no lessons.json — the host bridge must accept the whole return value.
     const a = startHarness(root, 'out-a');
-    const okA = await a.start({ goal: 'g', mode: 'light', name: 'lo-a' }, { agent: a.captain });
+    const okA = await a.start({ goal: 'g', mode: 'light', name: 'lo-a', use_cases: USE_CASES }, { agent: a.captain });
     check(okA.team_id === 'lo-a' && a.spawns.length === 2, 'state A: pair_start succeeds with 2 spawns and the right team id');
     check(isJsonValue(okA) === true, 'state A: no lessons.json — output passes the lossless-JSON gate (no undefined carried_lessons)');
 
     // State A2 (M13' regression): pair_stop keeps the archived dir for audit, so
     // findTeamByCaptain must skip DONE teams — the same captain session can then
     // start a NEW team (fail-closed: unreadable/malformed records still block).
-    const stopped = await a.stop({ reason: 'm13 regression' }, { agent: a.captain });
+    const stopped = await a.stop({ outcome: 'aborted', reason: 'm13 regression' }, { agent: a.captain });
     check(stopped.team_id === 'lo-a' && typeof stopped.retired === 'number', 'state A2: pair_stop closes the team and reports its retirements');
     let restarted;
     let restartError;
     try {
-      restarted = await a.start({ goal: 'g2', mode: 'light', name: 'lo-a2' }, { agent: a.captain });
+      restarted = await a.start({ goal: 'g2', mode: 'light', name: 'lo-a2', use_cases: USE_CASES }, { agent: a.captain });
     } catch (error) {
       restartError = error;
     }
@@ -77,7 +78,7 @@ export async function run(check) {
     let stopped2;
     let stop2Error;
     try {
-      stopped2 = await a.stop({ reason: 'm13 round2' }, { agent: a.captain });
+      stopped2 = await a.stop({ outcome: 'aborted', reason: 'm13 round2' }, { agent: a.captain });
     } catch (error) {
       stop2Error = error;
     }
@@ -89,12 +90,12 @@ export async function run(check) {
     } catch (error) {
       st3Error = error;
     }
-    check(st3 !== undefined && st3.phase === 'DONE' && st3.summary.includes('Team "lo-a" ('), `state A3: after stopping lo-a2, pair_status falls back to the first DONE archive (lo-a, DONE phase — tool-level audit face)${st3Error ? ` — got: ${st3Error.message}` : ''}`);
+    check(st3 !== undefined && st3.phase === 'ABORTED' && st3.summary.includes('Team "lo-a" ('), `state A3: after stopping lo-a2, pair_status falls back to the first terminal archive (lo-a, ABORTED phase — tool-level audit face)${st3Error ? ` — got: ${st3Error.message}` : ''}`);
     // State B: lessons.json present — same gate, and only the keep/try projection is carried.
     const b = startHarness(root, 'out-b');
     await mkdir(join(root, 'out-b'), { recursive: true });
     await writeFile(lessonsFileOf(join(root, 'out-b')), JSON.stringify({ teamId: 't-prev', keep: ['k-1'], try: ['t-1'] }), 'utf8');
-    const okB = await b.start({ goal: 'g', mode: 'light', name: 'lo-b' }, { agent: b.captain });
+    const okB = await b.start({ goal: 'g', mode: 'light', name: 'lo-b', use_cases: USE_CASES }, { agent: b.captain });
     check(isJsonValue(okB) === true, 'state B: with lessons.json — output passes the lossless-JSON gate');
     check(JSON.stringify(okB.carried_lessons) === '{"keep":["k-1"],"try":["t-1"]}', 'state B: carried_lessons is exactly the keep/try projection (teamId excluded)');
   } finally {

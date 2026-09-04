@@ -1,6 +1,6 @@
 # PROMPT.md — 实现启动 Prompt
 
-> **⚠️ 历史文档（v1.0）**：本 prompt 已完成其使命，插件已实现于 `../dsh-pair-programming/`。其中关于 `@nanmicoder/dsh-agent-teams` 作为**前置依赖/桥接对象**的表述已过时——v1.1 起插件自带独立结对运行时（仅从 agent-teams 的 MIT 源码复刻模式，运行零依赖）。v1.2 起协议为 PROTOCOL_VERSION=2：Pair Cycle 增加 Test-First（RED→GREEN→REFACTOR）与任务用户故事/INVEST 校验、结构化反馈三段式、可配置 DoD 门禁、绿构建、strong/ping-pong 风格、spike/trivial。当前权威描述见 `../01-design/DESIGN.md` §12、`04-acceptance/ACCEPTANCE.md`（T1–T14）与插件 README。
+> **⚠️ 历史文档（v1.0）**：本 prompt 已完成其使命，插件已实现于 `../dsh-pair-programming/`。其中关于 `@nanmicoder/dsh-agent-teams` 作为**前置依赖/桥接对象**的表述已过时——v1.1 起插件自带独立结对运行时（仅从 agent-teams 的 MIT 源码复刻模式，运行零依赖）。v1.2 起协议为 PROTOCOL_VERSION=2：Pair Cycle 增加 Test-First（RED→GREEN→REFACTOR）与任务用户故事/INVEST 校验、结构化反馈三段式、可配置 DoD 门禁、绿构建、strong/ping-pong 风格、spike/trivial。当前权威描述见 `../01-design/DESIGN.md` §12、`04-acceptance/ACCEPTANCE.md`（T1–T14）与插件 README。v3 起协议为 PROTOCOL_VERSION=3（oracle-first：SPEC-FORK 冻结验收、计算判决、门禁亲跑命令）——v2 的"三常驻席位、Driver 自写 RED、数证据字符串的门禁"已被取代，推导见设计侧 `01-design/REDESIGN-v3.md`；两处冲突以代码与 REDESIGN-v3 为准。
 
 > 使用方法：打开一个新 session，把下面「=== PROMPT 开始 ===」到「=== PROMPT 结束 ===」之间的**全部内容**复制粘贴发送。
 > 前置条件（v1.0 原文，已由 v1.1 取代）：目标机器已装 `@deepseek-ai/dsh`；不再要求安装 `@nanmicoder/dsh-agent-teams`。

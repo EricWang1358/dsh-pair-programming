@@ -2,7 +2,9 @@
 
 > 来源：本机已安装的 `@nanmicoder/dsh-agent-teams@0.1.13`
 > 路径：`C:\Users\Eric1\.dsh\profiles\web\node_modules\@nanmicoder\dsh-agent-teams`
-> 本文是实现 `dsh-pair-programming` 时对接底座的权威参考（从 package.json、lib/*.d.ts、lib/*.js 源码提取）。
+> ⏳ **v3 注（历史参考）**：agent-teams 从来只是 MIT 复刻来源，运行期零依赖（v1.1 起自带运行时）。下文是 v1 时期从其源码提取的对接速查，保留为出处记录；新实现不照此对接，改协议先读 REDESIGN-v3。
+>
+> 本文是实现 `dsh-pair-programming` 时对接底座的权威参考（从 package.json、lib/*.d.ts、lib/*.js 源码提取）。（v1 口径，历史）
 
 ## 1. 挂载机制（bundle patch）
 
