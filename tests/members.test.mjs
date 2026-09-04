@@ -87,7 +87,16 @@ export async function run(check) {
   handlers.get('agent/inbox/inserted')({ agent: { id: 'old-child', inbox: { remove: id => { removed = id; } } }, message: { id: 'cross-team-message' } });
   check(removed === 'cross-team-message', 'a generic host message to a retired pair child is removed synchronously');
   const accepted = await deliverToMember(retiredCtx, {}, 'old-child', 'stale', new AbortController().signal);
-  check(accepted === false && followed === false, 'pair delivery also refuses a retired child before calling the host');
+  check(accepted.ok === false && followed === false, 'pair delivery also refuses a retired child before calling the host');
+  check(typeof accepted.reason === 'string' && accepted.reason.length > 0, 'and says why, because a wake that did not happen must never read like one that did');
+  // The refusal the host itself gives is the diagnostic the board was missing.
+  // Two live sessions went quiet for 244s with "Mail pending for: driver,
+  // navigator, challenger" and a stall report that could not name a cause,
+  // because the typed SubagentError (DRAINING / ACTIVATION_CLOSING) had already
+  // been swallowed into a logger.warn nobody reads.
+  const throwing = { logger: { warn: () => {} }, subagents: { followup: async () => { throw new Error('continuable subagents are draining; the operation was not admitted'); } } };
+  const refused = await deliverToMember(throwing, {}, 'live-child', 'x', new AbortController().signal);
+  check(refused.ok === false && refused.reason.includes('draining'), 'a host refusal is carried out verbatim instead of being logged and dropped');
   // The spawn filter used to be a list of GUESSED names intersected with the
   // registry: `NON_DRIVER_WRITE_TOOL_CANDIDATES.filter(n => known.has(n))`.
   // That drops every name it did not anticipate, so it failed OPEN on exactly

@@ -200,7 +200,7 @@ Or develop against a local checkout (`link:` install per [docs](docs/README.md))
 ## Verified engineering
 
 ```sh
-npm test          # 570 assertions across 19 suites, pure-logic, offline
+npm test          # 575 assertions across 19 suites, pure-logic, offline
 npm run verify    # import gate · startup gate · package gate · typecheck — all green
 ```
 

@@ -44,6 +44,20 @@ fifth is a blind spot no re-run can cover.
   protocol text forbids. `kickMember` now delivers the board's `[PAIR:NEXT]` line
   straight to the owing seat, in the second person, once per debt.
 
+- **The host's own refusal now reaches the board, instead of a log nobody reads.**
+  This is the root-cause layer under every stall above. `ctx.subagents.followup`
+  refuses with a TYPED `SubagentError` — `DRAINING` while continuable subagents
+  shut down, `ACTIVATION_CLOSING` mid-disposal — and `deliverToMember` swallowed
+  it into a `logger.warn` and returned a bare `false`. `kickMember`'s redelivery
+  branch then released the mail and returned having recorded **nothing**, so the
+  sweep retried silently every 120s and the only artifact was a stall report
+  that could not name a cause. That is precisely what two live sessions
+  produced: `Mail pending for: driver, navigator, challenger`, 244s, and no why.
+  `deliverToMember` now returns `{ ok, reason }`; every failure path records a
+  decline; the stall report carries it verbatim under **Why the sweep could not
+  clear it**; and the sending tool's own result gains `wake_refused`, because
+  `delivered: "mailbox"` on its own reads like success to a model.
+
 ### Added
 - **`pair_green(tuned_for_oracle)` — required.** Which values, thresholds, sizes,
   positions or counts were chosen so the ORACLE would pass rather than because

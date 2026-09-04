@@ -130,7 +130,7 @@ export async function run(check) {
     // step, the one thing its own protocol text forbids.
     const hRoot = join(root, 'h-state');
     const owing = teamFixture({ id: 'n1', updatedAt: 4242 });
-    const hCycle = openCycle(owing.protocol, { taskId: 't-1', driver: 'driver', intent: 'i', files: ['a.js'], verify_plan: 'v' });
+    const hCycle = openCycle(owing.protocol, 't-1', { tddMode: 'enforce' });
     hCycle.step = 'GREEN';
     hCycle.oracleSha = 'a'.repeat(64);
     await createTeamDir(hRoot, owing);
@@ -153,6 +153,40 @@ export async function run(check) {
     // the nudge specifically, or this passes for the wrong reason.
     check(followups.filter(f => f.text.includes('the board has been waiting on you')).length === 1,
       'H only the seat named by [PAIR:NEXT] is nudged — the Driver owes nothing here and gets its ordinary attempt recovery instead');
+
+    // H2: when the host REFUSES the wake, the board must say so.
+    //
+    // This is the root-cause layer under every stall in this file. The host
+    // throws a typed SubagentError — DRAINING while continuable subagents shut
+    // down, ACTIVATION_CLOSING mid-disposal — and deliverToMember used to
+    // swallow it into a logger.warn and return a bare false. The unread branch
+    // then released the mail and returned WITHOUT recording anything, so the
+    // sweep retried silently every 120s and the only artifact was a stall
+    // report that could not name a cause. That is exactly what two live
+    // sessions produced: "Mail pending for: driver, navigator, challenger",
+    // 244s, and no why. The refusal now reaches the captain verbatim.
+    const rRoot = join(root, 'r-state');
+    const refusing = teamFixture({ id: 'r1', updatedAt: 99 });
+    const rCycle = openCycle(refusing.protocol, 't-1', { tddMode: 'enforce' });
+    rCycle.step = 'GREEN';
+    rCycle.oracleSha = 'b'.repeat(64);
+    // Older than STALL_AFTER_MS: the diagnosis is derived from the board's own
+    // timestamps, never from a stored clock.
+    rCycle.openedAt = Date.now() - 400_000;
+    await createTeamDir(rRoot, refusing);
+    const steers = [];
+    const rctx = {
+      logger: { warn: () => {}, debug: () => {} }, on: () => {},
+      agents: { get: (id) => (id === 'cap1' ? { id: 'cap1', status: 'idle', followup: (m) => { steers.push(m.content[0].text); }, session: { append: () => {} } } : undefined) },
+      subagents: { followup: async () => { throw new Error('continuable subagents are draining; the operation was not admitted'); } },
+    };
+    const rsched = installPairScheduler(rctx, { stateDir: 'r-state', heartbeatMs: 0 });
+    await rsched.kickMember(root, 'r1', 'navigator');
+    await rsched.escalateIfStalled(root, 'r1');
+    const reported = steers.join(String.fromCharCode(10));
+    check(reported.includes('Why the sweep could not clear it'), 'H2 a sweep that could not move anything says so to the one party able to act');
+    check(reported.includes('draining'), 'H2 and carries the host refusal verbatim — the difference between "went quiet" and "went quiet BECAUSE"');
+    check(reported.includes('navigator'), 'H2 naming which seat could not be woken');
 
     // G: settled teams leave the sweep list (all tasks terminal, all idle,
     // no mail, nothing owed) — a finished team costs zero future sweeps, and
