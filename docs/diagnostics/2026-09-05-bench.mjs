@@ -48,18 +48,24 @@ function stubHost(counters) {
 }
 
 async function mailboxScaling(root) {
-  console.log('\n== 1. mailbox: read-all + rewrite-all per append ==');
-  console.log('n     append total   per-msg   file      bytes rewritten   unread scan   claim+ack');
+  console.log('\n== 1. mailbox: O(1) append (0.13.7; was read-all + rewrite-all) ==');
+  console.log('n     append total   per-msg   file      bytes written   old path would   unread scan   claim+ack');
   for (const n of [100, 250, 500, 1000]) {
     const stateRoot = join(root, `mail-${n}`);
     const id = 'team';
     await createTeamDir(stateRoot, team(id));
-    let rewritten = 0;
+    // `written` is what this append path actually puts on disk; `wouldRewrite`
+    // is what the pre-0.13.7 read-and-rewrite path would have moved for the
+    // same messages. Keeping both is the point of the column pair.
+    let written = 0, wouldRewrite = 0, previous = 0;
     const file = join(stateRoot, id, 'inbox', 'captain.jsonl');
     const t0 = now();
     for (let i = 0; i < n; i += 1) {
       await appendMailbox(stateRoot, id, 'captain', createMessage('driver', 'captain', `message ${i} padded to a realistic length for a board note`));
-      rewritten += (await stat(file)).size;
+      const size = (await stat(file)).size;
+      written += size - previous;
+      previous = size;
+      wouldRewrite += size;
     }
     const appendNs = now() - t0;
     const size = (await stat(file)).size;
@@ -70,7 +76,7 @@ async function mailboxScaling(root) {
     await claimMailboxDelivery(stateRoot, id, 'captain', [unread[0].id]);
     await acknowledgeMailbox(stateRoot, id, 'captain', [unread[0].id]);
     const ackNs = now() - t2;
-    console.log(`${String(n).padEnd(6)}${ms(appendNs).padEnd(15)}${ms(appendNs / BigInt(n)).padEnd(10)}${kib(size).padEnd(10)}${kib(rewritten).padEnd(18)}${ms(scanNs).padEnd(14)}${ms(ackNs)}`);
+    console.log(`${String(n).padEnd(6)}${ms(appendNs).padEnd(15)}${ms(appendNs / BigInt(n)).padEnd(10)}${kib(size).padEnd(10)}${kib(written).padEnd(16)}${kib(wouldRewrite).padEnd(17)}${ms(scanNs).padEnd(14)}${ms(ackNs)}`);
   }
 }
 
@@ -187,7 +193,7 @@ async function retiredDenyList(root) {
 }
 
 async function writeCost(root) {
-  console.log('\n== 7. where an append actually spends its time (200 ops on a 160 KiB file) ==');
+  console.log('\n== 7. the two write paths, measured (200 ops on a 160 KiB file) ==');
   const dir = join(root, 'writecost');
   await createTeamDir(dir, team('t'));
   const line = JSON.stringify(createMessage('driver', 'captain', 'a representative board note')) + '\n';
@@ -204,8 +210,8 @@ async function writeCost(root) {
   for (let i = 0; i < 200; i += 1) await appendFile(appendTarget, line, 'utf8');
   const appendNs = (now() - t2) / 200n;
   console.log(`read whole file        ${ms(readNs)}`);
-  console.log(`atomic rewrite         ${ms(atomicNs)}  (temp write + rename; what appendMailbox does)`);
-  console.log(`plain O(1) appendFile  ${ms(appendNs)}`);
+  console.log(`atomic rewrite         ${ms(atomicNs)}  (temp write + rename; what mutateMailbox still does)`);
+  console.log(`plain O(1) appendFile  ${ms(appendNs)}  (what appendMailbox does since 0.13.7)`);
 }
 
 const root = await mkdtemp(join(tmpdir(), 'pair-bench-'));

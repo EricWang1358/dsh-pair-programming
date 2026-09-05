@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, rm, open, readdir, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { replaceFileAtomicOrDirect } from '../lib/state/atomic.js';
 import { createTeamDir, readTeam, writeTeam, commitMemberReplacement } from '../lib/state/store.js';
+import { appendMailbox, createMessage, readMailbox, acknowledgeMailbox } from '../lib/state/mailbox.js';
 import { initialProtocolState } from '../lib/protocol/machine.js';
 import { installPairScheduler } from '../lib/runtime/scheduler.js';
 import { recycleMember } from '../lib/runtime/recycle.js';
 import { isMemberRetired } from '../lib/runtime/members.js';
 import { spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const fixture = (id) => ({ id, name: id, goal: 'probe', mode: 'light',
@@ -162,6 +164,107 @@ export async function run(check) {
       assert.equal(result.reason, 'spawn refused');
       assert.deepEqual(interrupted, []);
       assert.equal((await readTeam(stateRoot, 'race')).members[0].id, 'old');
+    });
+    await test('an append grows the file readers already hold open, it does not replace it', async () => {
+      const stateRoot = join(root, 'mail-prefix'); await createTeamDir(stateRoot, fixture('m'));
+      const file = join(stateRoot, 'm', 'inbox', 'captain.jsonl');
+      for (let i = 0; i < 5; i += 1) await appendMailbox(stateRoot, 'm', 'captain', createMessage('driver', 'captain', `note ${i}`));
+      // A handle opened BEFORE the append. The replaced-file path (write temp,
+      // rename over the target) leaves this handle on the old inode, so it
+      // could never observe the sixth record; an in-place append can.
+      const handle = await open(file, 'r');
+      try {
+        const seen = await handle.readFile('utf8');
+        assert.ok(!seen.includes('note 5'));
+        await appendMailbox(stateRoot, 'm', 'captain', createMessage('driver', 'captain', 'note 5'));
+        // The handle sits at EOF-as-it-was, so a second read returns exactly
+        // the bytes the append added — nothing before them was touched.
+        const grown = await handle.readFile({ encoding: 'utf8' });
+        assert.ok(grown.includes('note 5'), 'the pre-existing handle must see the appended record');
+        assert.ok(!grown.includes('note 0'), 'committed records must not be rewritten');
+        assert.ok((await readFile(file, 'utf8')).startsWith(seen));
+      } finally { await handle.close(); }
+      assert.deepEqual((await readMailbox(stateRoot, 'm', 'captain')).map(v => v.content),
+        ['note 0', 'note 1', 'note 2', 'note 3', 'note 4', 'note 5']);
+    });
+    await test('a torn trailing line is skipped, and the next record does not fuse with it', async () => {
+      const stateRoot = join(root, 'mail-torn'); await createTeamDir(stateRoot, fixture('m'));
+      const file = join(stateRoot, 'm', 'inbox', 'captain.jsonl');
+      await appendMailbox(stateRoot, 'm', 'captain', createMessage('driver', 'captain', 'survivor'));
+      const whole = await readFile(file, 'utf8');
+      // Emulate an append interrupted mid-line: a complete record, then a fragment.
+      await writeFile(file, `${whole}{"id":"torn","from":"dri`);
+      const malformed = [];
+      await appendMailbox(stateRoot, 'm', 'captain', createMessage('driver', 'captain', 'after the tear'));
+      const messages = await readMailbox(stateRoot, 'm', 'captain', (line) => malformed.push(line));
+      assert.deepEqual(messages.map(v => v.content), ['survivor', 'after the tear']);
+      assert.equal(malformed.length, 1);
+      assert.ok((await readFile(file, 'utf8')).includes('dri\n{'), 'the fragment must not swallow the new record');
+    });
+    await test('concurrent appends to one mailbox all land, none interleaved', async () => {
+      const stateRoot = join(root, 'mail-race'); await createTeamDir(stateRoot, fixture('m'));
+      await Promise.all(Array.from({ length: 40 }, (_, i) =>
+        appendMailbox(stateRoot, 'm', 'captain', createMessage('driver', 'captain', `parallel ${i}`))));
+      const messages = await readMailbox(stateRoot, 'm', 'captain');
+      assert.equal(messages.length, 40);
+      assert.deepEqual([...new Set(messages.map(v => v.content))].length, 40);
+    });
+    await test('acknowledge still rewrites in place, which append cannot express', async () => {
+      const stateRoot = join(root, 'mail-ack'); await createTeamDir(stateRoot, fixture('m'));
+      for (let i = 0; i < 3; i += 1) await appendMailbox(stateRoot, 'm', 'captain', createMessage('driver', 'captain', `note ${i}`));
+      const [first] = await readMailbox(stateRoot, 'm', 'captain');
+      await acknowledgeMailbox(stateRoot, 'm', 'captain', [first.id]);
+      const after = await readMailbox(stateRoot, 'm', 'captain');
+      assert.equal(after.length, 3);
+      assert.equal(typeof after[0].readAt, 'number');
+      assert.equal(after[1].readAt, undefined);
+    });
+    await test('a superseded recovery copy is reclaimed; a sibling one and a fresh one are not', async () => {
+      const dir = join(root, 'sweep');
+      const target = join(dir, 'team.json'), sibling = join(dir, 'other.json');
+      await createTeamDir(dir, fixture('placeholder'));
+      await writeFile(target, '{}'); await writeFile(sibling, '{}');
+      const aged = (path) => `${path}.${process.pid}.${crypto.randomUUID()}.tmp`;
+      const supersededCopy = aged(target), siblingCopy = aged(sibling), freshCopy = aged(target);
+      for (const path of [supersededCopy, siblingCopy, freshCopy]) await writeFile(path, '{"pending":true}');
+      const old = new Date(Date.now() - 600_000);
+      await utimes(supersededCopy, old, old); await utimes(siblingCopy, old, old);
+
+      // A failed commit registers the target; nothing is reclaimed yet.
+      await assert.rejects(replaceFileAtomicOrDirect(supersededCopy, target, '{}', {
+        rename: async () => { throw Object.assign(new Error('busy'), { code: 'EPERM' }); },
+        writeFile: async () => assert.fail('must not overwrite'), remove: async () => assert.fail('must not remove'),
+      }, { retries: 0, retryDelayMs: 0 }));
+      assert.ok((await readdir(dir)).includes(supersededCopy.split(/[\\/]/).pop()));
+
+      // The next successful commit of THAT target supersedes it.
+      await replaceFileAtomicOrDirect('unused', target, '{}', {
+        rename: async () => undefined, writeFile: async () => assert.fail('must not overwrite'), remove: async () => assert.fail('must not remove'),
+      });
+      const left = await readdir(dir);
+      const name = (path) => path.split(/[\\/]/).pop();
+      assert.ok(!left.includes(name(supersededCopy)), 'the superseded copy must be reclaimed');
+      assert.ok(left.includes(name(freshCopy)), 'a copy young enough to be an in-flight write must survive');
+      assert.ok(left.includes(name(siblingCopy)), 'another target\'s uncommitted copy must survive');
+    });
+    await test('a resume after the scan TTL sees the board as it is now, not as it was', async () => {
+      const workspace = join(root, 'ttl'), stateRoot = join(workspace, 'state');
+      await createTeamDir(stateRoot, fixture('settling'));
+      const handlers = new Map();
+      const ctx = { on: (n, f) => handlers.set(n, f), logger: { warn() {} }, agents: { get() {} }, subagents: {} };
+      const scheduler = installPairScheduler(ctx, { stateDir: 'state', heartbeatMs: 0 }, { recoveryScanTtlMs: 0 });
+      const resume = () => handlers.get('agent/session-start')({ agent: { id: 'cap', session: { header: { cwd: workspace } } } });
+      await resume();
+      assert.deepEqual(scheduler.trackedTeams().map(t => t.teamId), ['settling']);
+      // The team finishes, and the sweep takes it off the list.
+      const done = await readTeam(stateRoot, 'settling');
+      done.protocol.phase = 'DONE';
+      await writeTeam(stateRoot, done);
+      scheduler.untrackTeam(workspace, 'settling');
+      // A memoised snapshot would put it straight back; a re-read does not.
+      await resume();
+      assert.deepEqual(scheduler.trackedTeams(), []);
+      handlers.get('dispose')();
     });
     await test('concurrent replacement commits choose one generation', async () => {
       const stateRoot = join(root, 'concurrent'), team = fixture('race'); await createTeamDir(stateRoot, team);

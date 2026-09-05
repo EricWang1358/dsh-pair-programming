@@ -7,6 +7,103 @@ protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 
 ## [Unreleased]
 
+## [0.13.7] — 2026-09-05
+
+The debts 0.13.6 recorded rather than paid. Each one here was either a claim
+that had gone false, or growth that was unbounded by construction — the same
+standard 0.13.5 used on the process-local maps. The structural work the review
+also listed is deliberately still outstanding; see the end of this entry.
+
+### Changed — the mailbox appends instead of rewriting itself
+
+`appendMailbox` read the whole JSONL file and committed a new copy of it for
+every message. Delivering 1000 messages moved **81 MiB** of disk to store
+162 KiB, and per-message cost grew with the mailbox (5.5 ms at 100 messages,
+7.9 ms at 1000). It is now an `appendFile`: bytes written equal bytes stored,
+and per-message cost is flat across the same range. A same-run comparison of
+the two write paths on a 160 KiB file puts the atomic rewrite at 1.4 ms
+against 0.6 ms for the append, on top of the 0.4 ms whole-file read the append
+no longer needs.
+
+What the rewrite bought was a file that never carries a torn line. It did
+**not** buy message durability: a crash before the rename lost the new record
+exactly as a crash mid-append does, because in both cases the message never
+reached disk whole. So the cost of the change is a torn *trailing* line
+surviving in the file — which `readMailbox` already skips, and which a
+one-byte boundary check refuses to fuse the next record onto. The win is the
+converse: records already committed are no longer rewritten, so an interrupted
+append cannot damage history, where the old path put the entire mailbox at
+risk on every message.
+
+`mutateMailbox` (claim / release / acknowledge) still rewrites atomically. It
+edits records in place, which an append cannot express.
+
+One thing this also removed: forty concurrent appends to one mailbox used to
+lose records, because read-modify-write races itself. Callers serialise on the
+team lock so this was not reachable in production — it was a loaded footgun
+rather than a live bug, and it is now unloaded.
+
+### Fixed — recovery copies accumulated with nothing to reclaim them
+
+0.13.6 made a failed commit keep its complete temp file, on purpose: silently
+removing it is what destroyed state in the first place. But nothing ever
+removed one, so repeated failures grew the state directory without bound.
+
+A recovery copy is now reclaimed at exactly one moment — when a **later commit
+of the same target succeeds**, which is when the version it holds becomes
+superseded rather than merely old. Scoping matters: a sibling file's recovery
+copy is not superseded by this commit and is left alone, and copies younger
+than a minute are left alone because they may be a write still in flight. The
+sweep runs only for targets whose commit actually failed, so the normal path
+does not pay a directory scan.
+
+### Fixed — a resumed captain could be handed a phase the board had left
+
+`recoveryScans` memoised each workspace scan for the life of the process. The
+snapshot records a phase, so a team that reached DONE after the scan was
+re-tracked from the stale entry on the captain's next resume. The sweep
+untracked it again — it self-healed — but a cache that can hand back a phase
+known to be false is a stale read, not a design. The memo now carries a 5 s
+TTL: long enough to coalesce the session-start burst of a host coming up,
+short enough that no resume is served a phase the board has since left.
+
+### Fixed — three claims about the plugin that had gone false
+
+- `dsh.sdk.testedCohort` named `0.1.2-alpha.5`; every installed package is
+  `0.1.2-rc.1`, and that is what `verify:startup` has been passing against.
+- `ARCHITECTURE.md` claimed 20 `pair_*` tools in two places. There are 22.
+- It claimed `PROTOCOL_VERSION=4`. Personas ship `'5'`. It also pointed at
+  `runtime/mailbox.js`, which has been `state/mailbox.js`.
+
+### Added — `drift.test.mjs`, for the claims that live outside the code
+
+A version string in a manifest and a count in a diagram are assertions like
+any other; they are just not executed, so nothing says when they stop being
+true. This suite derives the few that are cheap to derive and compares them:
+the tested cohort against the installed packages, the config schema against
+its published types, the architecture document's tool count and protocol
+version against the modules, and the newest CHANGELOG heading against the
+shipped version. Nothing else is pinned — a suite that mirrored every sentence
+would become the second source of truth it exists to prevent.
+
+### Not done, and why
+
+- **HostAdapter / StateRepository / SeatLifecycle full extraction.** No
+  reproduced defect stands behind any of them. Reworking load-bearing
+  boundaries immediately after landing a recovery fix widens exactly the
+  interleaving surface the review warned about, with nothing measured to show
+  for it.
+- **Quota-vs-rate-limit classification.** `isQuotaError` matches prose. The
+  SDK offers `LlmErrorOptions.status` instead of a quota code, so switching
+  would mean deciding whether 402 and 429 both mean exhausted — and guessing
+  wrong makes a seat fall back to the captain's model *permanently* after one
+  transient limit. That cannot be verified here against a real provider.
+- **Cross-process write locking.** A deployment constraint, not a defect, and
+  an OS-lock design of its own.
+- **Real-host cold recovery, long-run load, live model calls.** Not runnable
+  here. Every number in `docs/diagnostics/` comes from a temp directory and an
+  in-memory stub host, and none of it supports an availability or MTTR claim.
+
 ## [0.13.6] — 2026-09-05
 
 Three recovery defects, each reproduced by deterministic fault injection before

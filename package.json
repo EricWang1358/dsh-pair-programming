@@ -1,6 +1,6 @@
 {
   "name": "@ericwang1358/dsh-pair-programming",
-  "version": "0.13.6",
+  "version": "0.13.7",
   "description": "Agile pair programming for DeepSeek Harness: a self-contained Driver/Navigator/Challenger protocol runtime with quality gates, on host subagent primitives. No third-party plugin dependencies.",
   "type": "module",
   "main": "lib/index.js",
@@ -42,7 +42,7 @@
       "patch": "./cordis.patch.yml"
     },
     "sdk": {
-      "testedCohort": "@deepseek-ai/dsh@0.1.2-alpha.5 (cordis 4.0.2)",
+      "testedCohort": "@deepseek-ai/dsh@0.1.2-rc.1 (cordis 4.0.2)",
       "supportedDsh": ">=0.1.2-alpha <0.2",
       "note": "Beta+ gate: the plugin must start under this cohort. Bumping the DSH SDK requires re-running verify:startup before re-enabling in any daily profile."
     },
