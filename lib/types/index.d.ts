@@ -23,6 +23,15 @@ export interface Config {
   dod?: string;
   oracleFirst?: boolean;
   memberLifetime?: 'cycle' | 'session';
+  navigatorModel?: string;
+  navigatorEffort?: string;
+  navigatorModelProbeToken?: string;
+  maxTokenResumes?: number;
+  maxCarriedLessons?: number;
+  ceLanes?: 'off' | 'captain' | 'advisory' | 'full';
+  ceSoloLane?: 'off' | 'gesture' | 'curated' | 'full';
+  cePath?: string;
+  ceProbeToken?: string;
   oracleForkBudget?: number;
   heartbeatMs?: number;
   workingLeaseMs?: number;

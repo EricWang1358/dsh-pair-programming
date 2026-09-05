@@ -50,7 +50,7 @@ function harness(root, stateDir, cfg = {}) {
     logger: { warn: () => {}, debug: () => {}, error: () => {} },
     tools: { register: (d) => { defs.push(d); } },
     agents: { get: (id) => (id === 'cap1' ? { id: 'cap1', session: { append: () => {} } } : undefined) },
-    subagents: { followup: async () => true },
+    subagents: { sendMessage: async () => 'm-1' },
   };
   const config = { stateDir, tddMode: 'enforce', maxCyclesPerTask: 12, oracleFirst: true, evidenceCache: false, ...cfg };
   registerFlowTools(ctx, config, { scheduler: {} });

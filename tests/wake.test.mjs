@@ -17,6 +17,26 @@ import { initialProtocolState, openCycle } from '../lib/protocol/machine.js';
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
 
+/**
+ * Wait for a condition instead of for the clock.
+ *
+ * `agent/status` starts a fire-and-forget chain of fs reads, a lock and a
+ * write; a fixed 60ms sleep was enough on an idle machine and not enough once
+ * the suite grew to thirty files, two of which mount real host services. The
+ * assertion then failed for a reason that had nothing to do with the code —
+ * the same shape as the false REJECT this release fixed, one layer down.
+ */
+async function waitFor(predicate, label, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    let value;
+    try { value = await predicate(); } catch { value = undefined; }
+    if (value) return value;
+    if (Date.now() > deadline) throw new Error(`timed out after ${timeoutMs}ms waiting for ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 function memberOf(id, role) {
   return { id, name: role, role, status: 'idle', joinedAt: 1 };
 }
@@ -38,7 +58,7 @@ function stalledHarness(root, kicks, { followupOk = false, captainLive = true, s
     logger: { warn: () => {}, debug: () => {}, error: () => {} },
     tools: { register: (d) => { defs.push(d); } },
     agents: { get: (id) => (captainLive && id === 'cap1' ? { id: 'cap1', session: { append: () => {} } } : undefined) },
-    subagents: { followup: async () => { if (!followupOk) throw new Error('followup refused'); return true; } },
+    subagents: { sendMessage: async () => { if (!followupOk) throw new Error('followup refused'); return 'm-1'; } },
   };
   registerWakeRuntime(ctx, { kickMember: async (workspace, teamId, memberName) => { kicks.push(`${teamId}/${memberName}`); } });
   registerFlowTools(ctx, { stateDir, tddMode: 'enforce', maxCyclesPerTask: 12 }, { scheduler: {} });
@@ -50,6 +70,35 @@ function stalledHarness(root, kicks, { followupOk = false, captainLive = true, s
 }
 
 export async function run(check) {
+  /* ---- process-local state is released with the seats that own it ------- */
+  // lastNudge / memberActivity / parkedAttempts are keyed by CHILD SESSION ID,
+  // and memberLifetime:'cycle' mints a fresh id on every accepted cycle — so
+  // both grew for the life of the process, one entry per seat that ever
+  // existed, with nothing removing them. Small entries, so this was never what
+  // exhausts a heap; unbounded by construction is the part that matters.
+  {
+    const handlers = new Map();
+    const ctx = {
+      logger: { warn: () => {}, debug: () => {} },
+      on: (name, fn) => handlers.set(name, fn),
+      agents: { get: () => undefined },
+      subagents: {},
+    };
+    const sched = installPairScheduler(ctx, { stateDir: 'x', heartbeatMs: 0 });
+    check(typeof sched.releaseTeamSeats === 'function', 'the scheduler can hand back everything keyed to the seats of one team');
+    let threw = false;
+    try {
+      sched.releaseTeamSeats(['child-a', 'child-b'], 'team-1');
+      sched.releaseTeamSeats(undefined, undefined);
+      sched.releaseTeamSeats([undefined, '', 'child-c'], 'team-1');
+    } catch { threw = true; }
+    check(!threw, 'releasing is total: unknown ids, empty ids and a missing list are all no-ops, because teardown must never be the thing that throws');
+    sched.trackTeam('/ws', 'team-1');
+    check(sched.trackedTeams().length === 1, 'a tracked team is on the sweep list');
+    sched.untrackTeam('/ws', 'team-1');
+    check(sched.trackedTeams().length === 0, 'and untracking removes it — including its stall-report entry, which had no delete path at all');
+  }
+
   const root = await mkdtemp(join(tmpdir(), 'pair-wake-'));
   try {
     // A: no scheduler registered -> scheduleWake is a no-op, never a throw.
@@ -138,7 +187,7 @@ export async function run(check) {
     const hctx = {
       logger: { warn: () => {}, debug: () => {} }, on: () => {},
       agents: { get: (id) => (id === 'cap1' ? { id: 'cap1', session: { append: () => {} } } : undefined) },
-      subagents: { followup: async (_cap, childId, content) => { followups.push({ childId, text: content[0].text }); return true; } },
+      subagents: { sendMessage: async (_sender, targetId, content) => { followups.push({ childId: targetId, text: content[0].text }); return 'm-1'; } },
     };
     const hsched = installPairScheduler(hctx, { stateDir: 'h-state', heartbeatMs: 0 });
     await hsched.kickMember(root, 'n1', 'navigator');
@@ -178,7 +227,7 @@ export async function run(check) {
     const rctx = {
       logger: { warn: () => {}, debug: () => {} }, on: () => {},
       agents: { get: (id) => (id === 'cap1' ? { id: 'cap1', status: 'idle', followup: (m) => { steers.push(m.content[0].text); }, session: { append: () => {} } } : undefined) },
-      subagents: { followup: async () => { throw new Error('continuable subagents are draining; the operation was not admitted'); } },
+      subagents: { sendMessage: async () => { throw new Error('continuable subagents are draining; the operation was not admitted'); } },
     };
     const rsched = installPairScheduler(rctx, { stateDir: 'r-state', heartbeatMs: 0 });
     await rsched.kickMember(root, 'r1', 'navigator');
@@ -235,8 +284,13 @@ export async function run(check) {
     };
     const ts = installPairScheduler(tctx, { stateDir: 'tele-state', heartbeatMs: 0, workingLeaseMs: 600_000 });
     handlers.get('agent/status')({ agent: child, status: 'running' });
-    await settle();
-    let tele = await readTeam(teleRoot, 'tele');
+    let tele = await waitFor(
+      async () => {
+        const t = await readTeam(teleRoot, 'tele');
+        return t?.members[0]?.status === 'working' && typeof t.members[0].activity?.startedAt === 'number' ? t : undefined;
+      },
+      'the running status edge to land on the board',
+    );
     check(tele.members[0].status === 'working' && typeof tele.members[0].activity?.startedAt === 'number', 'H running records a renewable activity lease on the board');
     const sampledAt = tele.members[0].activity?.lastActivityAt ?? 0;
     child.session.seq = 9;

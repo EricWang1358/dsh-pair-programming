@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
-import { DEFAULTS, TDD_MODES, PAIR_STYLES, TEAM_MODES, MEMBER_LIFETIMES } from '../lib/defaults.js';
+import { DEFAULTS, TDD_MODES, PAIR_STYLES, TEAM_MODES, MEMBER_LIFETIMES, CE_LANES, resolveConfig } from '../lib/defaults.js';
+import { Config } from '../lib/config.js';
 /** settings surface: schema mapping, validation, and live-override plumbing. */
 import { PairSettingsSchema, SETTINGS_NAMESPACE, parseDod, toRuntimeSettings, settingsValueError, settingsEntry, installPairSettings } from '../lib/settings.js';
 
@@ -84,6 +85,7 @@ export async function run(check) {
   check(JSON.stringify(clientArray('PAIR_STYLES')) === JSON.stringify(PAIR_STYLES), 'client PAIR_STYLES mirrors lib/defaults.js');
   check(JSON.stringify(clientArray('TEAM_MODES')) === JSON.stringify(TEAM_MODES), 'client TEAM_MODES mirrors lib/defaults.js');
   check(JSON.stringify(clientArray('MEMBER_LIFETIMES')) === JSON.stringify(MEMBER_LIFETIMES), 'client MEMBER_LIFETIMES mirrors lib/defaults.js');
+  check(JSON.stringify(clientArray('CE_LANES')) === JSON.stringify(CE_LANES), 'client CE_LANES mirrors lib/defaults.js');
   // Every field the plugin serves must be renderable, or the UI silently hides
   // a knob the runtime obeys.
   const served = Object.keys(PairSettingsSchema({}));
@@ -94,4 +96,35 @@ export async function run(check) {
   // test rather than to check the wiring it exists to protect.
   check(PairSettingsSchema({}).defaultMode === DEFAULTS.defaultMode, 'the settings schema default comes from lib/defaults.js, not a restated literal');
   check(TEAM_MODES.includes(DEFAULTS.defaultMode), 'the default mode is one the settings surface can actually offer');
+
+  /* ---- no field may drift out of the composed→runtime chain ------------- */
+  // The failure this pins is the one lib/defaults.js was written to prevent,
+  // and it happened again: navigatorModel was declared in Config and in the
+  // settings schema, but missing from resolveConfig and settingsEntry — so a
+  // composed `pair-programming.navigatorModel:` in cordis.yml was accepted and
+  // then silently dropped. The card showed the schema default and a reset
+  // returned to empty instead of to the deployment's own value. Adding a field
+  // now fails here until every link of the chain carries it.
+  const schemaFields = Object.keys(PairSettingsSchema.dict ?? {});
+  const resolvedAll = resolveConfig({});
+  const entryFields = Object.keys(settingsEntry(resolvedAll, ''));
+  const runtimeFields = Object.keys(toRuntimeSettings(PairSettingsSchema({})));
+  const configFields = Object.keys(Config.dict ?? {});
+  const missingFrom = (want, have) => want.filter((f) => !have.includes(f));
+
+  const notInEntry = missingFrom(schemaFields, entryFields);
+  check(notInEntry.length === 0, `every served setting reaches the base layer via settingsEntry (missing: ${notInEntry.join(', ') || 'none'}) — otherwise the composed YAML value is silently ignored`);
+  const notInRuntime = missingFrom(schemaFields, runtimeFields);
+  check(notInRuntime.length === 0, `every served setting reaches the runtime via toRuntimeSettings (missing: ${notInRuntime.join(', ') || 'none'}) — otherwise the UI shows a knob nothing reads`);
+  const notInConfig = missingFrom(schemaFields, configFields);
+  check(notInConfig.length === 0, `every served setting is declarable in YAML via Config (missing: ${notInConfig.join(', ') || 'none'})`);
+  // `dod` is the one deliberate exception: index.js parses it into the runtime
+  // shape itself, so resolveConfig does not carry the raw string.
+  const notResolved = missingFrom(configFields, Object.keys(resolvedAll)).filter((f) => f !== 'dod');
+  check(notResolved.length === 0, `every YAML-declarable field survives resolveConfig (missing: ${notResolved.join(', ') || 'none'})`);
+
+  // And the value itself must travel, not merely the key.
+  const composed = resolveConfig({ navigatorModel: 'deepseek/deepseek-reasoner', maxCarriedLessons: 2 });
+  check(composed.navigatorModel === 'deepseek/deepseek-reasoner', 'a composed value survives resolveConfig');
+  check(settingsEntry(composed, '').navigatorModel === 'deepseek/deepseek-reasoner', 'and becomes the settings base layer, so a reset returns to the deployment value rather than to empty');
 }

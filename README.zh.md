@@ -184,7 +184,7 @@ pair-programming:
   maxCyclesPerTask: 8   # 探索性工作用更轻的预算
 ```
 
-没有 settings provider 的启动完全不受影响（插件严格按合成配置工作）。`stateDir`、`slashCommand`、成员派生选项等启动期字段有意只留在 profile YAML。上述字段同时提供 **Settings → Plugins 图形卡片**：草稿式编辑、每字段"已覆盖"徽标（显示组合基线并可一键恢复）、带 revision fence 的保存/放弃——全程不必碰 YAML。
+没有 settings provider 的启动完全不受影响（插件严格按合成配置工作）。`stateDir`、`slashCommand`、成员派生选项等启动期字段有意只留在 profile YAML。上述字段同时提供 **设置 → 结对编程 顶级分区**（设置侧栏自己的导航项，不再藏在 插件 → 插件配置 里）：草稿式编辑、每字段"已覆盖"徽标（显示组合基线并可一键恢复）、带 revision fence 的保存/放弃——全程不必碰 YAML。
 
 ## 安装
 

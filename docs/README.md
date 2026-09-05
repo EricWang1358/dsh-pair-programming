@@ -32,8 +32,12 @@ dsh-pair-programming-design/
 │   └── PROMPT.md                ← 历史文档，已退役（头顶有 v3 说明，不再用于开新实现会话）
 ├── 04-acceptance/
 │   └── ACCEPTANCE.md            ← 验收标准、测试计划、Definition of Done
-└── 05-reference/
-    └── AGENT_TEAMS_API.md       ← agent-teams 成熟实现调研（复刻模式的来源与参考）
+├── 05-reference/
+│   └── AGENT_TEAMS_API.md       ← agent-teams 成熟实现调研（复刻模式的来源与参考）
+└── 07-workflow/
+    ├── WORKFLOW.md              ← 功能表：Epic → User Story → Sub-feature，每项标机判点与失败模式
+    ├── LIFECYCLE.md             ← 一个任务的完整时序：阶段 0→7，每步的门与拒绝理由
+    └── FRAGILITY.md             ← 架构脆弱点（🟠）与解决方案，附优先级
 ```
 
 ## 快速开始（给实现者）

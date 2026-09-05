@@ -1,5 +1,5 @@
 /** runtime/members: toolDenyListFor — host-registry-filtered deny lists (I1). */
-import { toolDenyListFor, hostToolNames, markMemberRetired, isMemberRetired, installRetiredInboxGuard, deliverToMember, isWriteCapability } from '../lib/runtime/members.js';
+import { toolDenyListFor, hostToolNames, markMemberRetired, isMemberRetired, installRetiredInboxGuard, deliverToMember, isWriteCapability, seatModelRequest, isQuotaError, setNavRouteFallback, clearNavRouteFallback, navRouteFallbackActive, navRouteFallbackReason } from '../lib/runtime/members.js';
 
 const CLAUDE_NAMES = ['str_replace_editor', 'write_file', 'create_file', 'edit_file', 'apply_patch'];
 const DSH_NAMES = ['write', 'edit', 'pwsh'];
@@ -79,7 +79,7 @@ export async function run(check) {
   const retiredCtx = {
     on: (name, fn) => { handlers.set(name, fn); },
     logger: { warn: () => {} },
-    subagents: { followup: async () => { followed = true; } },
+    subagents: { sendMessage: async () => { followed = true; return 'm-1'; } },
   };
   installRetiredInboxGuard(retiredCtx, { stateDir: '.pair-programming' });
   markMemberRetired(retiredCtx, 'old-child');
@@ -94,9 +94,50 @@ export async function run(check) {
   // navigator, challenger" and a stall report that could not name a cause,
   // because the typed SubagentError (DRAINING / ACTIVATION_CLOSING) had already
   // been swallowed into a logger.warn nobody reads.
-  const throwing = { logger: { warn: () => {} }, subagents: { followup: async () => { throw new Error('continuable subagents are draining; the operation was not admitted'); } } };
+  const throwing = { logger: { warn: () => {} }, subagents: { sendMessage: async () => { throw new Error('continuable subagents are draining; the operation was not admitted'); } } };
   const refused = await deliverToMember(throwing, {}, 'live-child', 'x', new AbortController().signal);
   check(refused.ok === false && refused.reason.includes('draining'), 'a host refusal is carried out verbatim instead of being logged and dropped');
+
+  // seatModelRequest: the acceptance-definition seat's model override. The
+  // oracle is the one artifact whose quality nothing downstream can check, so
+  // its seat is the one allowed to route away from the captain — parse rules
+  // are pinned here because a wrong split silently routes the WRONG model.
+  check(JSON.stringify(seatModelRequest({ navigatorModel: 'deepseek/deepseek-reasoner' }, 'navigator')) === JSON.stringify({ provider: 'deepseek', model: 'deepseek-reasoner' }), 'provider/model splits at the FIRST slash');
+  check(JSON.stringify(seatModelRequest({ navigatorModel: 'openrouter/anthropic/claude-3' }, 'navigator')) === JSON.stringify({ provider: 'openrouter', model: 'anthropic/claude-3' }), 'and model ids keep their own slashes');
+  check(JSON.stringify(seatModelRequest({ navigatorModel: 'deepseek-reasoner' }, 'navigator')) === JSON.stringify({ model: 'deepseek-reasoner' }), 'a bare model id inherits the captain provider (no provider key)');
+  check(JSON.stringify(seatModelRequest({ navigatorModel: '' }, 'navigator')) === '{}' && JSON.stringify(seatModelRequest({}, 'spec')) === '{}', 'empty or absent inherits the captain route wholesale');
+  check(JSON.stringify(seatModelRequest({ navigatorModel: 'deepseek/deepseek-reasoner' }, 'driver')) === '{}' && JSON.stringify(seatModelRequest({ navigatorModel: 'deepseek/deepseek-reasoner' }, 'challenger')) === '{}', 'only the acceptance-definition seats (navigator/spec) route away — driver and challenger do not');
+  check(JSON.stringify(seatModelRequest({ navigatorModel: ' deepseek/deepseek-reasoner ' }, 'spec')) === JSON.stringify({ provider: 'deepseek', model: 'deepseek-reasoner' }), 'surrounding whitespace is trimmed before parsing');
+  // Quota fallback (M20): the sticky flag routes the acceptance seat on the
+  // captain's model until a successful route test clears it — and ONLY the
+  // acceptance seats; the flag never touches driver/challenger routing.
+  check(isQuotaError('Error: 402 You have exceeded your quota, check your plan and billing details') && isQuotaError('insufficient balance') && !isQuotaError('rate limit 429, too many requests') && !isQuotaError('connection refused'), 'quota detection matches exhaustion, not transient rate limits or network noise');
+  clearNavRouteFallback();
+  check(navRouteFallbackActive() === false && navRouteFallbackReason() === null, 'fallback starts inactive');
+  setNavRouteFallback('模型 deepseek/deepseek-reasoner 用量耗尽——navigator 席位已回退为队长模型与配置');
+  check(navRouteFallbackActive() === true && navRouteFallbackReason().includes('用量耗尽'), 'a quota death marks the fallback with its reason');
+  check(JSON.stringify(seatModelRequest({ navigatorModel: 'deepseek/deepseek-reasoner' }, 'navigator')) === '{}', 'while marked, the acceptance seat inherits the captain route wholesale (sticky)');
+  check(JSON.stringify(seatModelRequest({ navigatorModel: 'deepseek/deepseek-reasoner' }, 'driver')) === '{}', 'and the flag never touches non-acceptance seats (they never had an override)');
+  clearNavRouteFallback();
+  check(JSON.stringify(seatModelRequest({ navigatorModel: 'deepseek/deepseek-reasoner' }, 'navigator')).includes('deepseek-reasoner'), 'a successful route test clears the flag and the premium route returns');
+  // The wake seam is ctx.subagents.sendMessage — model-authored mail between
+  // adjacent Agents: running target steers at its nearest step boundary, idle
+  // target starts a turn, MISSING child cold-resumes from persistence. The
+  // service has no followup (that lives on Agent handles — the phantom call
+  // starved every delivery into the 120s sweep), and prompt is the browser
+  // HUMAN-prompt face: protocol mail must neither impersonate the user nor
+  // fail a cold resume. Pin the exact adjacency-contract shape.
+  const seen = [];
+  const cap = { id: 'cap-1' };
+  const signal = new AbortController().signal;
+  const sendCtx = { logger: { warn: () => {} }, subagents: { sendMessage: async (sender, targetId, content, options) => { seen.push({ sender, targetId, content, options }); return 'm-1'; } } };
+  const delivered = await deliverToMember(sendCtx, cap, 'child-1', 'wake up', signal);
+  check(delivered.ok === true && delivered.messageId === 'm-1', 'delivery lands through ctx.subagents.sendMessage and surfaces the inbox MessageId');
+  const call = seen[0];
+  check(call !== undefined && call.sender === cap, 'the sender is the exact live captain Agent — model mail from the captain, never impersonating the user');
+  check(call.targetId === 'child-1', 'and the target is the member session id');
+  check(Array.isArray(call.content) && call.content.length === 1 && call.content[0].type === 'text' && call.content[0].text === 'wake up', 'and carries the text as one text ContentBlock');
+  check(call.options !== undefined && call.options.signal === signal, 'and passes the caller signal through until inbox acceptance');
   // The spawn filter used to be a list of GUESSED names intersected with the
   // registry: `NON_DRIVER_WRITE_TOOL_CANDIDATES.filter(n => known.has(n))`.
   // That drops every name it did not anticipate, so it failed OPEN on exactly

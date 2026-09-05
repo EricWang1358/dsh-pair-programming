@@ -190,7 +190,7 @@ pair-programming:
   maxCyclesPerTask: 8   # leaner budget for exploratory work
 ```
 
-Boots without a settings provider are unaffected (the plugin keeps working exactly as composed). Boot-only fields (`stateDir`, `slashCommand`, member-spawn options) intentionally stay in the profile YAML. The fields above also ship as a **Settings → Plugins card** in the web UI: staged edits, per-field *overridden* badges with the composed value shown and a reset button, save/discard with revision fencing — no YAML required.
+Boots without a settings provider are unaffected (the plugin keeps working exactly as composed). Boot-only fields (`stateDir`, `slashCommand`, member-spawn options) intentionally stay in the profile YAML. The fields above also ship as a **top-level Settings section** (“Pair programming”, its own entry in the settings sidebar) in the web UI: staged edits, per-field *overridden* badges with the composed value shown and a reset button, save/discard with revision fencing — no YAML required.
 
 ## Install
 
@@ -210,7 +210,7 @@ Or develop against a local checkout (`link:` install per [docs](docs/README.md))
 ## Verified engineering
 
 ```sh
-npm test          # 575 assertions across 19 suites, pure-logic, offline
+npm test          # 938 assertions across 28 suites, pure-logic, offline
 npm run verify    # import gate · startup gate · package gate · typecheck — all green
 ```
 
