@@ -7,6 +7,840 @@ protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 
 ## [Unreleased]
 
+## [0.13.6] — 2026-09-05
+
+Three recovery defects, each reproduced by deterministic fault injection before
+it was fixed, and each now pinned by a case in the new `stability.test.mjs`.
+None of them was observed in production; what the probes showed is that the
+code carried no guarantee against them, and that the first one *causes* the
+second — a single failed write took the whole workspace's scheduling down with
+it.
+
+### Fixed — a failed rename could destroy the state it was replacing
+
+`replaceFileAtomicOrDirect` fell back to writing the canonical file directly
+when `rename` refused, and then removed the complete temp copy **even when that
+direct write had itself failed**. Injecting `EPERM` plus a truncated write left
+the canonical file holding a single `{` with no recovery material anywhere. A
+reader outside the lock could also observe the half-written middle state.
+
+- The direct-write fallback is gone. Rename is retried three times at 50 ms and
+  then the write **fails loudly** with `PAIR_STATE_COMMIT_FAILED`, carrying
+  `target` and `recoveryPath`. The last committed state is left intact and the
+  complete temp file is left in place. Recovery is deliberately manual: silent
+  automatic cleanup is exactly the behaviour that lost the data.
+- The cost of that choice is stated rather than hidden — repeated commit
+  failures accumulate `.tmp` recovery copies in the team directory. No read
+  path scans a directory, so they cannot be mistaken for state.
+
+### Fixed — one corrupt team stopped every other team's heartbeat
+
+`heartbeat()` walked `activeTeams` serially with the only `try/catch` outside
+the whole timer callback. Corrupting the first team's `team.json` made two
+consecutive sweeps throw, and a healthy team behind it received **zero** kicks.
+
+- New `runtime/heartbeat.js` owns the sweep: per-team `try/catch` keyed by
+  workspace and team id, a per-team deadline (10 s, `hosts.heartbeatBudgetMs`),
+  one sweep at a time so a slow round cannot stack `setInterval` callbacks into
+  an unbounded backlog, and no new work after `dispose`.
+- A team whose operation timed out stays owned until it settles rather than
+  being re-enqueued behind hung I/O. That is a deliberate hang, not an
+  oversight: `diagnostics().heartbeat.pending` is where it shows up.
+
+### Fixed — recycling could report success while orphaning the new seat
+
+`recycleMember` spawned the replacement and then committed, but the commit only
+matched on member *name*: it never checked that the seat it was replacing was
+still the same seat, the same generation, or on a team still dispatching. With
+the team aborted or the seat replaced during the spawn, the function returned
+`recycled: true` while the replacement sat on no board, never interrupted.
+
+- New `store.commitMemberReplacement()` re-reads under the team lock and
+  refuses unless `id`, `joinedAt` and `role` all still match and the phase is
+  still open. The child session id is the generation token, so no new on-disk
+  schema was needed.
+- Compensation is symmetric: on a refused commit the **replacement** is
+  retired, not the seat that is still doing the work, and the return value says
+  which happened.
+- New `runtime/retire.js` is now the one retirement path shared by `pair_stop`,
+  failed formation rollback and recycling — `markMemberRetired`, clearing the
+  live agent queue, `interrupt`, then the durable tombstone. Recycling used to
+  write only the tombstone, which left the live deny-list guard inert.
+- `recycleMember` now *requires* `runtime.releaseTeamSeats`. It used to call it
+  optional-chained on an object that never had it (`hosts`, not the scheduler
+  runtime), so every recycle silently skipped its own cleanup.
+
+### Fixed — a host that returns no child id could seat a sessionless member
+
+`spawnMember` assigned `start.childId` unchecked. A provider resolving without
+one would put a member on the board with an empty id: unreachable,
+un-interruptible and indistinguishable from a live seat. It now throws, which
+lands on the existing failure path — formation rolls back, recycling keeps the
+live seat.
+
+### Added — `stability.test.mjs`, and a baseline harness that is not a gate
+
+- Eighteen cases covering rename exhaustion and retry, sweep isolation,
+  coalescing, deadlines, post-dispose quiet, cold rediscovery of only the
+  resuming captain's valid live teams, commit-write failure, eight recycle
+  interleavings (normal / stop / terminal-only / replacement / missing /
+  spawn-fail / persist-fail / session-force) and concurrent commits.
+- `docs/diagnostics/2026-09-05-bench.mjs` measures mailbox, board, cold
+  recovery, 100-recycle churn, 100 start/stop and the retired deny-list against
+  a temp directory. It exits 0 whichever way the numbers go — it exists to set
+  a baseline, not to fail a build on someone's slow disk.
+- What it measured reversed one of the review's own recommendations: mailbox
+  *compaction* is not the win. On a 160 KiB mailbox an append costs 1.2 ms to
+  read the file and 3.5 ms to rewrite it atomically; a plain O(1) append would
+  cost 1.5 ms. Shrinking the file only touches the smaller term. The change
+  worth making is an append path for `appendMailbox` — and because that trades
+  crash-atomicity for a possible torn last line, it belongs in its own release
+  with its own crash-injection cases, not bolted onto a recovery fix.
+
+## [0.13.5] — 2026-09-05
+
+### Fixed — process-local state grew for the life of the host
+
+Prompted by a host OOM (4 GB heap, ~3.9 h uptime). This is almost certainly not
+the cause — every entry below is a short string, and the host holds session
+logs, SQLite and the web UI's history — but the growth was real and unbounded
+by construction, which is the part worth fixing whoever exhausted the heap.
+
+- `lastNudge`, `memberActivity` and `parkedAttempts` are keyed by **child
+  session id**, and `memberLifetime: 'cycle'` mints a fresh id on every
+  accepted cycle. Entries were added per seat and removed only on particular
+  paths, so a long session accumulated one per seat that ever existed.
+- `lastStallReport` had **no delete path at all**.
+- New `scheduler.releaseTeamSeats(ids, teamId)` hands everything back, called
+  from `recycleMember` (once per accepted cycle, exactly the rate the maps used
+  to grow) and from `pair_stop`; `untrackTeam` now also drops the team's
+  stall-report entry. Releasing is total — unknown ids, empty ids and a missing
+  list are no-ops, because teardown must never be the thing that throws.
+
+### Added — the settings surface goes through the real provider
+
+`settings.test.mjs` drives a hand-written stub, which can confirm that we call
+`installSection` and nothing else: not that the schema resolves, that the base
+layer is accepted, that the namespace grammar passes, or that a write round
+trips. Those are the host's rules. This is the same gap that let a CE candidate
+the registry rejects on sight ship for four releases.
+
+- **`settings-host.test.mjs`** mounts the real `@deepseek-ai/dsh-settings-file`
+  on a temp directory and pins: composed values reaching the resolved snapshot
+  (the exact drift that made `navigatorModel` a no-op in YAML), a write landing
+  in the *user* layer with the base intact — which is what makes "reset" mean
+  anything — the plugin's runtime object following the commit, persistence to
+  disk, the plugin validator running *inside* the host write path so an invalid
+  value is refused before it persists, the command-shape rule reaching that
+  boundary, and both namespaces coexisting so probe output stays out of the
+  section a human hand-edits.
+- The fork is disposed in `finally`: the provider keeps a file watcher, and
+  without that the suite would hold the runner open — which is precisely how
+  the throwaway probe that motivated this file ran for hours unnoticed.
+
+## [0.13.4] — 2026-09-05
+
+### Changed — the ledger can no longer rot where rotting is expensive
+
+AGENTS.md is prose, and prose drifts. That is fine for most of it: a stale
+"open" line costs someone a grep. It is not fine for an entry carrying an
+*executable instruction*, because a reader who follows a superseded one does
+damage — and M11' was exactly that. Its original fix options ("delete the
+appendPairEvent dead path", "register a pair event namespace") were reversed by
+0.12.4 when the guard turned out to be load-bearing, and until the reversal was
+written onto M11' itself, following the number traded session-resume for a UI
+panel nobody has.
+
+- **A reading convention at the head of the ledger**: every entry carries
+  `状态 / 证据 / 推翻者`; an absent status reads as *unchecked*, not as *open*;
+  evidence is a `file:line` pointer rather than a conclusion, because a pointer
+  drifts visibly and a conclusion only goes quietly false; numbers are
+  append-only and vacated ones are never reused.
+- **Supersession markers sit on the superseded line**, not only in the new
+  ruling — readers arrive by number and do not read the newest version first.
+  M11' now carries ⛔, the reversing version, the four-step mechanism chain, and
+  the cost comparison. A ⛔ line is *forbidden*, not deprioritised.
+- **`ledger.test.mjs` guards the destructive edges only**: a ⛔ entry must stay
+  ⛔; an entry claiming a capability is open must still find it absent
+  (`pair_rotate` still refuses, `typecheck.mjs` still has no EPERM handling); an
+  entry claiming one landed must still find it present (the gate executes
+  `dodCommand`, the retired list has a real consumer, the phantom API is gone).
+  Deliberately narrow — pinning every line would make the ledger unmaintainable
+  and this suite a second source of truth, which is the stub problem again.
+- **Stale entries corrected in place**: M7' (landed — the gate runs a command),
+  M8' (landed in 0.5.0; the v2 adjudication's "deferred indefinitely" is marked
+  where it stands), and the M2' foundation note's "retired-members.json has zero
+  consumers" (superseded by `installRetiredInboxGuard`, with the half that still
+  holds kept: the write semantics of `status='removed'` remain undefined).
+
+## [0.13.3] — 2026-09-05
+
+### Fixed — three bugs, each found by reading rather than by a failing test
+
+- **The quota fallback was dead exactly when it was needed.**
+  `markNavFallback` read `lastStatus`, which was declared *inside*
+  `installNavModelStatus`. Every real fallback therefore raised
+  `ReferenceError: lastStatus is not defined` — and the scheduler calls it
+  immediately before the two things that matter, so the throw aborted both: the
+  seat was never respawned on the captain's route and the captain was never
+  woken. The outer handler logged "member error telemetry failed" at warn
+  level. `lastStatus` is now module-level beside `installedScope`, the marker
+  is contained end to end, and the scheduler wraps both markers so a display
+  failure can cost a badge but never a recovery.
+- **The route test re-ran on every unrelated settings save.**
+  `onSettingsCommitted` tested on `token !== ''` instead of on the token having
+  changed. Once the user pressed Test the token stayed set for the life of the
+  process, so editing `tddMode` — or anything else — spent a
+  `resolveCallConfig` and rewrote the derived namespace. Now guarded the same
+  way `ce-install.js` guards its probe.
+- **`navigatorModel` in YAML did nothing.** It was declared in `Config` and in
+  the settings schema but missing from `resolveConfig` and `settingsEntry`, so
+  a composed `pair-programming.navigatorModel:` was accepted and then dropped:
+  the card showed the schema default and a reset returned to empty instead of
+  to the deployment's value. This is precisely the drift `lib/defaults.js` was
+  written to prevent, and it happened anyway — so `settings.test.mjs` now pins
+  the whole composed→base→runtime chain, and adding a field fails until every
+  link carries it.
+
+### Changed — the settings card is a card again, not a wall
+
+- **Six collapsible groups** (Protocol / Acceptance model / Budgets /
+  Completion gate / Compound Engineering / Diagnostics) replace twenty flat
+  rows. Only Protocol is open by default. A group holding an **invalid** value
+  is forced open regardless of the toggle, so collapsing can never be the
+  hidden reason a save button is disabled.
+- **The two probe tokens are no longer editable inputs.** They are host RPC
+  plumbing whose only legitimate writer is a button — and typing in one fired a
+  probe with no verdict behind it. They are read-only lines in the collapsed
+  Diagnostics group, where seeing the last request is genuinely useful when a
+  verdict looks stale.
+- `dodCommand` now renders the command-shape refusal as its inline error.
+
+### Stability
+
+- **The phantom-API guard covers every host service**, not just `subagents`:
+  `skills`, `tools`, `commands`, `settings`, `systemPrompt`, `llm`, `agents`,
+  plus the Agent handle face — and it asserts it actually scanned something, so
+  it cannot pass because a regex matched nothing. 21 host calls checked.
+- **The card is rendered in tests, not just projected.** The React stub now
+  puts children in props the way real React does; a stub that omitted it let a
+  component read `props.children` as undefined and still look healthy. The
+  walker renders function components, so a collapsed section is genuinely
+  invisible to the assertions.
+- **A flaky wake test is deterministic.** `agent/status` starts a fire-and-forget
+  chain of fs reads, a lock and a write; a fixed 60ms sleep was enough on an
+  idle machine and not once the suite grew to thirty files. It now waits for
+  the condition. Three consecutive clean full runs.
+
+## [0.13.2] — 2026-09-05
+
+### Fixed — the freeze gate rewarded a command that could not run
+
+0.13.1 stopped prose reaching the shell at checkpoint. The same class had three
+more instances, and the deepest one inverts a gate against itself.
+
+`redProblem` requires the oracle command to FAIL today — that is what makes it
+a RED. So the freeze gate **rewards a command that cannot run**: a mistyped
+`npn test` fails, passes the RED check, seals into the task contract, and then
+fails identically at every later verdict. The board reads "acceptance still
+unmet" forever, and the true cause — three characters — is invisible, because
+failing is exactly what the oracle was supposed to do.
+
+A shape check cannot catch it: `npn test` is a perfectly well-formed command
+line. Only the run can tell, and only by looking at HOW it failed.
+
+- **New `notRunnableEvidence(run)`** separates "it failed" from "it never ran":
+  not-found exit codes (127 / 9009), spawn-level failure, or the shell's own
+  not-found message. Wired into `redProblem`, so an unrunnable command cannot
+  complete a freeze. Conservative by design — the exit check leads, and the
+  text check only covers shells that report not-found through exit 1, so a
+  suite that prints "command not found" in its own output still counts by its
+  own exit code.
+- **`commandShapeError` now guards all four executed fields**, each at its
+  declaration point: `proposal.verify_plan` (0.13.1), `oracle_cmd` (before the
+  RED run, since the RED run itself cannot tell the difference),
+  `green_build_command`, and `dodCommand` at the settings boundary.
+- Their descriptions no longer invite prose and state the consequence.
+- 16 more assertions: the failed-vs-never-ran split, the freeze gate's new
+  refusal, and the settings-boundary refusal.
+
+### Added — docs/07-workflow, three cuts through the same facts
+
+- **`WORKFLOW.md`** — the feature surface as Epic → User Story → Sub-feature.
+  Every row carries its **enforcement point**, its **failure mode** (what the
+  board looks like when that capability silently dies), and its `file:line`. A
+  blank enforcement column means the rule is a habit, not an invariant — the
+  table makes that explicit rather than letting a reader assume otherwise. Also
+  records the enforcement-strength preference: physical isolation over machine
+  judgement, machine judgement over bookkeeping, bookkeeping over prompt text.
+- **`LIFECYCLE.md`** — the same protocol by time: phases 0–7, one task from the
+  activation gesture to the completion receipt, with each step's checks in the
+  order they actually run and why that order matters (digest before command;
+  shape before RED).
+- **`FRAGILITY.md`** — structural fragilities, orange-marked, each with the
+  shape, why more tests would not remove it, and a ranked solution. F1/F2 now
+  closed and kept as regression anchors; F2b records that the shape check is a
+  deliberately permissive heuristic that errs toward missing rather than
+  false-refusing, with the runtime layer behind it.
+
+## [0.13.1] — 2026-09-05
+
+### Fixed — a verdict could be manufactured from a malformed declaration
+
+`pair_propose.verify_plan` was documented as "How the change will be verified
+(test/build/lint command)" — a leading clause that invites prose, a
+parenthetical that asks for a command, and nothing checking which one arrived.
+Two steps later `pair_verify(stage="checkpoint")` handed that string to the
+shell. On the oj-forge-s2 board a Driver declared
+
+    1) npm test must stay fully green  2) Live adapter smoke: node --input …
+
+which exited non-zero and was recorded as `verdict: 'reject', category:
+'checkpoint_red'` — "the cycle's predeclared verify_plan still fails". The code
+was fine; the declaration was prose.
+
+This is not a papercut. The protocol's whole claim is that a verdict is a
+re-run rather than an assertion — `computeVerdict` exists so nobody can say "it
+passes". A false REJECT breaks that claim from the other side: it charged
+`stats.reject` and the cycle's rejection budget for a failure that never
+happened, rewound the cycle out of its GO, and delivered structured feedback
+about code that was never the problem.
+
+- **New `lib/protocol/command-shape.js`.** `commandShapeError` refuses prose —
+  multi-line plans, list markers, requirement words ("must"/"should"/"ensure"),
+  sentence punctuation (including full-width) — and accepts anything that could
+  plausibly be a command line. Deliberately permissive: refusing a valid
+  command blocks real work, while accepting prose only defers the error to the
+  shell, which is the bug.
+- **Checked at declaration time** in `pair_propose`, where the mistake is.
+- **Re-checked before execution** in checkpoint verification, because a cycle
+  proposed by an older build carries an unvalidated plan. That check raises a
+  tool error and leaves the cycle its step and its budget — it never
+  manufactures a verdict out of a declaration defect.
+- The parameter description no longer invites prose and states the consequence.
+- `command-shape.test.mjs` pins the measured plan, each prose shape separately,
+  and eight real command lines that must keep passing.
+
+### Added — docs/07-workflow
+
+- **`WORKFLOW.md`** — the feature surface as Epic → User Story → Sub-feature,
+  each row carrying its **enforcement point** (who refuses, when) and its
+  `file:line`. A row with a blank enforcement point is not an invariant, only a
+  habit; the table makes that explicit rather than implied.
+- **`FRAGILITY.md`** — seven structural fragilities marked 🟠, each with the
+  shape, why more tests would not remove it, and a ranked solution. Includes
+  the class this release's bug belongs to (three sibling string fields still
+  executed without shape validation) and the two host-contract holes that have
+  already cost a four-release outage each.
+
+## [0.13.0] — 2026-09-05
+
+### Added — the acceptance-definition seat gets its own model
+
+- New settings field **`navigatorModel`** (settings card + YAML
+  `pair-programming.navigatorModel`): the model for the acceptance-definition
+  seat — the **navigator** in light/full modes, the **SPEC seat** in solo.
+  Empty (default) inherits the captain's route, exactly as before.
+- Rationale: the oracle is the one artifact whose quality nothing downstream
+  can machine-check — the gate replays the command, it cannot replay "is this
+  the right thing to verify". Routing a stronger model at the seat that
+  defines acceptance is the highest-leverage spend in the protocol; routing it
+  at the reviewer seats is not (the paired-arm measurement: expensive review
+  tokens bought noise, not findings — 8 rounds, zero NO_GO/REJECT).
+- Format: `"provider/model"` (provider = the prefix before the first slash;
+  provider ids never contain one, model ids may) or a bare model id (provider
+  inherited from the captain's route). Applies at pair_start spawn AND member
+  recycle — a recycled navigator keeps its routed model. Six parse-rule
+  assertions pin the split (first-slash, model-keeps-slashes, bare-inherits,
+  empty-inherits, role-gating to navigator/spec only, whitespace trim).
+- Plays unchanged with the host's `/model` dialog and
+  subagent-model-selection: this field only routes the acceptance seat; the
+  captain and every other seat keep their routes.
+- **Reasoning effort** (`navigatorEffort`): empty = the captain route's
+  effort, `default` = the chosen model's adapter default, otherwise an
+  adapter-published effort id. An effort without a model override is legal —
+  same model, steeper thinking.
+- **The card reuses the dsh model catalog** (`ctx.modelDirectories`, the same
+  source the `/model` dialog renders): the model field becomes a
+  provider-grouped dropdown when the catalog is served — a typo can no longer
+  reach the settings — degrading to free text when it is not. The effort
+  dropdown lists only the efforts the chosen model's adapter publishes.
+- **A route test button.** The browser cannot reach the adapters, so the
+  button writes a probe token, the host resolves the committed route through
+  `llm.resolveCallConfig`, and the verdict lands in a derived
+  `pair-programming-nav` namespace the card reads back — the same
+  settings-write-as-RPC pattern the CE Detect button uses. It validates the
+  committed values: save first, then test. The client injects
+  `modelDirectories` as a hard dependency (the runner rejects undeclared
+  `ctx.get` lookups), so the card now requires the model-selection client
+  plugin.
+- **Quota fallback (the premium route dies mid-sprint).** When the
+  acceptance-definition seat's route fails with an exhaustion error (quota,
+  insufficient balance, billing — deliberately NOT transient rate limits),
+  the runtime falls back to the captain's model and config instead of
+  stalling: at `pair_start` formation, at member recycle, and on a mid-turn
+  `agent/error` (the seat is force-respawned from the board digest). The
+  fallback is sticky — the seat stays on the captain's model until the user
+  re-selects the premium model and a route test passes, which the settings
+  card marks with a banner (已回退为队长模型与配置 → 重新选择 → 测试路由).
+
+## [0.12.5] — 2026-09-04
+
+### Changed — the settings card is now a top-level settings section
+
+- `lib/client.js` registers on the `settings.section` slot (id
+  `pair-programming`) instead of `settings.plugin.item`: **结对编程** gets its
+  own entry in the settings sidebar instead of living inside
+  插件 → 插件配置. The card component, staged-edit form and revision fencing
+  are unchanged; the section supplies its own locale binder (`t`) because the
+  section shell passes only `close`.
+- This intentionally supersedes the 0.12.4 pin "the settings slot name —
+  `settings.plugin.item` matches the shell": that described the shell this
+  release replaces.
+
+### Added — a captain key-moment table for the armed CE lane
+
+- With a pair lane on (`advisory`/`full`), the system-prompt prefix now names
+  the four moments where the captain — the seat with the widest board view —
+  is expected to load an analytical CE skill: **ce-proof** against the
+  evidence chain before every `pair_gate_check` pass, **ce-pov** before a
+  `pair_arbitrate` ruling that picks between two live readings, **ce-debug**
+  before closing a P0/P1 risk ticket and after a second stalled round on the
+  same seat, and **ce-code-review** over the finished diff surface at
+  `pair_retro`. Routine GO/step traffic never justifies a load — the cadence
+  is pinned in the prefix, not left to taste.
+- Lane `off` renders nothing (byte-identical prefix); lane `captain` renders
+  no table either, because gesture-served skills cannot be self-loaded by a
+  seat. Every load is still recorded on the board, so cadence is auditable.
+
+### Fixed — the member wake called an API the host never had
+
+- `deliverToMember` called `ctx.subagents.followup(captain, childId, …)`. The
+  service has **no `followup`** — it lives on Agent *handles* only — so the
+  plugin's auto-wake leg was a phantom and **never once succeeded**: the
+  surrounding try/catch swallowed the TypeError into
+  `{ ok: false, "the host refused the wake" }`, every mailbox delivery
+  starved into the 120s heartbeat sweep, handoffs degraded to sweep-cadence
+  (one member working at a time, everyone idle in between), and recovery ran
+  through the captain relaying `send_message` by hand. Five live-session
+  STALL reports could not say why; this is why — and part of the 151-captain-
+  relay / zero-`pair_verify` ledger in `obligation.js` was this bug, not the
+  protocol.
+- `deliverToMember` now calls `ctx.subagents.sendMessage(sender, targetId,
+  content, { signal })` — model-authored mail between adjacent Agents. Chosen
+  over the `prompt` control face deliberately: `prompt` records **one human
+  message**, so protocol mail would impersonate the user in the child's
+  session history, and it refuses an absent child (`subagent/not-resumable`)
+  where `sendMessage` documents the **cold resume** the scheduler's recovery
+  path needs. The returned inbox `MessageId` surfaces in the ok result, so a
+  wake that landed is distinguishable from one that did not. Seven test
+  fixtures migrated off the phantom shape; new assertions pin the adjacency
+  contract (exact live captain Agent as sender, member session id as target,
+  single text ContentBlock, caller signal passed through).
+- New static guard in `host-contract.test.mjs`: every `ctx.subagents.<method>`
+  literal call in `lib/` is asserted to exist in the host package's declared
+  surface — the whole phantom-API family, not just this one, is now machine-
+  checked. Literal-scan limitation (aliases) stated in the guard's comment.
+- Effect: handoff latency returns from "up to one sweep + captain relay" to
+  event-driven; the designed pre-work overlap (navigator pre-reads while the
+  driver writes, challenger pre-arms) works again without captain relay.
+
+## [0.12.4] — 2026-09-04
+
+### The audit behind 0.12.3: why 893 tests missed a four-release outage
+
+Not one test, and not `scripts/verify-startup.mjs` either, had ever mounted a
+real host service. Every suite handed `apply()` a hand-written object per
+service, and a stub agrees with the code that wrote it by construction: it can
+check that we call `register`, never that what we pass is something the host
+would accept. Three host contracts were audited by mounting the real
+registries; two held, one was already broken (0.12.3), and one turned out to be
+a documentation landmine.
+
+### Added — tests that go through the host
+
+- **`host-contract.test.mjs`** mounts the real `ToolRuntime`, `SystemPromptService`,
+  `CommandRuntime` and `SkillRegistry` on a real Cordis context and runs the
+  real `apply()`. It pins all 22 tool schemas as the registry accepts them, the
+  `/pair` descriptor including `input.images`, the prompt section, and that a
+  catalog fetch never throws and every candidate carries a string `provider`.
+- **`events.test.mjs`** pins the session-event guard and, more importantly, the
+  harness facts that make it correct.
+
+### Fixed — a comment that invited a catastrophic change
+
+`lib/events.js` claimed the plugin's events let "the web client fold a protocol
+timeline from the session log". They cannot, and the guard that drops all six
+`pair/*` types is load-bearing rather than a defect:
+
+- `Session.append()` does not check the type and would write ours happily;
+- `KNOWN_SESSION_EVENT_TYPES` is a READ-path set whose own header says
+  downstream plugin events are outside it **by construction**;
+- `dsh-session-persistence.assertEventsSupported` then **throws
+  `SessionFormatUnsupportedError`** on any persisted event outside that set,
+  refusing to interpret the entire log;
+- `ignorable` is the designed escape hatch and `append()` offers no way to set it.
+
+So "fixing" the guard to make events appear would trade a UI panel nobody has
+for sessions that cannot be resumed. The comment now says that, and the test
+fails if a future harness changes it — making the change deliberate.
+
+### Audited and sound
+
+- **Tool schemas** — all 22 accepted by the real `ToolRuntime`.
+- **Settings** — both namespaces register on the real file-backed provider;
+  schema, base layer and validation round-trip. Cross-checked that no schema
+  field is missing from `settingsEntry` or `toRuntimeSettings`, which would
+  silently ignore a composed YAML value.
+- **The command descriptor** — accepted by the real `CommandRuntime`.
+- **The settings slot name** — `settings.plugin.item` matches the shell.
+
+### Still unverified by tests, stated rather than implied
+
+`llm`, `agents` and `subagents` have no standalone mount (they need a live
+model, a session store and a child-agent driver), so `startContinuable`'s
+request shape and the browser card's contract with the real web shell remain
+covered only by live runs.
+
+## [0.12.3] — 2026-09-04
+
+### Fixed — the CE catalog was dead in a live session
+
+A real run failed with:
+
+    skill provider "pair-ce" returned skill "ce-code-review" with a non-string provider
+
+`dsh-skill` validates every listed candidate and requires `provider` to be a
+string equal to the registering provider's own name. Our `list()` never set it,
+so the FIRST catalog fetch in a live session threw and no CE skill was ever
+served — from V5.3b (0.8.0) until a user hit it.
+
+- Candidates now carry `provider: CE_PROVIDER_NAME`.
+- **New `ce-registry.test.mjs` drives the real `SkillRegistry` on a real Cordis
+  context**, because that is the only thing that checks: 45 assertions across
+  the CE suites called `makeCeProvider(...)` directly and inspected the object
+  we returned, which is exactly the shape of test that cannot see a host
+  contract violation. It asserts the accepted catalog, the invocation split
+  through the host's own predicates, the loaded body with its boundary, the
+  solo lane, and disposal — and pins the broken shape as a regression with the
+  registry's own error text.
+
+This is the second dead composition under green unit tests in this integration
+(the persona push was the first, fixed in 0.12.1). The rule now recorded in the
+design notes: **when a contract belongs to the host, test through the host.**
+
+## [0.12.2] — 2026-09-04
+
+### Fixed — `/pair` refused image attachments
+
+Submitting `/pair` with a screenshot was rejected by the composer with "/pair
+does not accept image attachments". The message comes from the host
+(`dsh-client-ui-commands`), but this plugin caused it: a command admits images
+only by declaring `input.images: true`, and `/pair` declared only a hint. The
+gate is enforced twice — the composer refuses before dispatch, and the registry
+refuses again at execution — so the goal never reached the handler.
+
+That closed the front door on precisely the work this protocol was hardened on.
+The retrospective quoted throughout this codebase is a visual project that
+shipped rain as white squares and puddles with no reflections; a goal about how
+something LOOKS has to be able to show it.
+
+- `/pair` now declares `input.images: true` and forwards
+  `invocation.attachments` into the activation follow-up, text first so the
+  gesture boundary still matches on the activation line.
+- A goal with images but no text stays a usage error, and says the images are
+  retained — returning an error is what makes the composer keep the originals,
+  so a refused submission never costs the user their screenshots.
+- New `command.test.mjs` pins the declaration, the ordering, the retention on
+  refusal, and that the no-attachment path is unchanged.
+
+## [0.12.1] — 2026-09-04
+
+### Fixed — the persona push was unreachable, and its contract comment was false
+
+An external review found the flagship push path dead in the default
+configuration. It was worse than reported: three independent reasons, each
+invisible to a unit test on the function itself.
+
+- **The loader did not state its lane.** `ce.load` called the provider with no
+  `cwd`, the resolver read that as "no team live", and the solo lane answered —
+  which at the shipped default (`ceSoloLane: off`) serves nothing, so the push
+  silently produced an empty appendix. With a solo lane on it was worse: it
+  would have pushed a body with NO ownership boundary into a live team's seat,
+  the exact misread the boundary exists to prevent. The loader now states
+  `teamLive: true`, which is a fact about a respawn rather than something to
+  infer, and the provider honours an explicit override.
+- **The trigger named a step that cannot exist.** `cycleStep === 'REFACTOR'`
+  never matches under `oracleFirst` (the default), because an oracle cycle
+  folds REFACTOR into GREEN and `pair_refactor` refuses a separate round.
+- **And no step is current at a respawn anyway.** A seat is recycled only after
+  a cycle was ACCEPTED, so the last cycle always carries a verdict and
+  `currentStepOf` returns `undefined` at exactly the moment the persona is
+  composed. The trigger is now a board phase — `post-green`: the live task has
+  an accepted cycle and is still open — which is reachable, and is the same
+  intent ("advice about shape, once behaviour holds").
+- **An integration test now covers the assembly**, not the pieces: the real
+  loader wiring, a live team, and an assertion that the pushed body carries the
+  boundary and lands in the ledger as `teamLive: true`. The dead shape is
+  pinned as a regression.
+
+### Fixed — other review findings
+
+- **`get()` reads the lane through the cache.** A team going live inside the
+  5s resolver TTL could otherwise be served a solo body; that is the one
+  staleness that matters, since the body is what carries the boundary.
+- **The write-lane refusal now names a way out.** It states the false-positive
+  edge (attribution is workspace-and-window, so an unrelated load in the same
+  workspace lands there too), lists three executable exits, and says plainly
+  that there is no exemption flag, so nobody hunts for one.
+
+### Verified, not changed
+
+- **`modelInvocable: false` is enforced, not merely declared.** The review
+  flagged it as an unverified claim. `dsh-tool-skill` filters the catalog with
+  `isModelInvocable` and refuses a `skill` call with it twice (on the summary
+  and again after load). A test now pins our invocation objects against the
+  host's own predicates from `@deepseek-ai/dsh-skill`.
+
+### Known limitations, now written down
+
+- **Semantic drift is not guarded.** The closed allowlist stops a CE upgrade
+  from adding skills, and a changed version or count raises `reviewNeeded`, but
+  an existing skill whose body changes meaning under the same name is served
+  verbatim behind a routing line we authored. The fingerprint records the
+  commit; the provider serves whatever the checkout currently holds.
+- **Attribution is workspace-scoped.** With one workspace and several
+  concurrent tasks, a legitimate write-lane load can refuse an unrelated card's
+  credential. Deliberate: the gate errs toward refusing.
+
+## [0.12.0] — 2026-09-04
+
+### V5.5 — two CE lanes, chosen by whether a pair team is live
+
+Standalone CE and CE-inside-the-protocol are different tools with different
+risks, and until now one setting had to serve both. With no team running there
+is no single-writer invariant to protect and no completion receipt to keep
+fresh, so `ce-work` and the shipping family are exactly what CE is for. The
+moment a team goes live those same skills would put a second execution loop
+behind the same worktree. So the lane is no longer a knob anyone has to
+remember to flip — it follows the board.
+
+- **`ceSoloLane`** (`off` | `gesture` | `curated` | `full`) governs a session
+  with no live pair team; **`ceLanes`** governs one with a team. The provider
+  resolves which applies per workspace on every catalog fetch, cached for a few
+  seconds, and an unreadable state directory errs narrow (assume a team is live)
+  rather than widening the lane.
+- **Measured cost of each lane** — `gesture` 0 tokens/step (every skill, human
+  `/name` only), `curated` ~160, `full` ~744 for all 33. CE's own frontmatter
+  for the same 33 is 7,487 characters (~1,870/step), so the authored routing
+  lines cut the widest lane to roughly 40% of forwarding them.
+- **The ownership preamble is pair-mode only.** Prefixing "the pair protocol
+  owns every write" onto a skill running in a session with no protocol would be
+  a claim the model then has to reconcile against a workspace where it is false.
+- **The catalog is one table** of all 33 rows with their lane placement, so the
+  three-way partition and the two lanes cannot drift apart, and the allowlist
+  digest covers every row.
+
+## [0.11.1] — 2026-09-04
+
+### Fixed
+
+- **The write-lane refusal could not actually fire.** V5.3d's gate check read a
+  ledger written only by this plugin's own `provider.get()`, and this plugin
+  never serves a write-lane skill — so the refusal was unreachable on exactly
+  the configuration it was written for: a CE checkout wired into an ordinary
+  skill root (`~/.agents/skills`, `~/.dsh/skills`, `customSkillDirs`), where
+  every load is served by `dsh-skill-filesystem` instead. The rule was right;
+  the observation was in the wrong place.
+- **Loads are now observed at the tool pipeline.** Every skill load from every
+  provider is a `skill` tool call, so a `tools/pre-execute` listener — the same
+  hook the board write guard uses, for the same reason — records CE loads into
+  the ledger regardless of who served the body. It is installed unconditionally
+  (including with `ceLanes: off`, since a user can wire CE into a skill root
+  without telling this plugin anything), costs one string compare per tool
+  call, and never denies a call: loading a skill is not the violation, issuing
+  a completion credential afterwards is.
+
+## [0.11.0] — 2026-09-04
+
+### V5.4 — a retro entry earns its place in the long-lived store
+
+The failure this closes is not a missing retrospective. It is one that works:
+every session produces keep/try items, every one is carried into the next
+session's planning and into the board digest every recycled seat reads, and
+nothing ever removes one. The store grows monotonically while each individual
+entry looked reasonable on the day it was written.
+
+- **Two destinations, not one.** `retro.md` takes everything and costs nothing
+  later. The cross-session store is a prompt input, so an entry reaches it only
+  as an object answering the counterfactual: `{lesson, counterfactual,
+  reuse_trigger, evidence[]}`, and `rederivable_from` disqualifies anything the
+  repository already says. A bare string is archived rather than carried, and
+  the tool reports what it archived and why — nothing a captain wrote is lost.
+- **A cap that forces ranking.** At most `maxCarriedLessons` (default 3)
+  entries are carried; a retro that proposes more admissible entries is refused
+  with the candidates listed, because which ones matter is a judgement the
+  captain has to make and a silent truncation would make it invisibly.
+- **The answers travel with the entry,** so a later session can judge whether a
+  carried lesson still holds instead of inheriting an unattributed assertion.
+  The board digest renders structured entries as their text.
+
+## [0.10.0] — 2026-09-04
+
+### V5.3d — every load is on the record, and a second loop refuses the credential
+
+- **The load ledger.** Every CE body this plugin serves is appended to
+  `<stateDir>/ce-loads.jsonl`. `get()` is our code, which is the whole reason
+  to own the provider; a failed audit line never breaks a working skill.
+- **The gate reads it.** `pair_gate_check` inspects the window from the task's
+  earliest cycle: if a skill that owns an execution loop or a shipping action
+  (`ce-work`, `lfg`, the commit/PR/worktree family) was loaded in that window,
+  no gate credential is issued — a credential binds a claim to a worktree, and
+  a second scheduler behind that worktree makes the binding describe a state
+  nobody owned. `pair_stop` applies the same rule to the completion receipt
+  over the team's whole window.
+- **Two honesty rules in that check.** This plugin never serves those skills,
+  so a hit always means another skill root, and the refusal says so. And an
+  unreadable ledger fails: "we could not look" must never resolve the same way
+  as "nothing happened". A deployment that never wired a ledger is unaffected.
+- **Attribution is stated, not implied.** `get()` receives a cwd and no caller
+  identity, so a load is attributed to a workspace and a time window rather
+  than to a seat, and the refusal text says exactly that.
+- **The one push case.** Lane `full` hands the Driver `ce-simplify-code` in its
+  persona at respawn, and only while the open cycle is at REFACTOR. It loads
+  through the same provider — same allowlist check, same boundary preamble,
+  same ledger entry — is capped at 2,400 characters with the cut declared, and
+  is cached per CE commit so a per-cycle respawn does not re-read it. A failing
+  or missing body pushes nothing rather than half a persona.
+
+## [0.9.0] — 2026-09-04
+
+### V5.3c — the advisory catalog, with its price on the label
+
+- **`pair_status` names the lane.** The active CE lane, the size of the model
+  catalog it publishes, the detection it serves from, and the advisory boundary
+  are one board line — because a lane changes what a seat can load mid-cycle,
+  and that is protocol state a captain must read without leaving the tools.
+- **Cost is reported, not assumed.** `catalogCost(lane)` measures what a lane
+  adds to the per-step catalog; the Settings card shows it beside the lane
+  selector, and the derived namespace carries it. Lane `advisory` publishes 7
+  skills for ~140 repeated tokens per step, against the 4,571 characters CE's
+  own frontmatter would cost for the same set. This is the number the
+  integration's measurement gate is meant to be argued with.
+- **The system prompt gains a CE paragraph only when a lane is on.** With
+  `ceLanes: off` the section is byte-identical to a build without the
+  integration, so nobody pays a prefix for a feature they never enabled.
+- **A lane switch republishes the price without re-reading the disk** — nothing
+  on disk changed, so a re-probe would be theatre.
+
+## [0.8.0] — 2026-09-04
+
+### V5.3b — the CE skill provider, and the user/model surface split
+
+- **This plugin owns the provider** (`ctx.skills.registerProvider`) instead of
+  pointing `dsh-skill-filesystem` at CE's `skills/`. That buys the closed
+  allowlist, a rank (700) that can never shadow a local skill of the same name,
+  descriptions we author, and one observation point: `get()` is our code.
+- **The surface split is the token story.** The five constructive skills
+  (`ce-brainstorm`, `ce-ideate`, `ce-strategy`, `ce-plan`, `ce-compound`) are
+  served with `modelInvocable: false` — they never enter a model catalog and
+  cost zero repeated tokens, reachable only when a human types `/<name>`. The
+  seven analytical skills enter the catalog for 532 characters of authored
+  routing lines, against 4,571 characters for CE's own frontmatter.
+- **Every served body carries the ownership boundary first:** the pair protocol
+  owns all writes to product code, the skill's own execute/commit/PR steps are
+  not to be run here, findings return through the pair tools, and the frozen
+  oracle is sealed. CE's own text then follows verbatim, with its frontmatter
+  stripped.
+- **The provider is registered once and reports an empty catalog** when the
+  lane is `off` or no checkout was detected. `dsh-tool-skill` sends no catalog
+  tokens for an empty list, so an idle integration costs nothing, while a
+  provider that appeared and disappeared would append a full replacement
+  catalog to every live session on each toggle.
+- **Known limit, stated rather than papered over:** `SkillProvider.list/get`
+  receive no caller identity and the registry's scope layers belong to
+  agent-preset compositions, not to members spawned through `startContinuable`.
+  Per-role filtering is therefore impossible in the provider; it lives in the
+  member `toolFilter` and in the gate that reads the load record (V5.3d).
+
+## [0.7.0] — 2026-09-04
+
+### V5.3a — read-only Compound Engineering detection
+
+- **Detect button in the Settings card.** The card is browser code with three
+  services and no filesystem, so the button cannot detect anything itself: it
+  writes `ceProbeToken`, the host observes that committed change, probes the
+  filesystem read-only, and publishes the result into a second, host-owned
+  namespace (`pair-programming-ce`) the card renders. Settings as a one-shot
+  RPC; a typert Remote is the documented upgrade path, not a V5.3 dependency.
+- **Detection is read-only, always.** Candidate roots are an explicit `cePath`,
+  `~/.dsh/packages/compound-engineering-plugin`, and the Claude Code v2
+  registry's `installPath`. Identity is CE's own manifest plus a non-empty
+  `skills/`; the commit is resolved by reading `.git` (ref, detached, or
+  `packed-refs`) rather than spawning git. Nothing is downloaded, cloned, or
+  written into a skill root — installing CE stays the user's own action.
+- **A fingerprint, not a boolean.** `path + version + commit + skill count +
+  our own allowlist digest` identifies a detection, so a CE upgrade *or* an
+  edit to our allowlist invalidates a recorded link, exactly as a gate
+  credential is invalidated by a moved board or worktree.
+- **The allowlist (`lib/integrations/ce-catalog.js`) is closed** and accounts
+  for the whole reviewed release: 12 exposed, 9 refused as write-lane/shipping
+  (`ce-work`, `lfg`, the commit/PR/worktree family), 12 reviewed-but-deferred.
+  A CE upgrade that adds a skill exposes nothing until a human adds a row, and
+  a changed skill count raises `reviewNeeded` on the card. Descriptions are
+  authored here rather than forwarded: a model catalog costs repeated input
+  tokens on every step, and CE's own frontmatter for these skills runs 4,571
+  characters.
+- **`ceLanes` defaults to `off`,** which registers no provider at all — a
+  deployment without CE, or one that does not want it, pays exactly zero
+  tokens. `captain` exposes only the user-gesture surface, which is still zero
+  model-facing tokens.
+
+## [0.6.0] — 2026-09-04
+
+### V5.2 — a ruling says what happened to the gap, and where the residual lives
+
+- **`disposition` is required** on any `pair_arbitrate(closes_disclosure=...)`:
+  `fixed` (the gap is gone and the evidence shows it), `accepted` (it ships
+  as-is, knowingly), or `deferred` (postponed to named later work).
+- **A residual must have a durable home.** `accepted` and `deferred` also
+  require `sink` (`board | issue | document | pr`) and a traceable `sink_ref`.
+  The measured failure this closes is a real ruling — "accept visual arm as
+  backlog" on a board that had no backlog: it read as settled, the disclosure
+  left the open list, and the residual survived only in a session transcript.
+  `fixed` needs no sink; its evidence is the record.
+- **Residual ledger.** `pair_status` renders `Residual ledger:` and returns
+  `residual_ledger`; the `completion_receipt` carries every non-`fixed`
+  residual with its sink, so a receipt can be audited against a board that
+  legitimately accepted or deferred something.
+- **Legacy rulings stay visible without being retroactively fatal.** A pre-V5.2
+  decision that closed a gap with no disposition appears in the attention set
+  as `unsunk-residual` and never blocks completion — the enforcement point is
+  the tool, and no ruling written from here on can reach that state.
+
+## [0.5.0] — 2026-09-04
+
+### V5.1 — one attention set, and a bounded resume after a token cut-off
+
+- **Attention Set (`lib/protocol/attention.js`).** One projection recomputed
+  from the board at every wake, replacing three independent readers of the same
+  state: blocking P0/P1 risks, gate credentials that stopped binding, seats cut
+  off at the token ceiling, the owed protocol call, and every unruled
+  disclosure — ordered by urgency. `pair_status` prints it, its structured
+  result carries `attention_set`, the board digest carries the top five, and the
+  stall escalation carries it verbatim, so a captain can no longer be told one
+  thing and refused at `pair_stop` for a reason nothing had shown.
+- **Bounded resume after `max-tokens`.** A turn truncated at the output-token
+  ceiling ends *normally*: the seat goes idle, the board never moved, and the
+  nudge dedupe (keyed on an unchanged debt) suppressed the one message that
+  would have restarted it. The scheduler now recognises the cut-off, continues
+  the seat from the current board state at most `maxTokenResumes` times (default
+  2) for the same owed call on the same board revision, and then parks it as a
+  captain ruling. A board that actually moved refunds the budget; long
+  truncated prose does not, because only a board mutation changes `updatedAt`.
+- **`maxTokenResumes`** joins `heartbeatMs`/`workingLeaseMs` as YAML-only
+  liveness tuning; `0` escalates on the first truncation.
+
 ### Protocol v5 — disclosed gaps have an owner
 
 Built from a measured visual-project retrospective: 9/9 cards and 132/132

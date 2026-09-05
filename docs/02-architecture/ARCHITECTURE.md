@@ -51,7 +51,7 @@
 │   ├── config.js                 # Config schema（schemastery）
 │   ├── defaults.js               # 默认值与枚举的唯一真源（DEFAULTS / TEAM_MODES / …）
 │   ├── settings.js               # 运行时设置命名空间（dsh-settings）
-│   ├── client.js                 # Settings → Plugins 卡片（浏览器端，逐字提供）
+│   ├── client.js                 # 设置侧栏顶级「结对编程」分区（浏览器端，逐字提供）
 │   ├── command.js                # /pair slash command + 手势边界
 │   ├── prompt.js                 # systemPrompt section：协议使用策略（稳定前缀）
 │   ├── protocol/                 # 纯逻辑，可单测，不 import runtime/tools/cordis
@@ -66,6 +66,9 @@
 │   │   ├── obligation.js         # [PAIR:NEXT] 派生：看板决定谁欠哪一步
 │   │   ├── oracle.js             # SPEC-FORK 纯逻辑（分叉 / 计算判词 / 冻结记录）
 │   │   ├── stall.js              # 停摆诊断 + working lease 判定
+│   │   ├── attention.js          # Attention Set：每次唤醒从持久状态重算的待办
+│   │   ├── command-shape.js      # 「这串字符 shell 跑得动吗」——计划字段的可执行性判据
+│   │   ├── lessons.js            # 回顾允许写进长期存储的内容
 │   │   └── personas.js           # solo + SPEC + 遗留席位模板（版本化，缓存稳定前缀）
 │   ├── runtime/                  # 依赖 state/ 与宿主原语
 │   │   ├── members.js            # 子 Agent 派生/唤醒/persona + 工具沙箱（I1、SPEC 隔离）
@@ -73,7 +76,9 @@
 │   │   ├── scheduler.js          # 看板事件驱动调度器 + 心跳巡检 + 席位遥测
 │   │   ├── wake.js               # 投递失败后的恢复唤醒
 │   │   ├── collapse.js           # 未读邮件折叠
-│   │   └── recycle.js            # 席位按循环回收
+│   │   ├── recycle.js            # 席位按循环回收（预留代次→锁外 spawn→锁内核验提交）
+│   │   ├── heartbeat.js          # 单实例巡检：每队隔离 + 每队截止时间 + dispose 后止血
+│   │   └── retire.js             # 唯一退休路径：stop / 组队回滚 / 回收补偿共用
 │   ├── state/                    # 不 import cordis
 │   │   ├── lock.js               # withLock 串行队列 + sanitizeKey
 │   │   ├── atomic.js             # Windows 兼容原子写
@@ -91,6 +96,7 @@
 │   │   ├── risk.js               # pair_risk
 │   │   ├── arbitrate.js          # pair_arbitrate / pair_gate_check
 │   │   └── shared.js             # 调用方解析 + 投递扇出 + wakeCaptain
+│   ├── integrations/             # 与外部插件的只读集成（CE 检测 / 目录 / 推送 / 账本）
 │   ├── events.js                 # session 事件追加（容错：报告静默的模块自己不能静默）
 │   └── types/
 │       └── index.d.ts
@@ -204,7 +210,7 @@ interface EvidenceCache {
 
 - 存储：`.pair-programming/cache/<key>.json`，单文件单条。
 - 失效：key 内含 mtime/HEAD，天然精确失效；LRU 上限 500 条。
-- 写入走 `atomic.js` 的原子写（Windows 兼容 rename 重试 + 直接写降级）。
+- 写入走 `atomic.js` 的原子写（Windows 兼容 rename 有界重试）。**0.13.6 起没有直接写降级**：rename 重试耗尽即抛 `PAIR_STATE_COMMIT_FAILED`，正式文件保持上一版完整状态，完整临时副本留在 `recoveryPath` 等人工恢复。降级覆盖曾在注入 EPERM + 写入中断时把正式文件写成半个 JSON 并删掉恢复材料，那是它被删除的原因。
 
 ### 3.7 L1 状态模型
 
@@ -300,7 +306,7 @@ Driver Agent                    Navigator Agent                 Challenger Agent
 |---|---|---|
 | per-key 串行 promise 队列 | state.js `withTeamLock` | `state/lock.js` 泛化为任意 key |
 | Unicode 安全路径 key | state.js `sanitizeKey` | 直接复用 |
-| Windows 原子写（rename 重试 + 直接写降级） | state.js `replaceFileAtomicOrDirect` / `atomicWriteText` | `state/atomic.js` |
+| Windows 原子写（rename 有界重试，无降级 —— 0.13.6 起） | state.js `replaceFileAtomicOrDirect` / `atomicWriteText` | `state/atomic.js` |
 | JSONL 邮箱（append/read/unread/claim/release/ack，delivery lease） | state.js `appendMailbox` 等 | `runtime/mailbox.js` |
 | 任务状态机 + 迁移校验 | state.js `TASK_TRANSITIONS` / `transitionError` | `state/store.js`，状态集加 gate 相关 |
 | attempt 能力令牌（activate/begin/invalidate） | state.js | `state/store.js` |
