@@ -182,6 +182,7 @@ export async function run(check) {
     const hCycle = openCycle(owing.protocol, 't-1', { tddMode: 'enforce' });
     hCycle.step = 'GREEN';
     hCycle.oracleSha = 'a'.repeat(64);
+    owing.tasks[0].oracle = { sha: hCycle.oracleSha };
     await createTeamDir(hRoot, owing);
     const followups = [];
     const hctx = {
@@ -219,6 +220,7 @@ export async function run(check) {
     const rCycle = openCycle(refusing.protocol, 't-1', { tddMode: 'enforce' });
     rCycle.step = 'GREEN';
     rCycle.oracleSha = 'b'.repeat(64);
+    refusing.tasks[0].oracle = { sha: rCycle.oracleSha };
     // Older than STALL_AFTER_MS: the diagnosis is derived from the board's own
     // timestamps, never from a stored clock.
     rCycle.openedAt = Date.now() - 400_000;

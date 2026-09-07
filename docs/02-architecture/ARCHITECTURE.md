@@ -2,7 +2,7 @@
 
 > ⏳ **v3 导读（2026-09-03，PROTOCOL_VERSION=3）**（当前协议为 PROTOCOL_VERSION=5；v4/v5 增量见插件 `README.md` 与 `CHANGELOG.md` 0.4.0 起）：本文是 v1/v2 正文，保留为历史。当前架构见
 > `dsh-pair-programming-design/02-architecture/ARCHITECTURE.md`（v3 正文）：协议层已改为"状态机 + oracle 冻结与判决 + 亲跑命令的门禁"，
-> 默认入口是 solo（SPEC 短命席位），工具共 22 个 `pair_*`（完整清单以 `verify-startup` 为准）。与代码冲突时以代码为准。
+> 默认入口是 solo（SPEC 短命席位），工具共 23 个 `pair_*`（完整清单以 `verify-startup` 为准）。与代码冲突时以代码为准。
 >
 > 本文回答"怎么实现"。模块划分、数据流、API 契约、与 DSH 宿主原语的集成点。
 > **v1.1 修订**：零第三方插件依赖。插件自带完整结对运行时（团队状态、任务图、邮箱、事件驱动调度器），直接构建在 DSH 宿主原语上。成熟模式从 agent-teams 源码复刻适配（见 `05-reference/AGENT_TEAMS_API.md`，记录每个模式的出处）。
@@ -18,7 +18,7 @@
 │  PairProtocol 状态机 · 角色 persona 模板 · 消息 DSL 解析     │
 │  质量门禁 Gate · 风险单管理 · 决策日志 · 粒度控制器           │
 ├────────────────────────────────────────────────────────────┤
-│ 工具层（注册进共享 tools 注册表；22 个 pair_*，以 verify-startup 为准）│
+│ 工具层（注册进共享 tools 注册表；23 个 pair_*，以 verify-startup 为准）│
 │  pair_start · pair_oracle_write · pair_oracle · pair_propose│
 │  pair_review · pair_red/green · pair_report · pair_verify   │
 │  pair_risk · pair_arbitrate · pair_gate_check · pair_status │
@@ -172,7 +172,7 @@ pair_start(goal, mode)
 ### 3.4 消息流转
 
 - 协议消息 = 邮箱消息的 content，以 `[PAIR:<TYPE>]` 开头 + JSON 体。
-- 发送：写入接收方 JSONL 邮箱（落盘，真相源）→ 若接收方是成员，经 `subagents.followup(captain, childId, ...)` 唤醒为新 turn；若接收方是 captain 且 live，经 `captain.steer(...)` 在最近模型步送达。
+- 发送：先写入接收方 JSONL 原文，再在团队锁内选择并租约最多 8 条、总计最多 16 KiB UTF-8（含元数据与当前 NEXT）的通知。成员通过 `subagents.sendMessage` 接收；运行中的席位常规邮件留待 idle，紧急控制每轮最多一次通知。控制优先且预留普通邮件位。超长原文以明确引用送达，接收者用 `pair_mailbox_read(message_id, offset, max_chars)` 每页最多 4000 UTF-16 字符取回，仅可读自己的邮箱。ACK 仅表示宿主接受通知，**不表示模型已读或已完成**；原文与剩余积压保留，失败或旧租约回执不能消费新租约。
 - 接收方成员被唤醒后，其 persona 指示它：用 messages.js 解析消息，按状态机响应，回复走同一 DSL。
 - 每条协议消息同时追加为 captain session 事件（`session.append('pair/message-sent', ...)`，容错：harness 不认识该事件类型则跳过，见 events.js 模式），Web UI 可折叠协议时间线。
 

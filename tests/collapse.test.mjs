@@ -28,5 +28,6 @@ export async function run(check) {
   check(d.collapsed.length === 0 && d.live[0] === all[0] && d.live[1] === junk, 'D all-live input: no summary, identical live array');
   const z = collapseUnread([], T([]));
   check(z.collapsed.length === 0 && z.live.length === 0, 'D empty input folds nothing');
-  check(fallbackMailboxPrompt([{ from: 'nav', content: 'body-1' }]) === 'Pair-programming delivered messages that were persisted while live delivery was unavailable:\n\nFrom nav:\nbody-1\n\nHandle these messages in this turn. Task assignments still require pair_task_claim and the current attempt_id.', 'D fallbackMailboxPrompt without collapsed stays byte-identical to the legacy format');
+  const fallback = fallbackMailboxPrompt(Array.from({ length: 1000 }, (_, i) => ({ id: `m-${i}`, from: 'nav', content: '界'.repeat(2000) })));
+  check(Buffer.byteLength(fallback) <= 16384 && fallback.includes('backlog 992') && fallback.includes('pair_mailbox_read'), 'D the legacy formatter entry point also bounds a 1000-message burst and exposes durable references');
 }
