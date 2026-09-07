@@ -7,6 +7,126 @@ protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-09-08
+
+Review became something a green command cannot overrule, and closing a board
+became possible again. The protocol/persona templates move to v6, so a session
+started on 0.13.x carries different prose; boards in flight from 0.13.x keep
+their history but need a fresh final review before they can gate (see the
+migration note at the end).
+
+### Changed — an independent counterexample outranks a green oracle
+
+`pair_verify` used to derive the verdict from the sealed command alone: a
+reviewer who reproduced a real defect had nowhere to put it. A structured
+`verdict="reject"` with `evidence[]`, `observation`, `impact` and
+`way_forward` is now preserved as the cycle's verdict, with the computed
+outcome recorded separately rather than overwritten. There is no objection
+quota — a supported clean acceptance is still valid.
+
+Evidence is also bound to what it judged. A final ACCEPT records the
+candidate worktree, the board facts, and the task attempt it reviewed;
+`pair_gate_check` refuses a review that does not bind them, infrastructure
+failure is no longer charged as a product rejection, and a duplicate
+concurrent verification cannot rewrite a completed verdict. A verification
+whose task, cycle, oracle or candidate changed while its command was running
+refuses the call instead of certifying the tree it no longer describes.
+
+### Fixed — a board with two tasks could not be stopped as complete
+
+Measured on a real host, four times. Completing a task binds its credential
+to the worktree of that moment; the next task's implementation moves the
+tree; `pair_stop` then finds the older credential stale and prescribes
+re-running `pair_gate_check`. That call was refused three different ways: the
+task was terminal, then the phase was RETRO (which `pair_stop` itself
+requires first), then the captain's own arbitration about the stale gate sat
+inside the fingerprint that decided whether the review still stood. Two
+correct repairs were computed, accepted, gated — and then discarded, because
+the captain reset the fixture rather than obey an impossible instruction.
+
+A task already completed on its own full review and credential may now be
+**re-certified** against the final tree. The identity checked is the chain
+from the final review to the credential the task holds — both recorded while
+the attempt was live, since the scheduler releases `attemptId` the moment a
+task goes terminal — and a re-issued credential carries that attempt forward
+so the next re-certification can still verify the chain. Nothing is waived
+that the gate does not re-derive: it re-runs the frozen oracle, re-reads
+scope and deliverables, and re-executes the whole checklist against the
+current board, and `all_accepted` fails on its own the moment a new cycle
+opens. The credential records `recertified` so the board says which path
+issued it. Closure calls now refuse only `DONE` and `ABORTED`; `cancelled`
+and `failed` tasks are still refused outright.
+
+### Fixed — a missing program was charged as a failing product, in every locale but one
+
+`notRunnableEvidence` matched the English text a shell prints for an unknown
+command. `cmd.exe` translates it, and on a non-UTF-8 console codepage the
+translation arrives as mojibake, so on a zh-CN host a typo'd oracle exited 1
+with an unreadable tail and was recorded as `oracle_red` — the exact failure
+the module exists to prevent, sealed into the task contract. The structure
+survives translation: the shell opens its output by quoting the program name
+it could not run, and that is what is matched now.
+
+### Fixed — a correct oracle was reported as asserting nothing
+
+`assessOracleReach` resolved an oracle's quoted paths against the workspace
+root only. Oracles live under `.pair-oracles/<task_id>/`, so the relative
+import that reaches the product escaped the tree and was dropped: two
+correctly wired oracles on a live board were both labelled
+`SELF-CONTAINED (asserts nothing about existing code)`. Paths are now also
+resolved from the oracle's own directory.
+
+### Changed — obligations, delivery and receipts are bounded per seat
+
+- Work owed is derived from live tasks and their latest cycles rather than
+  the last global cycle: a REJECT keeps its cycle open, a later checkpoint is
+  not hidden by an earlier ACCEPT, and blocked dependencies create no work.
+  Continuation budgets bind to the owed task/cycle/attempt, so a heartbeat is
+  no longer mistaken for progress.
+- Fallback delivery is bounded by message count and UTF-8 bytes, oversized
+  records become read-by-id references instead of silent truncation, control
+  traffic is prioritised without starving ordinary mail, and leases are
+  released only for the delivery that took them.
+- Receipts the board has already absorbed collapse into one bounded summary:
+  a synthetic burst of 1,000 absorbed GREEN receipts needed 125 notifications
+  and 121,500 bytes before, one notification after. REJECT, NO_GO, P0/P1 and
+  unknown messages are never collapsed.
+- Independent seats are kicked concurrently with per-seat serialisation, and
+  a delayed retired member no longer occupies the flight its replacement
+  needs.
+
+### Fixed — a checkpoint's ancestry no longer blocks a later re-freeze
+
+An earlier checkpoint's oracle seal and `openedAt` prevented a legitimate
+defect re-freeze from ever reaching a gate. Explicitly audited checkpoint
+supersession is now recorded, and matching historical checkpoints keep their
+scope and Test First evidence without judging the new seal. A missing or
+modified audit grants no exemption, and they cannot replace the latest final
+ACCEPT.
+
+### Verification
+
+`npm run verify`: 1,340 checks, 0 failures, 36 suites; 103 files typecheck;
+runtime imports, build, a 74-file tarball and a 23-tool startup all pass.
+
+Native acceptance ran on a real DSH host (`opencode-go-muse` /
+`muse-spark-1.3-contributor`) against a fixture seeding two independent
+defects behind eight passing baseline regressions: 225 seconds, 89 tool
+calls, board `DONE` with a completion receipt, two tasks on two credentials,
+two of the three gate passes re-certifications, and the product verified
+independently of the board afterwards. Three earlier runs of the same fixture
+are recorded with their failures in
+`docs/diagnostics/2026-09-07-native-dsh-acceptance.md`. This is a functional
+integration result on one model and one host, not a measured improvement in
+repair success rate.
+
+### Migration
+
+`PROTOCOL_VERSION` is `6`. A board carried over from 0.13.x keeps its history,
+but an ACCEPT or gate credential recorded before review binding returns
+`GATE_STALE`: open a fresh cycle, report GREEN, and obtain a new final review
+before gating. Old verdicts are preserved, never rewritten.
+
 ## [0.13.10] — 2026-09-05
 
 ### Fixed — setup-peers created a dangling link on Linux
