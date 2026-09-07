@@ -157,13 +157,15 @@ export async function run(check) {
     check(board.protocol.cycles[0].step === 'GO', 'E8 a rejected auto-GO cycle rewinds to GO so the Driver can re-run GREEN');
     process.env.FIXED = '1';
     await h.tool('pair_green')({ cycle_id: proposed.cycle_id, green_evidence: ['oracle green'], diff_summary: 'src/a.js +9/-2', test_results: 'suite ok', tuned_for_oracle: 'none' }, { agent: h.driver });
+    const bareAccept = await fails(() => h.tool('pair_verify')({ cycle_id: proposed.cycle_id }, { agent: h.navigator }));
+    check(bareAccept.includes('needs a scope reading') && bareAccept.includes('beyond_request'), 'E8 an ACCEPT on a green oracle still requires someone to have read the diff');
     const accepted = await h.tool('pair_verify')({ cycle_id: proposed.cycle_id, beyond_request: 'nothing — the hunk is the minimal brace-aware split', preexisting_at_risk: 'the list/tuple passthrough; re-ran the existing config suite' }, { agent: h.navigator });
     check(accepted.verdict === 'accept' && accepted.computed === true, 'E8 a passing oracle accepts with no verdict argument at all');
     // A green re-run is blind to behaviour nobody requested. In a measured
     // run a comma fix also rewrote an existing list/tuple contract; the
     // oracle passed and the whole regression suite passed 18/18.
-    const bareAccept = await fails(() => h.tool('pair_verify')({ cycle_id: proposed.cycle_id }, { agent: h.navigator }));
-    check(bareAccept.includes('needs a scope reading') && bareAccept.includes('beyond_request'), 'E8 an ACCEPT on a green oracle still requires someone to have read the diff');
+    const duplicateAccept = await fails(() => h.tool('pair_verify')({ cycle_id: proposed.cycle_id }, { agent: h.navigator }));
+    check(duplicateAccept.includes('already completed'), 'E8 a final ACCEPT cannot be rewritten by a duplicate call');
     // E9: the gate replays the oracle itself.
     const pass = await h.tool('pair_gate_check')({ task_id: 't-1' }, { agent: h.captain });
     check(pass.pass === true && pass.oracle_replay.ok === true, 'E9 the gate replays the frozen oracle and passes');
@@ -180,8 +182,8 @@ export async function run(check) {
     check(staleTree.includes('GATE_STALE') && staleTree.includes('worktree changed'), 'E9 a post-gate source edit invalidates the credential');
     // E10: editing the oracle is caught by the gate and by verification.
     await writeFile(oraclePath, 'process.exit(0); // always green now\n');
-    const tamperedGate = await h.tool('pair_gate_check')({ task_id: 't-1' }, { agent: h.captain });
-    check(tamperedGate.pass === false && tamperedGate.failures.join(' ').includes('frozen oracle changed'), 'E10 a rewritten oracle fails the gate even though it now passes');
+    const tamperedGate = await fails(() => h.tool('pair_gate_check')({ task_id: 't-1' }, { agent: h.captain }));
+    check(tamperedGate.includes('GATE_STALE') && tamperedGate.includes('final review'), 'E10 a rewritten candidate/oracle needs a fresh final review even though it now passes');
     const nextCycle = await h.tool('pair_propose')({ task_id: 't-1', intent: 'take 3', files: ['src/a.js'], net_lines: 5, verify_plan: 'node .pair-oracles/t-1/accept.mjs' }, { agent: h.driver });
     await h.tool('pair_green')({ cycle_id: nextCycle.cycle_id, green_evidence: ['green'], diff_summary: 'src/a.js +1/-1', test_results: 'ok', tuned_for_oracle: 'none' }, { agent: h.driver });
     const tamperVerdict = await h.tool('pair_verify')({ cycle_id: nextCycle.cycle_id }, { agent: h.navigator });

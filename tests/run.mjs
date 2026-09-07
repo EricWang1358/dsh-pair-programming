@@ -14,6 +14,7 @@ const suites = ['protocol.test.mjs', 'state.test.mjs', 'lock.test.mjs', 'gate.te
 suites.push('stability.test.mjs');
 suites.push('drift.test.mjs');
 suites.push('delivery.test.mjs');
+suites.push('verification.test.mjs');
 for (const s of suites) {
   const mod = await import(new URL(`./${s}`, import.meta.url).href);
   await mod.run(check);

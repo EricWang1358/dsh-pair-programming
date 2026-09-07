@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — dsh-pair-programming 技术架构
 
-> ⏳ **v3 导读（2026-09-03，PROTOCOL_VERSION=3）**（当前协议为 PROTOCOL_VERSION=5；v4/v5 增量见插件 `README.md` 与 `CHANGELOG.md` 0.4.0 起）：本文是 v1/v2 正文，保留为历史。当前架构见
+> ⏳ **v3 导读（2026-09-03，PROTOCOL_VERSION=3）**（当前协议为 PROTOCOL_VERSION=6；v4/v5 增量见插件 `README.md` 与 `CHANGELOG.md` 0.4.0 起）：本文是 v1/v2 正文，保留为历史。当前架构见
 > `dsh-pair-programming-design/02-architecture/ARCHITECTURE.md`（v3 正文）：协议层已改为"状态机 + oracle 冻结与判决 + 亲跑命令的门禁"，
 > 默认入口是 solo（SPEC 短命席位），工具共 23 个 `pair_*`（完整清单以 `verify-startup` 为准）。与代码冲突时以代码为准。
 >
