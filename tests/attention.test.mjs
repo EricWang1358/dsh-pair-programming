@@ -93,7 +93,7 @@ export async function run(check) {
   const owed = attentionSet(cut).obligation;
   check(owed?.who === 'driver', 'the fixture owes the Driver a call');
   const key = debtKey(cut, owed);
-  check(typeof key === 'string' && key.includes(String(cut.updatedAt)), 'a resume budget is scoped to one owed call on one board revision');
+  check(typeof key === 'string' && key.length <= 80, 'a resume debt has a compact deterministic key');
 
   const firstCut = truncatedSeats(cut);
   check(firstCut.length === 1 && firstCut[0].name === 'driver', 'a truncated seat that still owes the board is surfaced');
@@ -105,12 +105,55 @@ export async function run(check) {
   const spentItem = attentionSet(cut).items.find(i => i.kind === 'truncated-seat');
   check(spentItem.who === 'captain' && spentItem.tool === 'pair_arbitrate', 'an exhausted budget hands the seat to the captain instead of continuing');
 
-  // The whole point of keying on updatedAt: real progress refunds the budget.
+  // Routine persistence is not progress on the owed task.
   const moved = { ...cut, updatedAt: cut.updatedAt + 1 };
-  check(truncatedSeats(moved)[0].resumes === 0, 'a board that actually moved gives the seat a fresh budget');
+  check(truncatedSeats(moved)[0].exhausted, 'a heartbeat or activity write cannot refund an exhausted resume budget');
 
-  // Long truncated prose is not progress: the board revision is what counts.
-  check(debtKey(cut, owed) !== debtKey(moved, owed), 'the debt key changes only when the board changes');
+  check(debtKey(cut, owed) === debtKey(moved, owed), 'the debt key ignores team.updatedAt');
+  const metadata = structuredClone(cut);
+  metadata.tasks[0].updatedAt += 10;
+  metadata.members[0].resume.at += 10;
+  metadata.members[0].lastTurn.endedAt += 10;
+  metadata.protocol.stats.cacheHits += 1;
+  check(debtKey(metadata, owed) === key, 'task metadata, member resumes and cache statistics cannot masquerade as debt progress');
+  const attempt = structuredClone(cut);
+  attempt.tasks[0].attemptId = 'a-2';
+  check(debtKey(attempt, owed) !== key && truncatedSeats(attempt)[0].resumes === 0, 'a new task attempt receives a distinct continuation budget');
+  const changedOracle = structuredClone(cut);
+  changedOracle.tasks[0].oracle.sha = 'new-oracle';
+  check(debtKey(changedOracle, owed) !== key, 'a changed acceptance seal changes the task debt');
+
+  const progressing = structuredClone(cut);
+  progressing.protocol.cycles.push({ id: 'c-1', taskId: 't-1', step: 'GO', oracleSha: frozen.sha, review: { verdict: 'go', auto: true }, rejections: 1 });
+  const implementing = attentionSet(progressing).obligation;
+  const implementationKey = debtKey(progressing, implementing);
+  progressing.protocol.cycles[0].step = 'GREEN';
+  check(debtKey(progressing, implementing) !== implementationKey, 'meaningful progress on the owed cycle changes its continuation key even when updatedAt is unchanged');
+  progressing.protocol.cycles[0].step = 'GO';
+  progressing.protocol.cycles[0].rejections = 2;
+  check(debtKey(progressing, implementing) !== implementationKey, 'a new rejected repair iteration at the same GO step has its own debt');
+  const reordered = structuredClone(progressing);
+  reordered.protocol.cycles[0] = Object.fromEntries(Object.entries(reordered.protocol.cycles[0]).reverse());
+  reordered.protocol.cycles[0].review.at = 900;
+  check(debtKey(reordered, implementing) === debtKey(progressing, implementing), 'object key order and review timestamps do not renew a debt');
+
+  const concurrent = structuredClone(cut);
+  concurrent.tasks.push(task({ id: 't-2', status: 'pending', attemptId: undefined }));
+  concurrent.members[1].lastTurn = { endReason: 'max-tokens' };
+  const concurrentSet = attentionSet(concurrent);
+  check(concurrentSet.obligations?.length === 2 && concurrentSet.items.filter(i => i.kind === 'obligation').length === 2, 'attention shows both Driver implementation and Navigator future oracle work');
+  const concurrentSeats = truncatedSeats(concurrent);
+  check(concurrentSeats.length === 2 && concurrentSeats.some(s => s.name === 'driver' && s.exhausted) && concurrentSeats.some(s => s.name === 'navigator' && s.remaining === MAX_TOKEN_RESUMES), 'truncation and exhaustion are evaluated separately for every owing seat');
+  check(concurrentSet.items.some(i => i.kind === 'truncated-seat' && i.who === 'navigator' && i.tool === 'pair_oracle_write'), 'each continuation attention row names that seat own draft-only tool');
+  check(debtKey(concurrent, owed) === key, 'adding independent work does not refund the current Driver budget');
+  concurrent.tasks[1].oracle = { ...frozen, sha: 'future-seal' };
+  check(debtKey(concurrent, owed) === key, 'progress on a different task does not change this task debt');
+
+  for (const phase of ['DONE', 'ABORTED']) {
+    const terminal = structuredClone(concurrent);
+    terminal.protocol.phase = phase;
+    check(attentionSet(terminal).items.length === 0 && truncatedSeats(terminal).length === 0, `${phase} teams cannot restart members through leftover attention`);
+  }
 
   const notOwed = teamFixture({
     tasks: [task({ oracle: frozen })],
