@@ -11,6 +11,7 @@ import { registerArbitrateTools } from '../lib/tools/arbitrate.js';
 import { createTeamDir, readTeam, writeTeam } from '../lib/state/store.js';
 import { initialProtocolState, openCycle } from '../lib/protocol/machine.js';
 import { runGate } from '../lib/protocol/gate.js';
+import { completionReadiness } from '../lib/protocol/completion.js';
 import { digestOracleFiles, workspaceFingerprint, runOracleCommand } from '../lib/tools/oracle-exec.js';
 import { navigatorPersona } from '../lib/protocol/personas.js';
 import { usageSectionText } from '../lib/prompt.js';
@@ -214,6 +215,7 @@ export async function run(check) {
   });
   await runFollowups(check);
   await runReviewRegressions(check);
+  await runClosureRegression(check);
 }
 
 export async function runFollowups(check) {
@@ -299,6 +301,56 @@ export async function runFollowups(check) {
   }, { evidenceCache: true, dodCommand: `node -e "require('fs').writeFileSync('product.txt','mutated')"` });
 }
 
+/**
+ * Closure of a multi-task board, measured live: completing one task binds its
+ * credential to the worktree of that moment, the NEXT task's implementation
+ * moves the tree, and pair_stop then demands a credential bound to the final
+ * tree. Its refusal says 're-run pair_gate_check' — so the gate must accept a
+ * completed task, or the instruction names a call the runtime rejects and no
+ * board with two tasks can ever be stopped as complete.
+ */
+export async function runClosureRegression(check) {
+  const h = await fixture();
+  try {
+    await h.verify();
+    const first = await h.call('pair_gate_check', { task_id: 't-1' }, 'cap');
+    check(first.pass === true, 'closure the first gate pass is issued while the task is still in flight');
+    await h.edit(t => { t.tasks[0].status = 'completed'; });
+    // What a later task on the same board does: it changes the tree.
+    await writeFile(join(h.root, 'later-task.txt'), 'a second task shipped its own file');
+    const finalTree = await workspaceFingerprint(h.root, { stateDir: '.state' });
+    const stale = completionReadiness(await h.board(), { greenRequired: false, worktreeSha: finalTree }).failures;
+    check(stale.some(text => text.includes('stale against the final worktree')), 'closure the completed task holds a credential stale against the final worktree');
+    const again = await resultOf(h.call('pair_gate_check', { task_id: 't-1' }, 'cap'));
+    check(again.error === undefined, `closure the gate re-runs for a completed task instead of refusing it (${again.error ?? 'ok'})`);
+    check(again.value?.pass === true && again.value.gate_pass_id !== first.gate_pass_id, 'closure the re-gate issues a fresh credential bound to the final worktree');
+    const after = completionReadiness(await h.board(), { greenRequired: false, worktreeSha: finalTree }).failures;
+    check(!after.some(text => text.includes('stale against the final worktree')), 'closure re-gating clears the only obstacle pair_stop named');
+    await h.edit(t => { t.tasks[0].status = 'cancelled'; });
+    check((await resultOf(h.call('pair_gate_check', { task_id: 't-1' }, 'cap'))).error?.includes('terminal'), 'closure a cancelled task is still refused — completed is the only terminal status the gate certifies');
+    check((await h.board()).protocol.gatePasses.at(-1).recertified === true, 'closure the re-issued credential records that it was re-certified, not freshly reviewed');
+  } finally { await h.cleanup(); }
+
+  // What re-certification must NOT buy. Each of these moves one dimension the
+  // allowance deliberately does not cover.
+  const denied = {
+    "a later change that breaks the completed task's own oracle": async f => { await writeFile(join(f.root, 'product.txt'), 'broken by the next task'); },
+    'a task that was never completed on its own credential': async f => { await f.edit(t => { t.tasks[0].status = 'in_progress'; }); },
+    'a task attempt that moved since the review': async f => { await f.edit(t => { t.tasks[0].attemptId = 'attempt-2'; }); },
+  };
+  for (const [name, drift] of Object.entries(denied)) {
+    const f = await fixture();
+    try {
+      await f.verify();
+      await f.call('pair_gate_check', { task_id: 't-1' }, 'cap');
+      await f.edit(t => { t.tasks[0].status = 'completed'; });
+      await writeFile(join(f.root, 'later-task.txt'), 'a second task shipped its own file');
+      await drift(f);
+      const result = await resultOf(f.call('pair_gate_check', { task_id: 't-1' }, 'cap'));
+      check(result.error !== undefined || result.value?.pass === false, `closure re-certification refuses ${name}`);
+    } finally { await f.cleanup(); }
+  }
+}
 /** Recovery sequences discovered by independent review of the evidence boundary. */
 export async function runReviewRegressions(check) {
   const h = await fixture();
