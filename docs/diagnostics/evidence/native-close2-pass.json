@@ -1,0 +1,184 @@
+{
+  "label": "final native DSH acceptance, two independently specified fixes - PASSED",
+  "status": "completed",
+  "selection": {
+    "provider": "opencode-go-muse",
+    "model": "muse-spark-1.3-contributor"
+  },
+  "captainSessionId": "session-a7d638d0-31a0-4e8b-9738-045815f5466f",
+  "startedAt": "2026-09-07T21:30:06.147Z",
+  "endedAt": "2026-09-07T21:33:51.349Z",
+  "elapsedSeconds": 225.2,
+  "toolCount": 89,
+  "sessions": [
+    "session-a7d638d0-31a0-4e8b-9738-045815f5466f",
+    "7dfd3d13-98d7-4a3c-8387-cd86c9d04a2f",
+    "4a9e6dd2-2c6b-4647-b268-d4ba09a73053",
+    "14e6c6ae-65b1-4da4-bc4f-72b3fb0ec2b8",
+    "b7f3b9bc-56ba-42e0-8a68-894fa644dca3",
+    "2b62b13b-d495-42fd-8c16-b5c9e2dd5b21",
+    "899aa27a-3057-4b19-a8ad-4f90fc82da24"
+  ],
+  "routesAllRequestedModel": true,
+  "tools": [
+    {
+      "Name": "edit",
+      "Count": 3
+    },
+    {
+      "Name": "pair_gate_check",
+      "Count": 4
+    },
+    {
+      "Name": "pair_green",
+      "Count": 2
+    },
+    {
+      "Name": "pair_oracle",
+      "Count": 3
+    },
+    {
+      "Name": "pair_oracle_write",
+      "Count": 3
+    },
+    {
+      "Name": "pair_propose",
+      "Count": 2
+    },
+    {
+      "Name": "pair_retro",
+      "Count": 1
+    },
+    {
+      "Name": "pair_start",
+      "Count": 1
+    },
+    {
+      "Name": "pair_status",
+      "Count": 26
+    },
+    {
+      "Name": "pair_stop",
+      "Count": 2
+    },
+    {
+      "Name": "pair_task_claim",
+      "Count": 2
+    },
+    {
+      "Name": "pair_task_create",
+      "Count": 2
+    },
+    {
+      "Name": "pair_task_update",
+      "Count": 6
+    },
+    {
+      "Name": "pair_verify",
+      "Count": 2
+    },
+    {
+      "Name": "pwsh",
+      "Count": 3
+    },
+    {
+      "Name": "read",
+      "Count": 16
+    },
+    {
+      "Name": "send_message",
+      "Count": 11
+    }
+  ],
+  "errors": [
+    {
+      "sessionId": "b7f3b9bc-56ba-42e0-8a68-894fa644dca3",
+      "name": "FsError",
+      "code": "FS_NOT_OBSERVED",
+      "message": ""
+    }
+  ],
+  "board": {
+    "phase": "DONE",
+    "completionReceipt": "pair-complete:2968ccfe3d28cb7e60c6b20e0d77f1a86448891ac4291b538c68d5fd47245ba8",
+    "tasks": [
+      {
+        "id": "t-1",
+        "status": "completed",
+        "gatePassId": "36e9a1ea-1efc-4699-a7d3-831b025af224",
+        "oracleCmd": "node .pair-oracles/t-1/acceptance.mjs",
+        "reach": {
+          "selfContained": false,
+          "touches": [
+            "src/range.mjs"
+          ]
+        }
+      },
+      {
+        "id": "t-2",
+        "status": "completed",
+        "gatePassId": "9ae5966c-7c44-4173-a5b2-7bc53efbb66e",
+        "oracleCmd": "node .pair-oracles/t-2/acceptance.mjs",
+        "reach": {
+          "selfContained": false,
+          "touches": [
+            "src/range.mjs"
+          ]
+        }
+      }
+    ],
+    "cycles": [
+      {
+        "id": "c-t-1-1-1",
+        "taskId": "t-1",
+        "verdict": "accept",
+        "category": "oracle_green"
+      },
+      {
+        "id": "c-t-2-1-2",
+        "taskId": "t-2",
+        "verdict": "accept",
+        "category": "oracle_green"
+      }
+    ],
+    "gatePasses": [
+      {
+        "id": "be2409e4-a4ec-4df8-8c45-5a298ed80c97",
+        "taskId": "t-1",
+        "recertified": false
+      },
+      {
+        "id": "9ae5966c-7c44-4173-a5b2-7bc53efbb66e",
+        "taskId": "t-2",
+        "recertified": true
+      },
+      {
+        "id": "36e9a1ea-1efc-4699-a7d3-831b025af224",
+        "taskId": "t-1",
+        "recertified": true
+      }
+    ],
+    "greenBuild": "command: node tests/regression.mjs\nexit: 0\noutput tail:\nok - an ascending range parses\nok - negative endpoints parse\nok - equal endpoints stay legal\nok - invalid syntax is a TypeError\nok - a missing endpoint is a TypeError\nok - a value inside the range is returned unchanged\nok - a value below the range is raised to the lower bound\nok - a degenerate range returns its only member\n8/8 baseline checks passed",
+    "members": [
+      {
+        "role": "driver",
+        "status": "removed"
+      },
+      {
+        "role": "navigator",
+        "status": "removed"
+      }
+    ]
+  },
+  "independentVerification": {
+    "parseRange 9..3": "RangeError",
+    "parseRange 3..9": "{lower:3,upper:9}",
+    "parseRange 4..4": "{lower:4,upper:4}",
+    "parseRange abc": "TypeError",
+    "clamp 99,1,10": 10,
+    "clamp -2,1,10": 1,
+    "clamp 5,1,10": 5,
+    "frozenOracleReplay": "t-1 exit 0, t-2 exit 0",
+    "baselineRegressions": "8/8 pass"
+  }
+}
