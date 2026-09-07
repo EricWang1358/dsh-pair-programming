@@ -1,0 +1,145 @@
+{
+  "native-close": {
+    "status": "timeout",
+    "elapsedSeconds": 1500.0,
+    "toolCount": 111,
+    "sessions": 7,
+    "routesAllRequestedModel": true,
+    "tools": {
+      "edit": 3,
+      "list_agents": 8,
+      "pair_gate_check": 6,
+      "pair_green": 2,
+      "pair_oracle": 2,
+      "pair_oracle_write": 3,
+      "pair_propose": 2,
+      "pair_retro": 1,
+      "pair_start": 1,
+      "pair_status": 32,
+      "pair_stop": 2,
+      "pair_task_claim": 3,
+      "pair_task_create": 2,
+      "pair_task_update": 6,
+      "pair_verify": 2,
+      "pwsh": 4,
+      "read": 13,
+      "send_message": 19
+    },
+    "phase": "RETRO",
+    "tasks": [
+      {
+        "id": "t-1",
+        "status": "completed",
+        "gatePassId": "940fd86c-2cf7-4f6a-bc2f-1094b740a372",
+        "reach": {
+          "selfContained": false,
+          "touches": [
+            "src/range.mjs"
+          ]
+        }
+      },
+      {
+        "id": "t-2",
+        "status": "completed",
+        "gatePassId": "12c6308b-4451-458a-8b59-107a16e44f96",
+        "reach": {
+          "selfContained": false,
+          "touches": [
+            "src/range.mjs"
+          ]
+        }
+      }
+    ],
+    "cycles": [
+      {
+        "id": "c-t-1-1-1",
+        "taskId": "t-1",
+        "verdict": "accept",
+        "category": "oracle_green"
+      },
+      {
+        "id": "c-t-2-1-2",
+        "taskId": "t-2",
+        "verdict": "accept",
+        "category": "oracle_green"
+      }
+    ],
+    "decisions": [],
+    "completionReceipt": null
+  },
+  "native-seal": {
+    "status": "timeout",
+    "elapsedSeconds": 1800.0,
+    "toolCount": 113,
+    "sessions": 7,
+    "routesAllRequestedModel": true,
+    "tools": {
+      "edit": 3,
+      "list_agents": 1,
+      "pair_arbitrate": 1,
+      "pair_gate_check": 7,
+      "pair_green": 2,
+      "pair_oracle": 3,
+      "pair_oracle_write": 4,
+      "pair_propose": 3,
+      "pair_retro": 1,
+      "pair_start": 1,
+      "pair_status": 28,
+      "pair_stop": 3,
+      "pair_task_claim": 2,
+      "pair_task_create": 2,
+      "pair_task_update": 6,
+      "pair_verify": 2,
+      "pwsh": 3,
+      "read": 24,
+      "send_message": 17
+    },
+    "phase": "RETRO",
+    "tasks": [
+      {
+        "id": "t-1",
+        "status": "completed",
+        "gatePassId": "a28609be-7f2f-4b9b-b974-fe316a1e1b80",
+        "reach": {
+          "selfContained": false,
+          "touches": [
+            "src/range.mjs"
+          ]
+        }
+      },
+      {
+        "id": "t-2",
+        "status": "completed",
+        "gatePassId": "525b2164-d077-4be1-95e9-b9f0a3077b0f",
+        "reach": {
+          "selfContained": false,
+          "touches": [
+            "src/range.mjs"
+          ]
+        }
+      }
+    ],
+    "cycles": [
+      {
+        "id": "c-t-1-1-1",
+        "taskId": "t-1",
+        "verdict": "accept",
+        "category": "oracle_green"
+      },
+      {
+        "id": "c-t-2-1-2",
+        "taskId": "t-2",
+        "verdict": "accept",
+        "category": "oracle_green"
+      }
+    ],
+    "decisions": [
+      {
+        "id": "d-6c21cb3b",
+        "taskId": "t-1",
+        "conflictRef": "t-1 gate stale after t-2 edit"
+      }
+    ],
+    "completionReceipt": null
+  }
+}
