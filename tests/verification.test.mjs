@@ -315,7 +315,7 @@ export async function runClosureRegression(check) {
     await h.verify();
     const first = await h.call('pair_gate_check', { task_id: 't-1' }, 'cap');
     check(first.pass === true, 'closure the first gate pass is issued while the task is still in flight');
-    await h.edit(t => { t.tasks[0].status = 'completed'; });
+    await h.edit(t => { t.tasks[0].status = 'completed'; t.tasks[0].attemptId = undefined; });
     // What a later task on the same board does: it changes the tree.
     await writeFile(join(h.root, 'later-task.txt'), 'a second task shipped its own file');
     const finalTree = await workspaceFingerprint(h.root, { stateDir: '.state' });
@@ -343,19 +343,35 @@ export async function runClosureRegression(check) {
     await h.edit(t => { t.protocol.phase = 'EXECUTION'; });
   } finally { await h.cleanup(); }
 
+  // The knot that closed on itself live: the captain settled the impasse the
+  // documented way, and its ruling was part of the fingerprint that decides
+  // whether the review still stands.
+  const ruled = await fixture();
+  try {
+    await ruled.verify();
+    await ruled.call('pair_gate_check', { task_id: 't-1' }, 'cap');
+    await ruled.edit(t => { t.tasks[0].status = 'completed'; t.tasks[0].attemptId = undefined; });
+    await writeFile(join(ruled.root, 'later-task.txt'), 'a second task shipped its own file');
+    await ruled.call('pair_arbitrate', { conflict_ref: 't-1 gate stale after t-2 edit', decision: 're-certify t-1 against the final tree', evidence: ['src/range.mjs:1'], rationale: 'a later task moved the tree this credential was bound to' }, 'cap');
+    const re = await resultOf(ruled.call('pair_gate_check', { task_id: 't-1' }, 'cap'));
+    check(re.value?.pass === true, `closure a ruling about the stale gate does not tighten it (${re.error ?? 'ok'})`);
+    const tree = await workspaceFingerprint(ruled.root, { stateDir: '.state' });
+    const left = completionReadiness(await ruled.board(), { greenRequired: false, worktreeSha: tree }).failures;
+    check(!left.some(text => text.includes('stale')), `closure no credential is left stale for pair_stop to refuse (${left.join(' | ')})`);
+  } finally { await ruled.cleanup(); }
   // What re-certification must NOT buy. Each of these moves one dimension the
   // allowance deliberately does not cover.
   const denied = {
     "a later change that breaks the completed task's own oracle": async f => { await writeFile(join(f.root, 'product.txt'), 'broken by the next task'); },
     'a task that was never completed on its own credential': async f => { await f.edit(t => { t.tasks[0].status = 'in_progress'; }); },
-    'a task attempt that moved since the review': async f => { await f.edit(t => { t.tasks[0].attemptId = 'attempt-2'; }); },
+    'a credential issued for a different attempt than the review signed': async f => { await f.edit(t => { t.protocol.gatePasses.at(-1).binding.taskAttempt.attemptId = 'attempt-2'; }); },
   };
   for (const [name, drift] of Object.entries(denied)) {
     const f = await fixture();
     try {
       await f.verify();
       await f.call('pair_gate_check', { task_id: 't-1' }, 'cap');
-      await f.edit(t => { t.tasks[0].status = 'completed'; });
+      await f.edit(t => { t.tasks[0].status = 'completed'; t.tasks[0].attemptId = undefined; });
       await writeFile(join(f.root, 'later-task.txt'), 'a second task shipped its own file');
       await drift(f);
       const result = await resultOf(f.call('pair_gate_check', { task_id: 't-1' }, 'cap'));
