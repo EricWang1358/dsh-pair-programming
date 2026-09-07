@@ -33,19 +33,35 @@ const peers = Object.keys({ ...(pkg.peerDependencies ?? {}), ...(pkg.dependencie
 
 /** Locate the installed DSH app's own @deepseek-ai singleton tree. */
 function locateDshSdk() {
-  let bin = '';
+  const candidates = [];
   try {
-    bin = execFileSync(process.platform === 'win32' ? 'where' : 'which', ['dsh'],
+    const probe = process.platform === 'win32' ? 'where' : 'which';
+    const bin = execFileSync(probe, ['dsh'],
       { encoding: 'utf8', shell: process.platform === 'win32' }).trim().split(/\r?\n/)[0] ?? '';
+    if (bin !== '') {
+      // Follow symlinks to the REAL entry (nvm: bin/dsh -> lib/node_modules/
+      // @deepseek-ai/dsh/bin/dsh.js — the old code stripped the suffix off the
+      // LINK path and looked in bin/node_modules, which nvm never populates),
+      // then climb every ancestor looking for the host's peer tree.
+      let real = bin;
+      try { real = realpathSync(bin); } catch { /* plain file, not a link */ }
+      let dir = join(real, '..');
+      while (true) {
+        candidates.push(join(dir, 'node_modules'));
+        const parent = join(dir, '..');
+        if (parent === dir) break;
+        dir = parent;
+      }
+    }
   } catch { /* where/which failed */ }
-  bin = bin.replace(/\\/g, '/').replace(/\/(bin|dsh(\.cmd|\.ps1|\.bat)?)$/i, '');
-  const dirs = bin ? [join(bin, 'node_modules')] : [];
+  try {
+    candidates.push(execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim());
+  } catch { /* npm absent — pnpm-only machines */ }
   const fallbacks = [
     'D:/Program Files/nodejs/node_global/node_modules',
     'D:/Program Files/nodejs/node_global/node_modules/@deepseek-ai/dsh/node_modules',
-    'C:/Users/Eric1/.dsh/profiles/web/node_modules',
   ];
-  for (const base of [...dirs, ...fallbacks]) {
+  for (const base of [...candidates, ...fallbacks]) {
     const cand = join(base, '@deepseek-ai');
     if (existsSync(join(cand, 'dsh-tools', 'package.json'))) return cand;
   }
@@ -72,7 +88,11 @@ mkdirSync(peerNM, { recursive: true });
 if (entryExists(junctionTarget)) {
   try { rmSync(junctionTarget, { force: true, recursive: true }); } catch { /* ignore */ }
 }
-symlinkSync(sdk.replace(/\//g, '\\'), junctionTarget, 'junction');
+  // Windows junctions want backslash separators; everywhere else the native
+  // forward-slash path is the only valid one (a backslash link is dangling).
+  const linkTarget = process.platform === 'win32' ? sdk.replace(/\//g, '\\') : sdk;
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+  symlinkSync(linkTarget, junctionTarget, linkType);
 const missing = peers.filter(p => !existsSync(join(junctionTarget, p, 'package.json')));
 if (missing.length) {
   console.error(`setup:peers FAILED: junction to ${sdk} missing peers: ${missing.join(', ')}.`);

@@ -199,7 +199,19 @@ dsh plugin --profile web add @ericwang1358/dsh-pair-programming
 dsh web
 ```
 
-> Not on npm yet — until the first publish, install from a local path (`dsh plugin --profile web add <path-to-dsh-pair-programming>`), which works identically (restart the app afterwards).
+> **pnpm 10 build-script gate.** The plugin ships a `postinstall` step that links
+> the host's own `@deepseek-ai` module tree into the plugin (its peers are the
+> host's own packages, resolved for singleton identity). pnpm 10 blocks
+> dependency build scripts by default, so if the install ends with
+> `[ERR_PNPM_IGNORED_BUILDS]`, finish it manually:
+>
+> ```sh
+> cd ~/.dsh/profiles/web
+> pnpm approve-builds   # select @ericwang1358/dsh-pair-programming, confirm
+> dsh plugin --profile web add @ericwang1358/dsh-pair-programming
+> ```
+>
+> One-time per machine; pnpm remembers the approval.
 
 To roll back: `dsh plugin --profile web remove @ericwang1358/dsh-pair-programming` (restart the app afterwards). Local-path installs work identically while developing.
 

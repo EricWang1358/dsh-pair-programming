@@ -7,6 +7,42 @@ protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 
 ## [Unreleased]
 
+## [0.13.10] — 2026-09-05
+
+### Fixed — setup-peers created a dangling link on Linux
+
+- The junction step unconditionally replaced `/` with `\\` in the SDK target
+  and passed the Windows-only `junction` link type — on Linux that produced a
+  dangling backslash link, the post-install peers check failed, and the
+  install exited non-zero (found on the first real nvm/Linux install; the
+  climb had correctly located the host tree). Separators are now only
+  rewritten on win32, and POSIX installs create a plain `dir` symlink.
+
+## [0.13.9] — 2026-09-05
+
+### Fixed — setup-peers could not find the host SDK on nvm/Linux installs
+
+- `locateDshSdk()` derived the module root from the `dsh` binary's own path
+  (`bin/node_modules`). That works for Windows global shims, but on nvm/Linux
+  the binary is a symlink into `lib/node_modules/@deepseek-ai/dsh/bin/` —
+  stripping the suffix landed on `bin/node_modules`, which nvm never
+  populates, and the probe died with `no installed @deepseek-ai SDK found`.
+- The probe now follows the symlink (`realpathSync`) and climbs every
+  ancestor directory looking for `@deepseek-ai/dsh-tools/package.json`, plus
+  `npm root -g` as a candidate. Verified on Windows (global root) and against
+  the nvm layout; the climb terminates at the filesystem root.
+
+## [0.13.8] — 2026-09-05
+
+### Fixed — fresh installs crashed in postinstall: scripts/ was never shipped
+
+- 0.13.7's `files` field omitted `scripts/`, but the package's `postinstall`
+  runs `scripts/setup-peers.mjs` — every fresh `dsh plugin add` died with
+  `MODULE_NOT_FOUND … scripts/setup-peers.mjs` (existing junction installs were
+  unaffected). `scripts` now ships in the tarball (64 → 70 files). Found on the
+  first real cross-machine install (Linux, pnpm 11); republished as 0.13.8 —
+  npm versions are immutable so 0.13.7 stays broken on the registry.
+
 ## [0.13.7] — 2026-09-05
 
 The debts 0.13.6 recorded rather than paid. Each one here was either a claim
