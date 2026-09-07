@@ -329,6 +329,18 @@ export async function runClosureRegression(check) {
     await h.edit(t => { t.tasks[0].status = 'cancelled'; });
     check((await resultOf(h.call('pair_gate_check', { task_id: 't-1' }, 'cap'))).error?.includes('terminal'), 'closure a cancelled task is still refused — completed is the only terminal status the gate certifies');
     check((await h.board()).protocol.gatePasses.at(-1).recertified === true, 'closure the re-issued credential records that it was re-certified, not freshly reviewed');
+    // pair_stop requires RETRO before it will close a board, and then asks for a
+    // current credential. A gate that refuses in RETRO refuses in the only phase
+    // where a successful stop can happen.
+    await h.edit(t => { t.tasks[0].status = 'completed'; t.protocol.phase = 'RETRO'; });
+    await writeFile(join(h.root, 'retro-note.txt'), 'the tree moves once more');
+    const inRetro = await resultOf(h.call('pair_gate_check', { task_id: 't-1' }, 'cap'));
+    check(inRetro.value?.pass === true, `closure the gate still certifies in RETRO, the phase pair_stop requires (${inRetro.error ?? 'ok'})`);
+    for (const phase of ['DONE', 'ABORTED']) {
+      await h.edit(t => { t.protocol.phase = phase; });
+      check((await resultOf(h.call('pair_gate_check', { task_id: 't-1' }, 'cap'))).error?.includes('team is closed'), `closure a ${phase} board issues no further credentials`);
+    }
+    await h.edit(t => { t.protocol.phase = 'EXECUTION'; });
   } finally { await h.cleanup(); }
 
   // What re-certification must NOT buy. Each of these moves one dimension the
