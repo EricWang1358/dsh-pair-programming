@@ -2,7 +2,9 @@
  * v3 oracle-first protocol: SPEC-FORK validation, the frozen digest, computed
  * verdicts, the board digest, and the end-to-end cycle the redesign specifies.
  */
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { forkProblems, redProblem, computeVerdict, freezeRecord, oracleSummary, resolveCycleOracle } from '../lib/protocol/oracle.js';
@@ -12,7 +14,9 @@ import { memberIsStale } from '../lib/runtime/recycle.js';
 import { registerFlowTools } from '../lib/tools/flow.js';
 import { registerOracleTools } from '../lib/tools/oracle.js';
 import { registerArbitrateTools } from '../lib/tools/arbitrate.js';
-import { createTeamDir, readTeam } from '../lib/state/store.js';
+import { createTeamDir, readTeam, writeTeam } from '../lib/state/store.js';
+import { withLock } from '../lib/state/lock.js';
+import { teamLockKey } from '../lib/state/layout.js';
 import { initialProtocolState } from '../lib/protocol/machine.js';
 import { gateStateFingerprint } from '../lib/protocol/gate.js';
 
@@ -69,6 +73,73 @@ const fails = (fn, needle) => fn().then(() => `no throw (expected ${needle})`, (
 export async function run(check) {
   const root = await mkdtemp(join(tmpdir(), 'pair-oracle-'));
   try {
+    const prepRoot = join(root, 'preparation'); await mkdir(prepRoot);
+    const prep = harness(prepRoot, 'state');
+    const prepBoard = teamFixture({ id: 'preparation', tasks: [taskOf({ oracle: { sha: 'current-seal' } }), taskOf({ id: 'future', status: 'pending', assignee: undefined })] });
+    prepBoard.protocol.cycles = [{ id: 'candidate', taskId: 't-1', step: 'GO', oracleSha: 'current-seal', review: { verdict: 'go' } }];
+    await createTeamDir(prep.stateRoot, prepBoard);
+    const draftArgs = { task_id: 'future', path: '.pair-oracles/future/draft.mjs', content: 'process.exit(1);\n' };
+    const draft = await prep.tool('pair_oracle_write')(draftArgs, { agent: prep.navigator });
+    check(draft.bytes === Buffer.byteLength(draftArgs.content), 'P current GO permits future oracle drafting through the real writer');
+    const freezeArgs = { ...GOOD_FORK, task_id: 'future', oracle_files: [draftArgs.path], oracle_cmd: 'node .pair-oracles/future/draft.mjs' };
+    check((await fails(() => prep.tool('pair_oracle')(freezeArgs, { agent: prep.navigator }))).includes('current canonical task'), 'P a future draft cannot freeze or run its command while the canonical task is live');
+    for (const step of ['GREEN', 'IMPLEMENTED', 'REFACTOR', 'VERIFIED']) {
+      prepBoard.protocol.cycles[0].step = step;
+      prepBoard.protocol.cycles[0].verify = step === 'VERIFIED' ? { verdict: 'accept' } : undefined;
+      await writeTeam(prep.stateRoot, prepBoard);
+      const paused = await fails(() => prep.tool('pair_oracle_write')({ ...draftArgs, content: 'pause must keep original' }, { agent: prep.navigator }));
+      check(paused.includes('preparation paused') && await readFile(join(prepRoot, draftArgs.path), 'utf8') === draftArgs.content, `P ${step} pauses future oracle file writes without changing bytes`);
+    }
+    prepBoard.tasks[0].status = 'completed'; await writeTeam(prep.stateRoot, prepBoard);
+    check((await prep.tool('pair_oracle_write')(draftArgs, { agent: prep.navigator })).bytes > 0, 'P current terminal status resumes future drafts');
+    check((await prep.tool('pair_oracle')(freezeArgs, { agent: prep.navigator })).oracle_sha?.length === 64, 'P current terminal status resumes a real failing oracle freeze');
+
+    // A held real team lock lets GREEN win before a queued writer re-reads.
+    prepBoard.tasks[0].status = 'in_progress'; prepBoard.protocol.cycles[0].step = 'GO'; delete prepBoard.protocol.cycles[0].verify;
+    await writeTeam(prep.stateRoot, prepBoard);
+    let releaseLock, lockEntered; const lockGate = new Promise(resolve => { releaseLock = resolve; });
+    const inLock = new Promise(resolve => { lockEntered = resolve; });
+    const locked = withLock(teamLockKey(prep.stateRoot, prepBoard.id), async () => { lockEntered(); await lockGate; prepBoard.protocol.cycles[0].step = 'GREEN'; await writeTeam(prep.stateRoot, prepBoard); });
+    await inLock;
+    let settledWhileLocked = false;
+    const queuedDraft = fails(() => prep.tool('pair_oracle_write')({ ...draftArgs, content: 'queued forbidden change' }, { agent: prep.navigator })).then(result => { settledWhileLocked = true; return result; });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    check(!settledWhileLocked, 'P oracle write waits for the same team lock used by candidate transitions');
+    releaseLock(); await locked;
+    const queuedResult = await queuedDraft;
+    check(queuedResult.includes('preparation paused') && await readFile(join(prepRoot, draftArgs.path), 'utf8') === draftArgs.content, 'P queued writer revalidates the latest GREEN window inside the lock before changing a file');
+    // Delay the real filesystem boundary, then send the real Driver tool.
+    // The wrapper still performs mkdir; it injects latency, not a fake write.
+    prepBoard.protocol.cycles[0].step = 'GO'; await writeTeam(prep.stateRoot, prepBoard);
+    const delayedArgs = { ...draftArgs, path: '.pair-oracles/future/delayed/accept.mjs' };
+    const realMkdir = fs.promises.mkdir;
+    let fileEntered, releaseFile;
+    const fileEntry = new Promise(resolve => { fileEntered = resolve; });
+    const fileGate = new Promise(resolve => { releaseFile = resolve; });
+    let delayedWrite, concurrentGreen;
+    try {
+      fs.promises.mkdir = async (...args) => {
+        const result = await realMkdir(...args);
+        if (String(args[0]) === join(prepRoot, '.pair-oracles', 'future', 'delayed')) { fileEntered(); await fileGate; }
+        return result;
+      };
+      syncBuiltinESMExports();
+      delayedWrite = prep.tool('pair_oracle_write')(delayedArgs, { agent: prep.navigator });
+      await fileEntry;
+      concurrentGreen = prep.tool('pair_green')({ cycle_id: 'candidate', green_evidence: ['candidate passes'], diff_summary: 'candidate', test_results: 'green', tuned_for_oracle: 'none' }, { agent: prep.driver });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      check((await readTeam(prep.stateRoot, prepBoard.id)).protocol.cycles[0].step === 'GO', 'P a real pair_green cannot record its candidate while a future oracle file write is still in flight');
+    } finally {
+      releaseFile(); fs.promises.mkdir = realMkdir; syncBuiltinESMExports();
+      await Promise.all([delayedWrite, concurrentGreen]);
+    }
+    check(await readFile(join(prepRoot, delayedArgs.path), 'utf8') === delayedArgs.content && (await readTeam(prep.stateRoot, prepBoard.id)).protocol.cycles[0].step === 'GREEN', 'P future draft commits completely before the queued real GREEN transition');
+    const currentDraft = { ...draftArgs, task_id: 't-1', path: '.pair-oracles/t-1/repair.mjs' };
+    check((await prep.tool('pair_oracle_write')(currentDraft, { agent: prep.navigator })).bytes > 0, 'P the current task oracle author is not stranded by the future-task preparation pause');
+    prepBoard.protocol.phase = 'RETRO'; await writeTeam(prep.stateRoot, prepBoard);
+    check((await fails(() => prep.tool('pair_oracle_write')({ ...draftArgs, task_id: 't-1', path: '.pair-oracles/t-1/draft.mjs' }, { agent: prep.navigator }))).includes('closed'), 'P oracle writer rejects a dispatch-closed team even for its current task');
+    prepBoard.protocol.phase = 'CYCLING'; prepBoard.protocol.cycles = []; prepBoard.tasks[0].status = 'completed'; await writeTeam(prep.stateRoot, prepBoard);
+    check((await fails(() => prep.tool('pair_oracle_write')({ ...draftArgs, task_id: 't-1', path: '.pair-oracles/t-1/draft.mjs' }, { agent: prep.navigator }))).includes('terminal'), 'P oracle writer rejects terminal tasks without relying on an ACCEPT record');
     /* ---- pure: SPEC-FORK validation ---------------------------------- */
     check(forkProblems(GOOD_FORK).length === 0, 'A a complete fork validates');
     check(forkProblems({ ...GOOD_FORK, readings: [GOOD_FORK.readings[0]] })[0].includes('at least 2 distinct interpretations'), 'A one reading is refused — the fork is the point');

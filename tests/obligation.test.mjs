@@ -124,6 +124,13 @@ export async function run(check) {
     ready.tasks.unshift(task({ id: 'working', oracle: { sha: 'abc' } }));
     check(!frontier(ready).some(o => o.tool === 'pair_task_claim'), 'B2 an active canonical task prevents another Driver claim');
     check(nextObligation(ready, 'navigator')?.taskId === 'ready' && nextObligation(ready, 'navigator')?.tool === 'pair_oracle_write', 'B2 future oracle work is draft-only while another canonical task is live; its command cannot race implementation');
+    ready.protocol.cycles = [{ id: 'working-candidate', taskId: 'working', step: 'GO', oracleSha: 'abc' }];
+    check(frontier(ready).some(o => o.taskId === 'ready' && o.preparationOnly), 'B3 current GO permits independent future drafts');
+    for (const step of ['GREEN', 'REFACTOR', 'IMPLEMENTED', 'VERIFIED']) {
+      ready.protocol.cycles[0].step = step;
+      ready.protocol.cycles[0].verify = step === 'VERIFIED' ? { verdict: 'accept' } : undefined;
+      check(!frontier(ready).some(o => o.taskId === 'ready'), `B3 current ${step} pauses future oracle drafts through the candidate verification window`);
+    }
     ready.tasks[0].status = 'completed';
     check(nextObligation(ready, 'navigator')?.tool === 'pair_oracle', 'B2 future draft work becomes a freeze obligation after the canonical task finishes');
     const unfrozen = teamFixture({ tasks: [task(), task({ id: 't-2' })] });
