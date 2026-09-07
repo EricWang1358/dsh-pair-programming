@@ -116,7 +116,7 @@ export async function run(check) {
     let fileEntered, releaseFile;
     const fileEntry = new Promise(resolve => { fileEntered = resolve; });
     const fileGate = new Promise(resolve => { releaseFile = resolve; });
-    let delayedWrite, concurrentGreen;
+    let delayedWrite, concurrentGreen, entryTimer;
     try {
       fs.promises.mkdir = async (...args) => {
         const result = await realMkdir(...args);
@@ -125,12 +125,16 @@ export async function run(check) {
       };
       syncBuiltinESMExports();
       delayedWrite = prep.tool('pair_oracle_write')(delayedArgs, { agent: prep.navigator });
-      await fileEntry;
+      await Promise.race([
+        fileEntry,
+        delayedWrite.then(() => { throw new Error('oracle writer completed without reaching the filesystem boundary'); }),
+        new Promise((_, reject) => { entryTimer = setTimeout(() => reject(new Error('oracle writer never reached the filesystem boundary')), 15000); }),
+      ]);
       concurrentGreen = prep.tool('pair_green')({ cycle_id: 'candidate', green_evidence: ['candidate passes'], diff_summary: 'candidate', test_results: 'green', tuned_for_oracle: 'none' }, { agent: prep.driver });
       await new Promise(resolve => setTimeout(resolve, 100));
       check((await readTeam(prep.stateRoot, prepBoard.id)).protocol.cycles[0].step === 'GO', 'P a real pair_green cannot record its candidate while a future oracle file write is still in flight');
     } finally {
-      releaseFile(); fs.promises.mkdir = realMkdir; syncBuiltinESMExports();
+      clearTimeout(entryTimer); releaseFile(); fs.promises.mkdir = realMkdir; syncBuiltinESMExports();
       await Promise.all([delayedWrite, concurrentGreen]);
     }
     check(await readFile(join(prepRoot, delayedArgs.path), 'utf8') === delayedArgs.content && (await readTeam(prep.stateRoot, prepBoard.id)).protocol.cycles[0].step === 'GREEN', 'P future draft commits completely before the queued real GREEN transition');

@@ -213,6 +213,7 @@ export async function run(check) {
     check(await workspaceFingerprint(h.root, { stateDir: '.state' }) !== first, 'U3 two clean committed candidates have different fingerprints');
   });
   await runFollowups(check);
+  await runReviewRegressions(check);
 }
 
 export async function runFollowups(check) {
@@ -296,4 +297,43 @@ export async function runFollowups(check) {
     await writeFile(join(h.root, 'product.txt'), 'ok');
     check((await resultOf(h.call('pair_gate_check', { task_id: 't-1' }, 'cap'))).error?.includes('STALE'), 'U3 self-mutating DoD cannot seed a passing cache receipt for restored code');
   }, { evidenceCache: true, dodCommand: `node -e "require('fs').writeFileSync('product.txt','mutated')"` });
+}
+
+/** Recovery sequences discovered by independent review of the evidence boundary. */
+export async function runReviewRegressions(check) {
+  const h = await fixture();
+  try {
+    await h.verify({ stage: 'checkpoint' });
+    const originalCheckpoint = (await h.board()).protocol.cycles[0].verify;
+    const second = await h.call('pair_propose', { task_id: 't-1', intent: 'final increment', files: ['product.txt'], verify_plan: command, net_lines: 1 }, 'drv');
+    await h.call('pair_green', { cycle_id: second.cycle_id, green_evidence: ['green'], diff_summary: 'final increment', test_results: 'green', tuned_for_oracle: 'none' }, 'drv');
+    await h.call('pair_verify', { cycle_id: second.cycle_id, ...veto });
+    await h.call('pair_oracle_write', { task_id: 't-1', path: oracleFile, content: "import { readFileSync } from 'node:fs'; process.exit(readFileSync('product.txt','utf8') === 'ok-new' ? 0 : 1);\n" });
+    await h.call('pair_oracle', { task_id: 't-1', ...fork, fork_kind: 'defect', defect_evidence: 'Prior oracle omitted the output suffix requirement.' });
+    let board = await h.board();
+    check(board.protocol.cycles[0].closure?.reason === 'oracle-replaced' && board.protocol.cycles[0].step === 'CLOSED', 'checkpoint re-fork explicitly archives superseded checkpoint');
+    check(JSON.stringify(board.protocol.cycles[0].verify) === JSON.stringify(originalCheckpoint), 'checkpoint re-fork preserves original partial verification evidence');
+    check(!runGate(board, 't-1', { dod: ['all_accepted'] }).pass, 'superseded checkpoint and rejection cannot replace final acceptance');
+    const repair = await h.call('pair_propose', { task_id: 't-1', intent: 'repair replacement contract', files: ['product.txt'], verify_plan: command, net_lines: 1 }, 'drv');
+    await writeFile(join(h.root, 'product.txt'), 'ok-new');
+    await h.call('pair_green', { cycle_id: repair.cycle_id, green_evidence: ['real green'], diff_summary: 'replacement repair', test_results: 'green', tuned_for_oracle: 'none' }, 'drv');
+    await h.call('pair_verify', { cycle_id: repair.cycle_id, ...scope });
+    const gate = await h.call('pair_gate_check', { task_id: 't-1' }, 'cap');
+    check(gate.pass === true, 'checkpoint -> reject -> defect re-fork -> fresh final review reaches gate');
+    board = await h.board();
+    const noAudit = structuredClone(board); delete noAudit.protocol.cycles[0].closure;
+    check(!runGate(noAudit, 't-1', { dod: ['oracle_precedes_impl'] }).pass, 'old checkpoint without matching supersession audit cannot waive oracle ordering');
+    const badHistory = structuredClone(board); delete badHistory.protocol.cycles[0].red;
+    check(!runGate(badHistory, 't-1', { dod: ['test_first'], tddMode: 'enforce' }).pass, 'superseded checkpoint retains Test First obligations');
+  } finally { await h.cleanup(); }
+
+  for (const stage of ['checkpoint', 'final']) {
+    const f = await fixture();
+    try {
+      const benignOutput = `${command} && node -e "console.log('negative-path test handled: No such file or directory')"`;
+      await f.edit(t => { t.tasks[0].oracle.cmd = benignOutput; t.protocol.cycles[0].proposal.verify_plan = benignOutput; });
+      const result = await resultOf(f.verify({ stage }));
+      check(result.value?.verdict === (stage === 'final' ? 'accept' : 'checkpoint'), `passing ${stage} output mentioning an expected failure is not infrastructure failure`);
+    } finally { await f.cleanup(); }
+  }
 }
