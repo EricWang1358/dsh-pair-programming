@@ -88,7 +88,10 @@ export async function runBaton(check) {
   const asOwner = obligationLine(owed, 'navigator');
   check(asOwner.startsWith('[PAIR:NEXT] YOU owe pair_verify(cycle_id=c-t-3-1-20)'), 'E the owed party is addressed in the second person, not asked to infer that "navigator" means itself');
   check(asOwner.includes('You are the last runner'), 'E it says plainly that the baton is held');
-  check(asOwner.includes('nothing else on this board moves until you make that call'), 'E and what happens if it stops: nothing, forever');
+  check(asOwner.includes('nothing advances it until you make that call'), 'E and what happens if it stops: this task, forever');
+  // Independent seats made the older wording ("nothing else on this board
+  // moves") false, and a line the reader can disprove is a line it can ignore.
+  check(asOwner.includes('Other seats may still have independent work'), 'E the stall warning is scoped to the task, so it stays true once other seats can run');
   check(asOwner.includes('Do not end your turn before it'), 'E the instruction targets the exact move that causes the stall');
   check(asOwner.includes('name who can'), 'E an honest out exists — stuck is fine, silent is not');
 

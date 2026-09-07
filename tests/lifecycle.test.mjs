@@ -12,7 +12,7 @@ import { registerFlowTools } from '../lib/tools/flow.js';
 import { openRisk } from '../lib/protocol/risks.js';
 import { appendMailbox, createMessage, claimMailboxDelivery, releaseMailboxDelivery, acknowledgeMailbox, readUnreadMailbox } from '../lib/state/mailbox.js';
 import { initialProtocolState, openCycle } from '../lib/protocol/machine.js';
-import { gateStateFingerprint } from '../lib/protocol/gate.js';
+import { gateStateFingerprint, reviewStateFingerprint } from '../lib/protocol/gate.js';
 import { workspaceFingerprint } from '../lib/tools/oracle-exec.js';
 
 function mockCtx() {
@@ -332,7 +332,15 @@ export async function run(check) {
   // ORDER-P3b-2: pair_gate_check runs the configured dodCommand itself (M7').
   const gh = arbHarness(root, { stateDir: 'gateexec-state', dodCommand: 'node -e "process.exit(0)"' });
   const gate = gh.defs.find((x) => x.name === 'pair_gate_check').execute;
-  await createTeamDir(gh.stateRoot, teamFixture({ tasks: [{ ...tsk('t-1'), status: 'in_progress', assignee: 'driver', attemptId: 'gate-attempt' }], protocol: { ...initialProtocolState(), cycles: [{ id: 'c1', taskId: 't-1', step: 'VERIFIED', verify: { verdict: 'accept', evidence: ['suite green'] } }] } }));
+  const gateTeam = teamFixture({ tasks: [{ ...tsk('t-1'), status: 'in_progress', assignee: 'driver', attemptId: 'gate-attempt' }], protocol: { ...initialProtocolState(), cycles: [{ id: 'c1', taskId: 't-1', step: 'VERIFIED', verify: { verdict: 'accept', evidence: ['suite green'] } }] } });
+  // The final ACCEPT binds the candidate, board and attempt it judged; a board
+  // without that binding is refused as GATE_STALE before the gate can run.
+  gateTeam.protocol.cycles[0].verify.binding = {
+    worktreeSha: await workspaceFingerprint(root, { stateDir: 'gateexec-state' }),
+    gateStateSha: reviewStateFingerprint(gateTeam, 't-1'),
+    assignee: 'driver', attemptId: 'gate-attempt', handoffId: null,
+  };
+  await createTeamDir(gh.stateRoot, gateTeam);
   const gr = await gate({ task_id: 't-1' }, { agent: gh.captain });
   check(gr.pass === true && typeof gr.gate_pass_id === 'string', 'pair_gate_check runs the configured dodCommand and passes');
   const gp = (await readTeam(gh.stateRoot, 't1')).protocol.gatePasses[0];

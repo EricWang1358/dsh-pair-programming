@@ -83,6 +83,11 @@ export async function run(check) {
   check(notRunnableEvidence({ exit: 'error', command: 'npn test' }).includes('spawn failure'), 'a spawn-level failure is recognised');
   check(notRunnableEvidence({ exit: 1, command: 'npn test', outputTail: "'npn' is not recognized as an internal or external command" }).includes('not a runnable program'), 'a shell that reports not-found through exit 1 is still caught');
   check(notRunnableEvidence({ exit: 127, command: 'npn test' }).includes('npn'), 'the refusal names the program it could not find');
+  // A localized shell: the sentence is translated and arrives as mojibake on a
+  // non-UTF-8 codepage, so only the quoted program name is still readable.
+  check(notRunnableEvidence({ exit: 1, command: 'npn test', outputTail: "'npn' 不是内部或外部命令" }) !== undefined, 'a translated not-found message is caught by the name it quotes');
+  check(notRunnableEvidence({ exit: 1, command: 'npm test', outputTail: "'foo' is undefined at line 3\n2 failing" }) === undefined, 'a suite that quotes something OTHER than the program it ran is a real result');
+  check(notRunnableEvidence({ exit: 0, command: 'npn test', outputTail: "'npn' 不是内部或外部命令" }) === undefined, 'a command that exited 0 ran, whatever it printed');
   check(notRunnableEvidence(undefined) === undefined, 'no run, no claim');
 
   /* ---- the freeze gate no longer rewards an unrunnable command --------- */
