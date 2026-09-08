@@ -70,7 +70,7 @@ export async function run(check) {
   /* ---- tool schemas the host actually accepted -------------------------- */
   const schemas = ctx.tools.schemas();
   const pairTools = schemas.filter(schema => schema.name.startsWith('pair_'));
-  check(pairTools.length === 23, 'all 23 pair_* tools are accepted by the real registry, schema validation included');
+  check(pairTools.length === 24 && pairTools.some(tool => tool.name === 'pair_integrate'), 'all 24 pair_* tools including integration are accepted by the real registry, schema validation included');
   check(pairTools.every(schema => typeof schema.description === 'string' && schema.description.length > 0), 'each carries a description the host kept');
   const badParams = pairTools.filter(schema => schema.parameters !== undefined && schema.parameters.type !== 'object');
   check(badParams.length === 0, 'and none declares a non-object parameter envelope');

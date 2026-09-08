@@ -30,6 +30,7 @@ export async function run(check) {
     check(taskWorkspace({ ...team, tasks: [{id:'t-1', status:'completed'}] }, 't-1', root, {closure:true}) === root, 'completed recertification resolves integrated canonical workspace');
     await disposeIsolatedMember(ctx, member.id);
     check(disposed === 1, 'isolated runtime disposes owned handle exactly once');
+    check(coordinationWorkspace(slot.path) === slot.path, 'disposal releases the in-memory route when no durable board exists');
     await disposeIsolatedMember(ctx, member.id);
     check(disposed === 1, 'isolated disposal is idempotent');
     let denied = false;

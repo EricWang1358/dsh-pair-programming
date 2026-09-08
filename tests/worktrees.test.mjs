@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { digestOracleFiles } from '../lib/tools/oracle-exec.js';
 import { createDriverWorktrees, snapshotCandidate, integrateCandidate, removeDriverWorktrees, scopeConflicts } from '../lib/runtime/worktrees.js';
 
 const exec = promisify(execFile);
@@ -111,6 +112,41 @@ export async function run(check) {
     await mkdir(join(root, '.pair-oracles')); await writeFile(join(root, '.pair-oracles', 'own.mjs'), 'user oracle\n');
     await assert.rejects(integrateCandidate(parallel, candidate, { verify: async () => {} }), /clean/);
     assert.equal(await readFile(join(root, '.pair-oracles', 'own.mjs'), 'utf8'), 'user oracle\n');
+  });
+  await test('autocrlf checkout preserves the sealed LF oracle through integration and promotion', async root => {
+    await git(root, 'config', 'core.autocrlf', 'true');
+    const parallel = await create(root), slot = parallel.slots.driver;
+    assert.equal(await readFile(join(slot.path, 'a.txt'), 'utf8'), 'A\n', 'Driver checkout must not introduce implicit CRLF');
+    const file = '.pair-oracles/own.mjs', content = 'import assert from "node:assert/strict";\nassert.equal(1 + 1, 2);\n';
+    await mkdir(join(slot.path, '.pair-oracles'));
+    await writeFile(join(slot.path, file), content);
+    const sealed = await digestOracleFiles(slot.path, [file]);
+    const candidate = await snapshotCandidate(slot, [file]);
+    const blob = (await exec('git', ['show', `${candidate.commit}:${file}`], { cwd: root, encoding: 'utf8' })).stdout;
+    assert.equal(blob, content, 'snapshot must retain the frozen bytes');
+    await integrateCandidate(parallel, candidate, { verify: async cwd => {
+      assert.equal(await digestOracleFiles(cwd, [file]), sealed, 'disposable checkout must match the actual frozen digest');
+    } });
+    assert.equal(await digestOracleFiles(root, [file]), sealed, 'canonical promotion must preserve the same bytes');
+    assert.equal(await readFile(join(root, file), 'utf8'), content);
+    await integrateCandidate(parallel, candidate, { verify: async cwd => {
+      assert.equal(await digestOracleFiles(cwd, [file]), sealed, 'rechecking an integrated candidate must preserve its existing seal on checkout');
+    } });
+    assert.equal(await git(root, 'config', '--get', 'core.autocrlf'), 'true', 'user Git configuration must remain untouched');
+  });
+  await test('explicit checkout attributes cannot silently waive a frozen oracle mismatch', async root => {
+    await writeFile(join(root, '.gitattributes'), '.pair-oracles/** text eol=crlf\n');
+    await git(root, 'add', '.gitattributes'); await git(root, 'commit', '-m', 'explicit CRLF oracle checkout');
+    const parallel = await create(root), slot = parallel.slots.driver;
+    const file = '.pair-oracles/own.mjs';
+    await mkdir(join(slot.path, '.pair-oracles'));
+    await writeFile(join(slot.path, file), 'export default true;\n');
+    const sealed = await digestOracleFiles(slot.path, [file]);
+    const candidate = await snapshotCandidate(slot, [file]);
+    await assert.rejects(integrateCandidate(parallel, candidate, { verify: async cwd => {
+      assert.equal(await digestOracleFiles(cwd, [file]), sealed, 'frozen oracle mismatch');
+    } }), /frozen oracle mismatch/);
+    assert.equal(await git(root, 'rev-parse', 'HEAD'), parallel.baseHead);
   });
   await test('cancellation and verifier mutations refuse promotion and remove disposable checkout', async root => {
     const parallel = await create(root), slot = parallel.slots.driver;
