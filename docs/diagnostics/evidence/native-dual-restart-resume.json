@@ -1,0 +1,132 @@
+{
+  "startedAt": "2026-09-08T04:59:59.389Z",
+  "routes": [],
+  "events": [
+    {
+      "id": "session-693a1f43-c834-4dde-b48c-4310237ea8c4",
+      "type": "turn/start",
+      "at": 1788843600348,
+      "name": null,
+      "reason": null
+    },
+    {
+      "id": "session-b70d4e75-a9b2-44a5-93f6-25e01fb8737d",
+      "type": "turn/start",
+      "at": 1788843600358,
+      "name": null,
+      "reason": null
+    },
+    {
+      "id": "session-b70d4e75-a9b2-44a5-93f6-25e01fb8737d",
+      "type": "tool/call",
+      "at": 1788843602240,
+      "name": "pwsh",
+      "reason": null
+    },
+    {
+      "id": "session-693a1f43-c834-4dde-b48c-4310237ea8c4",
+      "type": "tool/call",
+      "at": 1788843602929,
+      "name": "pwsh",
+      "reason": null
+    },
+    {
+      "id": "session-b70d4e75-a9b2-44a5-93f6-25e01fb8737d",
+      "type": "turn/end",
+      "at": 1788843604143,
+      "name": null,
+      "reason": "completed"
+    },
+    {
+      "id": "session-693a1f43-c834-4dde-b48c-4310237ea8c4",
+      "type": "turn/end",
+      "at": 1788843605337,
+      "name": null,
+      "reason": "completed"
+    },
+    {
+      "id": "session-693a1f43-c834-4dde-b48c-4310237ea8c4",
+      "type": "turn/start",
+      "at": 1788843605583,
+      "name": null,
+      "reason": null
+    },
+    {
+      "id": "session-b70d4e75-a9b2-44a5-93f6-25e01fb8737d",
+      "type": "turn/start",
+      "at": 1788843605592,
+      "name": null,
+      "reason": null
+    },
+    {
+      "id": "session-693a1f43-c834-4dde-b48c-4310237ea8c4",
+      "type": "turn/end",
+      "at": 1788843606773,
+      "name": null,
+      "reason": "completed"
+    },
+    {
+      "id": "session-b70d4e75-a9b2-44a5-93f6-25e01fb8737d",
+      "type": "turn/end",
+      "at": 1788843607048,
+      "name": null,
+      "reason": "completed"
+    }
+  ],
+  "deliveries": [
+    {
+      "ok": true,
+      "messageId": "15ecf3da-c232-450c-9b39-5fa378c411ca"
+    },
+    {
+      "ok": true,
+      "messageId": "b03103fd-1a43-47c5-aa92-1f659efeb9f1"
+    }
+  ],
+  "absentBeforeResume": true,
+  "resumeDeliveries": [
+    {
+      "ok": true,
+      "messageId": "28f2c783-659a-4df0-984f-f6542bc7717f"
+    },
+    {
+      "ok": true,
+      "messageId": "0e67b4d7-3d74-483c-a2d1-4eeae375e543"
+    }
+  ],
+  "members": [
+    {
+      "id": "session-b70d4e75-a9b2-44a5-93f6-25e01fb8737d",
+      "name": "driver",
+      "cwd": "C:\\Users\\Eric1\\AppData\\Local\\Temp\\dsh-dual-20260908\\restart\\.pair-programming\\probe\\worktrees\\driver",
+      "selection": {
+        "provider": "opencode-go-muse",
+        "model": "muse-spark-1.3-contributor",
+        "maxTokens": 131072
+      }
+    },
+    {
+      "id": "session-693a1f43-c834-4dde-b48c-4310237ea8c4",
+      "name": "driver2",
+      "cwd": "C:\\Users\\Eric1\\AppData\\Local\\Temp\\dsh-dual-20260908\\restart\\.pair-programming\\probe\\worktrees\\driver2",
+      "selection": {
+        "provider": "opencode-go-muse",
+        "model": "muse-spark-1.3-contributor",
+        "maxTokens": 131072
+      }
+    }
+  ],
+  "cleanup": {
+    "retired": [
+      "session-b70d4e75-a9b2-44a5-93f6-25e01fb8737d",
+      "session-693a1f43-c834-4dde-b48c-4310237ea8c4"
+    ],
+    "persisted": true,
+    "failedInterrupts": []
+  },
+  "retiredDelivery": {
+    "ok": false,
+    "reason": "the seat is retired"
+  },
+  "endedAt": "2026-09-08T05:00:07.056Z"
+}

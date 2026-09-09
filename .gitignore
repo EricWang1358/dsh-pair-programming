@@ -14,3 +14,7 @@ cj.txt
 combo.js
 chunk.js
 idx.html
+
+# Local browser QA artifacts
+.playwright-cli/
+output/playwright/

@@ -100,7 +100,7 @@ try {
   };
   apply(ctx, {});
 
-  const expectTools = ['pair_start', 'pair_oracle_write', 'pair_oracle', 'pair_propose', 'pair_review', 'pair_red', 'pair_green', 'pair_refactor', 'pair_report', 'pair_verify', 'pair_risk', 'pair_arbitrate', 'pair_gate_check', 'pair_task_create', 'pair_task_amend', 'pair_task_claim', 'pair_task_update', 'pair_rotate', 'pair_status', 'pair_retro', 'pair_stop', 'pair_interrupt', 'pair_mailbox_read'];
+  const expectTools = ['pair_start', 'pair_oracle_write', 'pair_oracle', 'pair_propose', 'pair_review', 'pair_red', 'pair_green', 'pair_refactor', 'pair_report', 'pair_verify', 'pair_risk', 'pair_arbitrate', 'pair_gate_check', 'pair_integrate', 'pair_backlog', 'pair_repair_verify_plan', 'pair_task_create', 'pair_task_amend', 'pair_task_claim', 'pair_task_update', 'pair_rotate', 'pair_status', 'pair_retro', 'pair_stop', 'pair_interrupt', 'pair_mailbox_read'];
   const missingTools = expectTools.filter(t => !reg.tools.includes(t));
   const unexpectedTools = reg.tools.filter(t => !expectTools.includes(t));
   const needCommands = reg.commands.includes('pair');

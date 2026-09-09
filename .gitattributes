@@ -1,0 +1,2 @@
+# Keep the generated browser asset stable across platform checkout settings.
+/lib/client.js text eol=lf

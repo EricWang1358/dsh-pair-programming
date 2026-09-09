@@ -1,0 +1,84 @@
+{
+  "startedAt": "2026-09-08T04:58:03.783Z",
+  "routes": [
+    {
+      "id": "session-b70d4e75-a9b2-44a5-93f6-25e01fb8737d",
+      "cwd": "C:\\Users\\Eric1\\AppData\\Local\\Temp\\dsh-dual-20260908\\restart\\.pair-programming\\probe\\worktrees\\driver",
+      "provider": "opencode-go-muse",
+      "model": "muse-spark-1.3-contributor"
+    },
+    {
+      "id": "session-693a1f43-c834-4dde-b48c-4310237ea8c4",
+      "cwd": "C:\\Users\\Eric1\\AppData\\Local\\Temp\\dsh-dual-20260908\\restart\\.pair-programming\\probe\\worktrees\\driver2",
+      "provider": "opencode-go-muse",
+      "model": "muse-spark-1.3-contributor"
+    }
+  ],
+  "events": [
+    {
+      "id": "session-b70d4e75-a9b2-44a5-93f6-25e01fb8737d",
+      "type": "turn/start",
+      "at": 1788843485079,
+      "name": null,
+      "reason": null
+    },
+    {
+      "id": "session-693a1f43-c834-4dde-b48c-4310237ea8c4",
+      "type": "turn/start",
+      "at": 1788843485084,
+      "name": null,
+      "reason": null
+    },
+    {
+      "id": "session-693a1f43-c834-4dde-b48c-4310237ea8c4",
+      "type": "tool/call",
+      "at": 1788843487438,
+      "name": "pwsh",
+      "reason": null
+    },
+    {
+      "id": "session-b70d4e75-a9b2-44a5-93f6-25e01fb8737d",
+      "type": "tool/call",
+      "at": 1788843487441,
+      "name": "pwsh",
+      "reason": null
+    },
+    {
+      "id": "session-693a1f43-c834-4dde-b48c-4310237ea8c4",
+      "type": "turn/end",
+      "at": 1788843489718,
+      "name": null,
+      "reason": "completed"
+    },
+    {
+      "id": "session-b70d4e75-a9b2-44a5-93f6-25e01fb8737d",
+      "type": "turn/end",
+      "at": 1788843489992,
+      "name": null,
+      "reason": "completed"
+    }
+  ],
+  "deliveries": [
+    {
+      "ok": true,
+      "messageId": "c0a71956-ddb4-49ca-a18f-3597ad071557"
+    },
+    {
+      "ok": true,
+      "messageId": "88d85ad7-7644-4fe3-bf5e-024b94d9958c"
+    }
+  ],
+  "checkpoint": [
+    {
+      "id": "session-b70d4e75-a9b2-44a5-93f6-25e01fb8737d",
+      "name": "driver",
+      "cwd": "C:\\Users\\Eric1\\AppData\\Local\\Temp\\dsh-dual-20260908\\restart\\.pair-programming\\probe\\worktrees\\driver"
+    },
+    {
+      "id": "session-693a1f43-c834-4dde-b48c-4310237ea8c4",
+      "name": "driver2",
+      "cwd": "C:\\Users\\Eric1\\AppData\\Local\\Temp\\dsh-dual-20260908\\restart\\.pair-programming\\probe\\worktrees\\driver2"
+    }
+  ],
+  "status": "checkpoint"
+}

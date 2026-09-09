@@ -1,0 +1,96 @@
+[
+  {
+    "run": "workflow4",
+    "status": "timeout",
+    "reason": "Driver claimed protocol tools were absent although the native request header contained them; no successful claim; timeout. Prior edit before claim motivated an editor guard.",
+    "captain": "session-4c0b850b-a5be-40e8-8ef6-89c22b485056",
+    "phase": "CYCLING",
+    "tasks": [
+      {
+        "id": "t-1",
+        "status": "pending",
+        "assignee": "driver",
+        "attemptId": null
+      },
+      {
+        "id": "t-2",
+        "status": "completed",
+        "assignee": "driver2",
+        "attemptId": null
+      }
+    ],
+    "cycles": [
+      {
+        "id": "c-t-2-1-1",
+        "step": "VERIFIED",
+        "repairs": 0
+      }
+    ],
+    "integrated": [
+      "t-2"
+    ],
+    "profile": "pair-dev",
+    "provider": "opencode-go-muse",
+    "model": "muse-spark-1.3-contributor"
+  },
+  {
+    "run": "workflow5",
+    "status": "stopped-after-reproduced-defect",
+    "reason": "A pre-cycle amendment revoked ownership but retained an unreclaimable worktree. Run stopped after reproducing this state.",
+    "captain": "session-7b638e2e-3be1-46e1-bf3e-d698d8a1d7c4",
+    "phase": "PLANNING",
+    "tasks": [
+      {
+        "id": "t-1",
+        "status": "pending",
+        "assignee": null,
+        "attemptId": null
+      },
+      {
+        "id": "t-2",
+        "status": "pending",
+        "assignee": "driver2",
+        "attemptId": null
+      }
+    ],
+    "cycles": [],
+    "integrated": [],
+    "profile": "pair-dev",
+    "provider": "opencode-go-muse",
+    "model": "muse-spark-1.3-contributor"
+  },
+  {
+    "run": "workflow6",
+    "status": "timeout",
+    "reason": "Both Driver headers contained identical protocol tool schemas, but the first Driver repeatedly refused to call them. The new editor guard prevented pre-claim implementation; timeout.",
+    "captain": "session-b12eea9f-b67a-45b8-9f0d-076c9bc6c251",
+    "phase": "CYCLING",
+    "tasks": [
+      {
+        "id": "t-1",
+        "status": "pending",
+        "assignee": "driver",
+        "attemptId": null
+      },
+      {
+        "id": "t-2",
+        "status": "completed",
+        "assignee": "driver2",
+        "attemptId": null
+      }
+    ],
+    "cycles": [
+      {
+        "id": "c-t-2-1-1",
+        "step": "VERIFIED",
+        "repairs": 0
+      }
+    ],
+    "integrated": [
+      "t-2"
+    ],
+    "profile": "pair-dev",
+    "provider": "opencode-go-muse",
+    "model": "muse-spark-1.3-contributor"
+  }
+]

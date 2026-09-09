@@ -4,7 +4,7 @@ import { toolDenyListFor, hostToolNames, markMemberRetired, isMemberRetired, ins
 const CLAUDE_NAMES = ['str_replace_editor', 'write_file', 'create_file', 'edit_file', 'apply_patch'];
 const DSH_NAMES = ['write', 'edit', 'pwsh'];
 const SHELL_NAMES = ['pwsh', 'bash', 'Bash'];
-const PAIR_CAPTAIN_NAMES = ['pair_start', 'pair_stop', 'pair_rotate', 'pair_arbitrate', 'pair_interrupt'];
+const PAIR_CAPTAIN_NAMES = ['pair_start', 'pair_stop', 'pair_rotate', 'pair_arbitrate', 'pair_interrupt', 'pair_integrate'];
 
 /** A fail-loud refusal must name the role it protects I1 for. */
 const I1_MESSAGE = /cannot enforce single-writer I1 without the host tool registry/;

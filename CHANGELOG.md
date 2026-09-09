@@ -7,6 +7,39 @@ protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 
 ## [Unreleased]
 
+- Add a read-only live Pair runtime conversation view and optional right sidebar. Separate task completion, acceptance coverage and integration; expose attention, product discovery, mailbox counts and task contracts. Theme-aware responsive UI, density preferences, cancellation and bounded reconnects use native DSH session/RPC services without model calls.
+
+- Add optional use-case design and collaboration contracts: joint acceptance cases, accountable task ownership, provider dependencies, and focused QA/Driver handoffs. Invalid collaboration amendments are refused before mutation; design changes invalidate verification bindings. Existing use cases remain compatible.
+
+- `pair_backlog` adds evidence-backed discovery, Captain product triage, draft
+  readiness and stable priority scheduling. QA and Driver admission retain the
+  discovered criteria; untriaged needs block closure, deferred needs stay auditable.
+- `pair_repair_verify_plan` repairs a checkpoint command on the same cycle without
+  changing its frozen acceptance oracle, erasing failures or bypassing fresh GREEN.
+- Parallel pre-cycle amendments retain their prepared workspace and owner while
+  revoking the old attempt. Reclaim checks the unchanged files and new dependencies.
+- Isolated editor calls now require a live owned cycle and declared write scope.
+  Claim receipts expose exact paths; protocol transport hints reduce false reports
+  of missing tools. Product status is paginated and redundant repair wakes removed.
+
+- Opt-in `pair_start(drivers=2)` creates two isolated Git worktrees with native
+  DSH Agent sessions, durable cwd/composition recovery and a shared Navigator.
+  Single-contributor defaults stay unchanged. Protocol templates move to v7.
+- Tasks declare read/write/resource scopes. Conflicts queue; mutations and
+  evidence bind to the owning Driver, task attempt and candidate workspace.
+- Captain-only `pair_integrate` tests a disposable combined tree with frozen
+  oracles and a required whole-suite command before advancing the canonical
+  branch. Completion requires the integration receipt; final gates re-certify
+  the canonical tree. Failed merges/checks preserve candidates and the root.
+- Claim, gate and completion transitions wake their next owner immediately.
+  Native Driver delivery caches its team route instead of scanning all archives.
+- Driver worktrees, candidate refs and branches remain as audit/recovery
+  artifacts at stop; native sessions are retired. This opt-in is not an OS
+  sandbox, and no speed or quality improvement is claimed from smoke coverage.
+- Validation: native checkpoint-repair tool pipeline passed without model turns.
+  Full PM dual-task model acceptance is still incomplete; the opt-in remains
+  experimental and further model runs follow the user's explicit cost constraint.
+
 ## [0.14.0] — 2026-09-08
 
 Review became something a green command cannot overrule, and closing a board
