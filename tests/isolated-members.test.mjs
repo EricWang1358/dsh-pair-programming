@@ -31,11 +31,23 @@ export async function run(check) {
     check(coordinationWorkspace(slot.path) === root, 'isolated physical cwd maps to central coordination root');
     check(taskWorkspace({ ...team, tasks: [{id:'t-1', assignee:'driver', workspace:slot.path}] }, 't-1', root) === slot.path, 'candidate commands resolve task workspace');
     check(taskWorkspace({ ...team, tasks: [{id:'t-1', status:'completed'}] }, 't-1', root, {closure:true}) === root, 'completed recertification resolves integrated canonical workspace');
+    const replacement = { ...member, id: '' };
+    const sibling = { ...member, id: '', name: 'driver2' };
+    const siblingSlot = { path: join(root, '.pair-programming/team/worktrees/driver2') };
+    team.parallel.slots.driver2 = siblingSlot;
+    await spawnIsolatedMember(ctx, { memberMaxDepth: 1 }, parent, team, replacement, 'recovered persona', ['pair_stop']);
+    await spawnIsolatedMember(ctx, { memberMaxDepth: 1 }, parent, team, sibling, 'sibling persona', ['pair_stop']);
     await disposeIsolatedMember(ctx, member.id);
-    check(disposed === 1, 'isolated runtime disposes owned handle exactly once');
+    check(coordinationWorkspace(slot.path) === root, 'retiring old Driver preserves replacement worktree routing');
+    check(coordinationWorkspace(siblingSlot.path) === root, 'Driver recovery leaves driver2 routing intact');
+    await disposeIsolatedMember(ctx, replacement.id);
+    check(coordinationWorkspace(slot.path) === slot.path, 'last generation releases its route');
+    check(coordinationWorkspace(siblingSlot.path) === root, 'disposing Driver preserves driver2');
+    await disposeIsolatedMember(ctx, sibling.id);
+    check(disposed === 3, 'all isolated generations disposed once');
     check(coordinationWorkspace(slot.path) === slot.path, 'disposal releases the in-memory route when no durable board exists');
     await disposeIsolatedMember(ctx, member.id);
-    check(disposed === 1, 'isolated disposal is idempotent');
+    check(disposed === 3, 'isolated disposal is idempotent');
     let denied = false;
     try { await spawnIsolatedMember(ctx, { memberMaxDepth: 0 }, parent, team, member, 'persona', []); } catch { denied = true; }
     check(denied, 'isolated native helper enforces delegation depth cap before creation');

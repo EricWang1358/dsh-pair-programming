@@ -110,6 +110,42 @@ export async function run(check) {
       await assert.rejects(commitMemberReplacement(stateRoot, 'one', original.members[0], { ...original.members[0], id: 'new' }, async () => { throw Object.assign(new Error('injected rename failure'), { code: 'PAIR_STATE_COMMIT_FAILED' }); }));
       assert.equal((await readTeam(stateRoot, 'one')).members[0].id, 'old');
     });
+    await test('session and dual cycle policies retain seats without spawning', async () => {
+      const stateRoot = join(root, 'stable-seats');
+      const team = fixture('stable');
+      await createTeamDir(stateRoot, team);
+      assert.equal((await recycleMember({}, { memberLifetime: 'session' }, {}, stateRoot, team.id, 'driver')).recycled, false);
+      team.parallel = { slots: {} };
+      await writeTeam(stateRoot, team);
+      for (const name of ['driver', 'driver2']) {
+        const result = await recycleMember({}, { memberLifetime: 'cycle' }, {}, stateRoot, team.id, name);
+        assert.equal(result.reason, 'parallel seats retain their candidate ownership');
+      }
+    });
+    await test('isolated replacement persists new composition and preserves sibling', async () => {
+      const stateRoot = join(root, 'isolated-commit');
+      const team = fixture('one');
+      Object.assign(team.members[0], { runtime: 'isolated', workspace: root, composition: { persona: 'old' } });
+      team.members.push({ ...team.members[0], name: 'driver2', id: 'sibling' });
+      await createTeamDir(stateRoot, team);
+      const replacement = { ...team.members[0], id: 'new', composition: { persona: 'new', toolFilter: { deny: ['pair_verify'] } } };
+      assert.equal(await commitMemberReplacement(stateRoot, team.id, team.members[0], replacement), true);
+      const saved = await readTeam(stateRoot, team.id);
+      assert.deepEqual(saved.members[0].composition, replacement.composition);
+      assert.equal(saved.members[0].replacementCount, 1);
+      assert.equal(saved.members[0].seatHistory[0].reason, 'recovery');
+      assert.equal(saved.members[0].seatHistory[0].previousId, 'old');
+      assert.deepEqual(saved.members[1], team.members[1]);
+      for (let i=0;i<14;i++) {
+        const current=(await readTeam(stateRoot,team.id)).members[0];
+        assert.equal(await commitMemberReplacement(stateRoot,team.id,current,{...current,id:'generation-'+i}),true);
+      }
+      const final=await readTeam(stateRoot,team.id);
+      assert.equal(final.members[0].replacementCount,15);
+      assert.equal(final.members[0].seatHistory.length,12);
+      assert.equal(final.members[1].replacementCount,undefined);
+
+    });
     for (const scenario of ['normal', 'stop', 'terminal-only', 'replacement', 'missing', 'spawn-fail', 'persist-fail', 'session-force']) {
       await test(`recycle transaction: ${scenario}`, async () => {
         const stateRoot = join(root, scenario); await createTeamDir(stateRoot, fixture('race'));

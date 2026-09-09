@@ -178,7 +178,7 @@ Captain 把需求拆成用户故事（*"作为财务专员，我希望退款调�
 | `experimentalDualDrivers` / `dualDriverIntegrationCommand` | `false` / 空 | 两个隔离 Driver 工作树的默认开关；仅在保存可运行的全量合并验证命令后生效 |
 | `oracleFirst` | `true` | 任务未冻结验收 oracle 时，`pair_propose` 直接拒绝（spike 若跳过必须写 `no_oracle_reason`，落在循环记录上） |
 | `oracleForkBudget` | `3` | 每任务允许的冻结次数上限，超出需 `captain_override`。软预算：可见化重复冻结循环，不阻断真实推进 |
-| `memberLifetime` | `cycle` | `cycle` 每个循环由看板摘要重派席位；`session` 保留每角色一个常驻席位 |
+| `memberLifetime` | `session` | `cycle` 每个循环由看板摘要重派席位；`session` 保留每角色一个常驻席位 |
 | `heartbeatMs` | `120000` | 停摆邮箱的存活巡检周期；`0` 关闭。仅 YAML——巡检定时器在启动时装配，因此刻意不出现在运行时设置面里 |
 | `workingLeaseMs` | `600000` | 一个席位可以在不产出任何会话事件的情况下保持 `working` 多久，超时才被看门狗判为停摆；真正在干活的长回合会自动续租。`0` 关闭。仅 YAML |
 

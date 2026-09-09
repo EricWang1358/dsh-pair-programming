@@ -7,6 +7,12 @@ protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 
 ## [Unreleased]
 
+- Show bounded, collapsed session replacement history per logical seat in the live panel. Persist successful replacement counts and reasons atomically; unknown legacy history remains explicitly unrecorded. This does not measure cache savings or archive host conversations.
+
+- Preserve replacement Driver workspace routing when retiring its predecessor, persist the new isolated composition for cold resume, and correct recovery instructions for unfinished cycles. Dual Driver seats continue to skip automatic cycle recycling.
+
+- Default memberLifetime to session to retain seats across accepted cycles. Explicit cycle overrides and failure recovery remain supported. Change existing stored cycle overrides in Settings.
+
 - Add a read-only live Pair runtime conversation view and optional right sidebar. Separate task completion, acceptance coverage and integration; expose attention, product discovery, mailbox counts and task contracts. Theme-aware responsive UI, density preferences, cancellation and bounded reconnects use native DSH session/RPC services without model calls.
 
 - Add the **Experimental: isolated dual Drivers** Settings card. It saves a
