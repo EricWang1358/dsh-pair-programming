@@ -38,6 +38,9 @@ export async function run(report) {
   });
   await check('generated browser asset is reproducible from its settings/panel sources', async () => {
     assert.equal(await readFile(new URL('../lib/client.js', import.meta.url),'utf8'), await renderClient());
+    const inputs = Object.fromEntries(await Promise.all(['lib/client/settings.js', 'lib/client/panel.js', 'lib/client/panel.css']
+      .map(async file => [file, await readFile(new URL('../' + file, import.meta.url), 'utf8')])));
+    assert.equal(renderClient(file => inputs[file].replace(/\r?\n/g, '\r\n')), renderClient(), 'CRLF source checkouts produce the same generated JavaScript and embedded CSS');
   });
   const fixture = await mountPanelFixture();
   try {
