@@ -35,6 +35,10 @@ Agile engineering practices — Extreme Programming, pair programming, TDD, user
 
 For independent implementation tasks, opt in with
 `pair_start({drivers:2, mode:"light", integration_command:"npm test", ...})`.
+Or make it the default for new teams in **Settings → Pair programming →
+Experimental: isolated dual Drivers**. Save a dedicated integration command
+there; the incomplete setting remains inactive, so an ordinary start does not
+unexpectedly switch to two contributors.
 Use a **clean, committed Git repository root**. Each Driver gets its own branch
 and worktree; the Navigator reviews both. The default remains unchanged.
 
@@ -202,6 +206,7 @@ The Captain drafts stories (*"As a finance ops clerk, I want refund calls to be 
 | `planningMaxArbitrations` | `2` | disputes resolvable per task while it is still in planning; a task with cycles is exempt |
 | `defaultMode` | `solo` | `solo` (you + a short-lived SPEC seat) · `light` (legacy Driver + Navigator) · `full` (adds Challenger) |
 | `oracleFirst` | `true` | `pair_propose` refuses a task whose acceptance oracle is not frozen (spikes need `no_oracle_reason` if they skip it; recorded on the cycle) |
+| `experimentalDualDrivers` / `dualDriverIntegrationCommand` | `false` / empty | opt-in default for two isolated Driver worktrees; it becomes active only with a runnable whole-suite integration command |
 | `oracleForkBudget` | `3` | freezes per task before `captain_override` is required — a soft budget that surfaces re-fork loops, never a wall |
 | `memberLifetime` | `cycle` | `cycle` respawns each seat from the board digest per Pair Cycle; `session` keeps one durable seat per role |
 | `heartbeatMs` | `120000` | liveness sweep for stalled mailboxes; `0` disables. YAML-only — its interval is wired at startup, so it is deliberately absent from the live settings surface |

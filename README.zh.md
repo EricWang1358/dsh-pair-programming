@@ -19,6 +19,12 @@
 DSH Web 会话视图新增 **Pair 运行台**，新宿主还支持右侧栏。动态显示任务进度、需求覆盖、质量凭证、双 Driver 集成、当前重点、产品发现与消息积压。支持搜索、展开任务契约、深浅主题、舒适/紧凑密度与暂停更新；只读观察，不调用模型。[使用与实现说明](docs/diagnostics/2026-09-09-pair-panel.md)。
 
 ## 为什么：独狼代理的四个老毛病
+## 实验性：隔离双 Driver
+
+在 **设置 → 结对编程 → 实验性：隔离双 Driver** 中打开开关，并保存一条合并验证命令。之后每个新团队会自动以 light 模式创建两个隔离 Driver 工作树；每次候选合并都跑该命令。只开开关但尚未填写命令时，实验保持未就绪，普通单 Driver 启动不会被意外改变。
+
+仍须从干净、已提交的 Git 仓库根目录启动，并为并行任务声明写入范围、读取范围与共享资源；冲突任务会排队。
+
 
 让单个代理"直接把功能写了"，就是加了速的瀑布流：
 
@@ -169,6 +175,7 @@ Captain 把需求拆成用户故事（*"作为财务专员，我希望退款调�
 | `maxOpenRisks` | `15` | 全队 OPEN 非 P0 风险票上限；P0 提票不受此限 |
 | `planningMaxArbitrations` | `2` | 任务进入规划期时可裁决的争议上限；任务已有 cycle 即豁免 |
 | `defaultMode` | `solo` | `solo`（你 + 一个短命 SPEC 席位）· `light`（遗留 Driver + Navigator）· `full`（另加 Challenger） |
+| `experimentalDualDrivers` / `dualDriverIntegrationCommand` | `false` / 空 | 两个隔离 Driver 工作树的默认开关；仅在保存可运行的全量合并验证命令后生效 |
 | `oracleFirst` | `true` | 任务未冻结验收 oracle 时，`pair_propose` 直接拒绝（spike 若跳过必须写 `no_oracle_reason`，落在循环记录上） |
 | `oracleForkBudget` | `3` | 每任务允许的冻结次数上限，超出需 `captain_override`。软预算：可见化重复冻结循环，不阻断真实推进 |
 | `memberLifetime` | `cycle` | `cycle` 每个循环由看板摘要重派席位；`session` 保留每角色一个常驻席位 |

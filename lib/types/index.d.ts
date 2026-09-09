@@ -16,6 +16,8 @@ export interface Config {
   planningMaxArbitrations?: number;
   dodCommand?: string;
   defaultMode?: 'solo' | 'light' | 'full';
+  experimentalDualDrivers?: boolean;
+  dualDriverIntegrationCommand?: string;
   tddMode?: 'enforce' | 'coach' | 'off';
   pairStyle?: 'traditional' | 'strong' | 'ping-pong';
   spikeMaxCycles?: number;

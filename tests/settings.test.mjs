@@ -53,6 +53,11 @@ export async function run(check) {
   check([42, {}, true].every(bad => String(settingsValueError({ ...okSettings, dodCommand: bad })).includes('dodCommand')), 'the settings face rejects a non-string dodCommand');
   check(toRuntimeSettings({ ...okSettings, dodCommand: 'node tests/run.mjs' }).dodCommand === 'node tests/run.mjs', 'toRuntimeSettings carries dodCommand');
   check(PairSettingsSchema({}).dodCommand === undefined, 'section schema leaves dodCommand unset by default');
+  check(settingsValueError({ ...okSettings, dualDriverIntegrationCommand: 'node tests/run.mjs' }) === undefined, 'a runnable dual-Driver integration command validates');
+  check(String(settingsValueError({ ...okSettings, dualDriverIntegrationCommand: 'the full suite must stay green' })).includes('dualDriverIntegrationCommand'), 'a prose dual-Driver command is refused at the settings boundary');
+  const dualRuntime = toRuntimeSettings({ ...okSettings, experimentalDualDrivers: true, dualDriverIntegrationCommand: 'node tests/run.mjs' });
+  check(dualRuntime.experimentalDualDrivers === true && dualRuntime.dualDriverIntegrationCommand === 'node tests/run.mjs', 'dual-Driver preferences reach the runtime config');
+  check(PairSettingsSchema({}).experimentalDualDrivers === false && PairSettingsSchema({}).dualDriverIntegrationCommand === '', 'the experiment is opt-in and incomplete defaults stay inert');
 
   // settingsEntry: base layer mirrors the composed YAML, dod raw string preserved
   const resolved = { tddMode: 'off', pairStyle: 'traditional', defaultMode: 'full', maxCyclesPerTask: 12, spikeMaxCycles: 2, greenBuildOnStop: true, dod: undefined, stateDir: '.pair-programming', slashCommand: true };
