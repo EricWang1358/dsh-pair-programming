@@ -17,6 +17,7 @@ suites.push('delivery.test.mjs');
 suites.push('verification.test.mjs');
 suites.push('worktrees.test.mjs', 'isolated-members.test.mjs', 'parallel-tasks.test.mjs', 'integration.test.mjs', 'dual-lifecycle.test.mjs');
 suites.push('product.test.mjs', 'backlog.test.mjs', 'repair.test.mjs', 'design.test.mjs');
+suites.push('panel.test.mjs');
 for (const s of suites) {
   const mod = await import(new URL(`./${s}`, import.meta.url).href);
   await mod.run(check);

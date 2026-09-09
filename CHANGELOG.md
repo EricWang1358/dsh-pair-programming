@@ -7,6 +7,8 @@ protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 
 ## [Unreleased]
 
+- Add a read-only live Pair runtime conversation view and optional right sidebar. Separate task completion, acceptance coverage and integration; expose attention, product discovery, mailbox counts and task contracts. Theme-aware responsive UI, density preferences, cancellation and bounded reconnects use native DSH session/RPC services without model calls.
+
 - Add optional use-case design and collaboration contracts: joint acceptance cases, accountable task ownership, provider dependencies, and focused QA/Driver handoffs. Invalid collaboration amendments are refused before mutation; design changes invalidate verification bindings. Existing use cases remain compatible.
 
 - `pair_backlog` adds evidence-backed discovery, Captain product triage, draft

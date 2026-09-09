@@ -14,6 +14,10 @@ That's it. You just became the **Captain** of a pair-programming team — and ev
 
 ---
 
+## Pair runtime panel
+
+A live **Pair runtime** conversation view, with an optional right sidebar on newer DSH hosts. Follow task progress, acceptance coverage, board credentials, dual-Driver integration, attention, product discoveries and mailbox backlog. Search tasks, inspect contracts, switch density or pause updates. Uses the host theme and reads durable state without model calls. [Implementation and validation](docs/diagnostics/2026-09-09-pair-panel.md).
+
 ## Why: the loner-agent problem
 
 Letting a single agent "just implement" your feature is waterfall with extra speed:
