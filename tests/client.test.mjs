@@ -63,7 +63,7 @@ function loadClient(check) {
 /** fake browser ctx: one settingsScope namespace with base/user/value layers and a ready snapshot. */
 function fakeCtx() {
   const user = { tddMode: 'coach' };
-  const base = { tddMode: 'enforce', pairStyle: 'traditional', defaultMode: 'full', maxCyclesPerTask: 12, planningMaxArbitrations: 2, spikeMaxCycles: 2, greenBuildOnStop: true, dod: '' };
+  const base = { tddMode: 'enforce', pairStyle: 'traditional', defaultMode: 'full', experimentalDualDrivers: false, dualDriverIntegrationCommand: '', maxCyclesPerTask: 12, planningMaxArbitrations: 2, spikeMaxCycles: 2, greenBuildOnStop: true, dod: '' };
   const listeners = new Set();
   const writes = [];
   const scope = {
@@ -130,7 +130,7 @@ export async function run(check) {
   check(env.slots.bound.includes('pair-programming-ce'), 'binds the host-written CE detection namespace separately from the user config section');
   check(env.locale.registered?.ns === 'settings.pair-programming', 'locale registered under its own namespace');
   const copy = env.locale.registered?.copy;
-  const needed = ['cardTitle', 'tddMode', 'pairStyle', 'defaultMode', 'maxCyclesPerTask', 'maxOpenRisks', 'planningMaxArbitrations', 'spikeMaxCycles', 'greenBuildOnStop', 'dod', 'save', 'discard', 'reset', 'overridden', 'baseLabel', 'readOnly', 'saveFailed', 'unsaved', 'saving', 'invalidNumber', 'navigatorModel', 'navigatorModelHint', 'navigatorEffort', 'navigatorEffortHint', 'navTest', 'navTesting', 'navNeverTested', 'navigatorModelProbeToken', 'navigatorModelProbeTokenHint'];
+  const needed = ['cardTitle', 'tddMode', 'pairStyle', 'defaultMode', 'experimentalDualDrivers', 'experimentalDualDriversHint', 'dualDriverIntegrationCommand', 'dualDriverIntegrationCommandHint', 'dualDriversReady', 'dualDriversNeedsCommand', 'dualDriversOff', 'secDualDrivers', 'secDualDriversSummary', 'maxCyclesPerTask', 'maxOpenRisks', 'planningMaxArbitrations', 'spikeMaxCycles', 'greenBuildOnStop', 'dod', 'save', 'discard', 'reset', 'overridden', 'baseLabel', 'readOnly', 'saveFailed', 'unsaved', 'saving', 'invalidNumber', 'navigatorModel', 'navigatorModelHint', 'navigatorEffort', 'navigatorEffortHint', 'navTest', 'navTesting', 'navNeverTested', 'navigatorModelProbeToken', 'navigatorModelProbeTokenHint'];
   check(needed.every(k => typeof copy?.zh?.[k] === 'string' && typeof copy?.en?.[k] === 'string'), 'both locales cover every needed key');
   check(env.slots.injectedName === 'settings.section', 'injected into the top-level settings.section slot');
   check(env.slots.registration?.id === 'pair-programming', 'section id is the settings namespace');
@@ -143,6 +143,8 @@ export async function run(check) {
   check(state.available === true && state.writable === true, 'card available on a ready writable namespace');
   check(state.fields.tddMode.text === 'coach' && state.fields.tddMode.overridden === true, 'user override surfaces as coach + overridden');
   check(state.fields.maxCyclesPerTask.text === '12' && state.fields.maxCyclesPerTask.overridden === false, 'composed value renders unmarked');
+  check(state.fields.experimentalDualDrivers.text === '0' && state.fields.dualDriverIntegrationCommand.text === '', 'the isolated dual-Driver card starts safely inactive');
+  check(['oracleFirst', 'memberLifetime', 'navigatorEffort', 'navigatorModelProbeToken', 'oracleForkBudget'].every((field) => state.fields[field] !== undefined), 'the card snapshot carries every registered control rather than silently omitting fields');
 
   const actions = env.slots.registration.inject();
   actions.edit('maxCyclesPerTask', '8');
@@ -215,6 +217,15 @@ export async function run(check) {
   check(!collapsed.includes('maxCyclesPerTask'), 'the budget group starts collapsed — twenty open rows is the wall this replaces');
   check(!collapsed.includes('ceLanes'), 'and so does the CE group');
 
+  check(!labelsOf(render()).includes('experimentalDualDrivers'), 'the experimental card starts collapsed with the advanced controls out of the way');
+  actions.toggle('dualDrivers');
+  check(labelsOf(render()).includes('experimentalDualDrivers') && labelsOf(render()).includes('dualDriverIntegrationCommand'), 'opening the experimental card reveals both required controls together');
+  actions.edit('dualDriverIntegrationCommand', 'node tests/run.mjs');
+  actions.edit('experimentalDualDrivers', '1');
+  check(store.getSnapshot().fields.experimentalDualDrivers.text === '1' && store.getSnapshot().fields.dualDriverIntegrationCommand.text === 'node tests/run.mjs', 'the experimental card reports a ready dual-Driver configuration before saving');
+  actions.save();
+  await new Promise(r => setTimeout(r, 0));
+  check(env.writes.some(w => w[0] === 'set' && w[1] === 'experimentalDualDrivers' && w[2] === true) && env.writes.some(w => w[0] === 'set' && w[1] === 'dualDriverIntegrationCommand' && w[2] === 'node tests/run.mjs'), 'saving the card persists both dual-Driver settings');
   actions.toggle('budgets');
   check(labelsOf(render()).includes('maxCyclesPerTask'), 'toggling a group reveals its rows');
   actions.toggle('budgets');
