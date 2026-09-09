@@ -1,0 +1,23 @@
+{
+  "status": "stopped-by-user-cost-constraint",
+  "endedAt": "2026-09-09T02:16:32.726383+00:00",
+  "reason": "User requested reducing full DSH runs; no further full model acceptance scheduled.",
+  "tasks": [
+    {
+      "id": "t-1",
+      "status": "pending",
+      "assignee": "driver",
+      "gatePassId": null
+    },
+    {
+      "id": "t-2",
+      "status": "completed",
+      "assignee": "driver2",
+      "gatePassId": "338f6fa1-6aad-4f46-b86d-ca562f7ae793"
+    }
+  ],
+  "phase": "CYCLING",
+  "integrated": [
+    "t-2"
+  ]
+}

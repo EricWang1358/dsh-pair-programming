@@ -27,6 +27,32 @@ Agile engineering practices — Extreme Programming, pair programming, TDD, user
 
 ## What you get: an agile team, not a chatbot
 
+### Optional two-contributor workflow
+
+For independent implementation tasks, opt in with
+`pair_start({drivers:2, mode:"light", integration_command:"npm test", ...})`.
+Use a **clean, committed Git repository root**. Each Driver gets its own branch
+and worktree; the Navigator reviews both. The default remains unchanged.
+
+Declare `write_paths`, `read_paths` and `resources` arrays on each task. Explicit
+disjoint scopes may run together; missing declarations, overlapping scopes and
+shared manifests/interfaces queue. Each Driver claims before its task oracle is
+authored. Install required dependencies separately in each worktree.
+
+After independent final review and gate, the Captain calls `pair_integrate`.
+It merges in a disposable checkout and runs the new and previously integrated
+oracles plus the whole-suite command before advancing the canonical branch.
+Only then may the owning Driver complete its task. Completed task gates are
+re-certified against the final canonical tree before successful stop.
+
+Separate worktrees prevent accidental shared-directory overwrites; they cannot
+guarantee semantic independence or contain arbitrary shell access. Declare shared
+resources and provide meaningful regressions. Stop retires native sessions but
+**retains worktrees, branches and candidate refs for audit/recovery**, which costs
+disk space; archive them deliberately after inspecting their contents. No speedup
+or quality gain is claimed from a smoke test. See the
+[implementation and native acceptance record](docs/diagnostics/2026-09-08-dual-drivers.md).
+
 **Solo mode (the default) has two parties, and only one of them is spawned:**
 
 | Role | Who | Duty | Hard rule |
@@ -222,7 +248,7 @@ Or develop against a local checkout (`link:` install per [docs](docs/README.md))
 ## Verified engineering
 
 ```sh
-npm test          # 938 assertions across 28 suites, pure-logic, offline
+npm test          # protocol, real Git/worktree and SDK contract regressions
 npm run verify    # import gate · startup gate · package gate · typecheck — all green
 ```
 
@@ -232,7 +258,7 @@ Zero third-party plugin dependencies: the plugin ships its own runtime (team sta
 
 ## Why trust this
 
-Every practice here comes from the playbook that made agile work — Kent Beck's XP, the Agile Manifesto's values, Scrum's artifacts and ceremonies — applied where it has never had better conditions than agent teams: agents have *no ego* to defend in a strong-style pair, *no fatigue* in a 30-minute rotation, and *no incentive* to mark a task done without the gate pass. The failure modes of lone-wolf coding don't disappear in AI-assisted development. They get a bigger keyboard.
+The plugin applies small increments, explicit product decisions and independent acceptance to DSH agents. Models can still misunderstand requirements, misuse tools or report unsupported conclusions. Gates bind evidence to actual candidates; they do not prove the requirements or tests are complete. See the [design and native failure records](docs/diagnostics/2026-09-08-dual-drivers.md) for what has and has not been demonstrated.
 
 **Stop code-review theater. Start shipping increments whose acceptance was authored before the code was.**
 

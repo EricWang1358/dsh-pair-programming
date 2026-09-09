@@ -43,5 +43,22 @@ the pre-existing `lib/protocol/disclosure.js` changes.
 
 ## Evidence and progress
 
-U1 in progress; U2–U5 pending. Each behavior unit records focused proof and the
-final native acceptance record before this plan can be marked complete.
+U1–U4 implemented and committed through e924760. Native lifecycle, cold resume
+and the two-task integration/completion chain have evidence records. U5 documentation and bounded verification are delivered. Full PM dual-task model
+acceptance remains unproven; further full DSH runs were stopped at the user's explicit cost constraint. This is not a stable-mode release signoff.
+
+Additional user-approved units implemented:
+- U6: evidence-backed requirement discovery, Captain PM triage, non-claimable
+  drafts, priority with reasons, independent QA preparation and bounded status.
+- U7: repair a bad checkpoint command on the same cycle, retaining the frozen
+  oracle, historical failures and budgets, and requiring new GREEN.
+- Native failure follow-up: pre-claim editor protection; precise tool/path
+  guidance; safely reclaim amended preparation with integrated dependencies;
+  reduce isolated Driver tools to their actual responsibilities.
+
+The final design and evidence index are in
+[dual-drivers.md](../diagnostics/2026-09-08-dual-drivers.md). The native checkpoint-repair pipeline passed; offline verification reported
+1438/0 across 45 suites on the final frozen working tree. Product-model orchestration limitations and the user's
+cost policy are recorded there; future full model trials are not automatic.
+
+- U8: frozen local design and cross-use-case collaboration contracts; joint AC allocation, dependency ancestry, evidence binding, and task-specific QA/Driver handoff. Offline handler regressions cover rejection without board mutation. No new model trial.

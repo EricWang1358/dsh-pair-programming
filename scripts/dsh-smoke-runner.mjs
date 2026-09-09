@@ -4,7 +4,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative, isAbsolute } from 'node:path';
 import { brandString } from '@deepseek-ai/dsh-brand';
 import { installModelSelection } from '@deepseek-ai/dsh-agent';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
@@ -13,7 +13,7 @@ import { Config } from '@deepseek-ai/dsh-headless';
 
 export { Config };
 export const name = 'pair-native-smoke-runner';
-export const inject = ['agents', 'sessions', 'headlessStartup'];
+export const inject = ['agents', 'sessions', 'tools', 'headlessStartup'];
 
 export function apply(ctx, config) {
   run(ctx, config.task).catch(error => {
@@ -30,11 +30,24 @@ async function run(ctx, task) {
   };
   const output = process.env.DSH_PAIR_SMOKE_OUTPUT;
   if (!output) throw new Error('DSH_PAIR_SMOKE_OUTPUT must name a result file');
-  const receipt = { selection, cwd: process.cwd(), startedAt: new Date().toISOString(), sessions: [], routes: [], tools: [], toolCount: 0, errors: [] };
+  const receipt = { selection, cwd: process.cwd(), startedAt: new Date().toISOString(), sessions: [], sessionWorkspaces: [], routes: [], turns: [], tools: [], toolCount: 0, errors: [] };
   const stop = ctx.on('session/event', (session, event) => {
-    if (session.header.cwd !== process.cwd()) return;
-    if (!receipt.sessions.includes(session.id)) receipt.sessions.push(session.id);
-    if (event.type === 'request/context' && receipt.routes.length < 100) receipt.routes.push({ sessionId: session.id, provider: event.data.provider, model: event.data.model });
+    if (typeof session.header.cwd !== 'string') return;
+    const rel = relative(process.cwd(), session.header.cwd);
+    if (rel.startsWith('..') || isAbsolute(rel)) return;
+    if (!receipt.sessions.includes(session.id)) {
+      receipt.sessions.push(session.id);
+      receipt.sessionWorkspaces.push({ sessionId: session.id, cwd: session.header.cwd });
+    }
+    if (['turn/start', 'turn/end'].includes(event.type) && receipt.turns.length < 2000) {
+      receipt.turns.push({ sessionId: session.id, type: event.type, at: Date.now(), reason: event.data.reason?.kind ?? null });
+    }
+    if (event.type === 'request/context' && receipt.routes.length < 100) {
+      const agent = ctx.agents.get(session.id);
+      if (!receipt.routes.some(route => route.sessionId === session.id)) process.stdout.write(`DSH_TOOL_SCOPE ${session.id} ${JSON.stringify(session.requestHeader()?.tools?.map(tool => tool.name) ?? [])}\n`);
+      receipt.routes.push({ sessionId: session.id, provider: event.data.provider, model: event.data.model,
+        protocolTools: agent ? ctx.tools.schemas(agent).map(tool => tool.name).filter(name => name.startsWith('pair_')) : null });
+    }
     if (event.type === 'tool/call' || event.type === 'tool/code-dispatch') receipt.toolCount++;
     if (receipt.tools.length < 2000 && event.type === 'tool/call') {
       const call = { sessionId: session.id, name: event.data.name };
@@ -47,8 +60,15 @@ async function run(ctx, task) {
       receipt.tools.push(call);
     }
     if (receipt.tools.length < 2000 && event.type === 'tool/code-dispatch') receipt.tools.push({ sessionId: session.id, name: event.data.name ?? 'unknown', isError: event.data.isError === true });
-    if (event.type === 'tool/result' && event.data.error && receipt.errors.length < 100) receipt.errors.push({ sessionId: session.id, ...event.data.error,
-      message: event.data.message.content.filter(block => block.type === 'text').map(block => block.text).join('').slice(0, 1500) });
+    if (event.type === 'tool/result' && receipt.errors.length < 100) {
+      const failed = event.data.message.content.filter(block => block.type === 'tool-result' && block.isError);
+      if (event.data.error || failed.length) {
+        const blocks = failed.length ? failed.flatMap(block => block.content ?? []) : event.data.message.content;
+        const message = blocks.filter(block => block.type === 'text').map(block => block.text).join('').slice(0, 1500);
+        receipt.errors.push({ sessionId: session.id, message });
+        process.stdout.write(`DSH_TOOL_ERROR ${session.id} ${message.slice(0, 500)}\n`);
+      }
+    }
     if (event.type === 'turn/end') {
       process.stdout.write(`DSH_TURN ${session.id} ${event.data.reason.kind}\n`);
       if (event.data.reason.kind === 'error') receipt.errors.push({ sessionId: session.id, code: event.data.reason.error.code, message: String(event.data.reason.error.message).slice(0, 1000) });
@@ -90,11 +110,14 @@ async function run(ctx, task) {
           if (['DONE', 'ABORTED'].includes(board.protocol.phase)) {
             receipt.team = {
               id: board.id, phase: board.protocol.phase,
-              members: board.members.map(({ id, role, provider, model, status }) => ({ id, role, provider, model, status })),
+              members: board.members.map(({ id, name, role, provider, model, status, workspace }) => ({ id, name, role, provider, model, status, workspace: workspace ?? null })),
+              integrations: board.parallel?.integrations ?? null,
               tasks: board.tasks.map(({ id, status, gatePassId }) => ({ id, status, gatePassId })),
               cycleCount: board.protocol.cycles.length,
               cycles: board.protocol.cycles.map(({ id, rejections, verify }) => ({ id, rejections, verdict: verify?.verdict, category: verify?.category })),
               stats: board.protocol.stats,
+              product: board.product ?? null,
+              repairs: board.protocol.cycles.flatMap(cycle => (cycle.verificationRepairs ?? []).map(repair => ({ cycleId: cycle.id, ...repair }))),
             };
             break;
           }

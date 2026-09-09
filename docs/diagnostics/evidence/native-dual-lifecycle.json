@@ -1,0 +1,145 @@
+{
+  "startedAt": "2026-09-08T04:51:05.387Z",
+  "routes": [
+    {
+      "id": "session-981596c6-f47d-43ca-a560-9b3362c24c70",
+      "cwd": "C:\\Users\\Eric1\\AppData\\Local\\Temp\\dsh-dual-20260908\\probe4\\.pair-programming\\probe\\worktrees\\driver2",
+      "provider": "opencode-go-muse",
+      "model": "muse-spark-1.3-contributor"
+    },
+    {
+      "id": "session-693fb0cf-85c6-4cc4-8606-be83bff4419a",
+      "cwd": "C:\\Users\\Eric1\\AppData\\Local\\Temp\\dsh-dual-20260908\\probe4\\.pair-programming\\probe\\worktrees\\driver",
+      "provider": "opencode-go-muse",
+      "model": "muse-spark-1.3-contributor"
+    }
+  ],
+  "events": [
+    {
+      "id": "session-693fb0cf-85c6-4cc4-8606-be83bff4419a",
+      "type": "turn/start",
+      "at": 1788843066723,
+      "name": null,
+      "reason": null
+    },
+    {
+      "id": "session-981596c6-f47d-43ca-a560-9b3362c24c70",
+      "type": "turn/start",
+      "at": 1788843066728,
+      "name": null,
+      "reason": null
+    },
+    {
+      "id": "session-693fb0cf-85c6-4cc4-8606-be83bff4419a",
+      "type": "tool/call",
+      "at": 1788843069042,
+      "name": "pwsh",
+      "reason": null
+    },
+    {
+      "id": "session-981596c6-f47d-43ca-a560-9b3362c24c70",
+      "type": "tool/call",
+      "at": 1788843069542,
+      "name": "pwsh",
+      "reason": null
+    },
+    {
+      "id": "session-693fb0cf-85c6-4cc4-8606-be83bff4419a",
+      "type": "turn/end",
+      "at": 1788843071558,
+      "name": null,
+      "reason": "completed"
+    },
+    {
+      "id": "session-981596c6-f47d-43ca-a560-9b3362c24c70",
+      "type": "turn/end",
+      "at": 1788843071935,
+      "name": null,
+      "reason": "completed"
+    },
+    {
+      "id": "session-693fb0cf-85c6-4cc4-8606-be83bff4419a",
+      "type": "turn/start",
+      "at": 1788843072177,
+      "name": null,
+      "reason": null
+    },
+    {
+      "id": "session-981596c6-f47d-43ca-a560-9b3362c24c70",
+      "type": "turn/start",
+      "at": 1788843072181,
+      "name": null,
+      "reason": null
+    },
+    {
+      "id": "session-981596c6-f47d-43ca-a560-9b3362c24c70",
+      "type": "turn/end",
+      "at": 1788843073589,
+      "name": null,
+      "reason": "completed"
+    },
+    {
+      "id": "session-693fb0cf-85c6-4cc4-8606-be83bff4419a",
+      "type": "turn/end",
+      "at": 1788843073634,
+      "name": null,
+      "reason": "completed"
+    }
+  ],
+  "deliveries": [
+    {
+      "ok": true,
+      "messageId": "46163072-f233-4ec8-809d-ad2d044fcb1a"
+    },
+    {
+      "ok": true,
+      "messageId": "368ffd3f-0871-49b9-9350-742afe9cfb81"
+    }
+  ],
+  "absentBeforeResume": true,
+  "resumeDeliveries": [
+    {
+      "ok": true,
+      "messageId": "15c2b0cc-f01e-4fbe-92ac-2d84a9f6af15"
+    },
+    {
+      "ok": true,
+      "messageId": "fab470a3-d65f-445e-9071-4e93f007a1f9"
+    }
+  ],
+  "members": [
+    {
+      "id": "session-693fb0cf-85c6-4cc4-8606-be83bff4419a",
+      "name": "driver",
+      "cwd": "C:\\Users\\Eric1\\AppData\\Local\\Temp\\dsh-dual-20260908\\probe4\\.pair-programming\\probe\\worktrees\\driver",
+      "selection": {
+        "provider": "opencode-go-muse",
+        "model": "muse-spark-1.3-contributor",
+        "maxTokens": 131072
+      }
+    },
+    {
+      "id": "session-981596c6-f47d-43ca-a560-9b3362c24c70",
+      "name": "driver2",
+      "cwd": "C:\\Users\\Eric1\\AppData\\Local\\Temp\\dsh-dual-20260908\\probe4\\.pair-programming\\probe\\worktrees\\driver2",
+      "selection": {
+        "provider": "opencode-go-muse",
+        "model": "muse-spark-1.3-contributor",
+        "maxTokens": 131072
+      }
+    }
+  ],
+  "cleanup": {
+    "retired": [
+      "session-693fb0cf-85c6-4cc4-8606-be83bff4419a",
+      "session-981596c6-f47d-43ca-a560-9b3362c24c70"
+    ],
+    "persisted": true,
+    "failedInterrupts": []
+  },
+  "retiredDelivery": {
+    "ok": false,
+    "reason": "the seat is retired"
+  },
+  "endedAt": "2026-09-08T04:51:13.641Z"
+}

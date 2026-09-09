@@ -65,7 +65,7 @@ export async function run(check) {
   const architecture = await read('docs/02-architecture/ARCHITECTURE.md');
 
   const toolNames = new Set();
-  for (const file of ['arbitrate', 'flow', 'gate-exec', 'integrate', 'lifecycle', 'mailbox', 'oracle', 'oracle-exec', 'risk', 'task']) {
+  for (const file of ['arbitrate', 'backlog', 'flow', 'gate-exec', 'integrate', 'lifecycle', 'mailbox', 'oracle', 'oracle-exec', 'repair', 'risk', 'task']) {
     for (const match of (await read(`lib/tools/${file}.js`)).matchAll(/name: *'(pair_[a-z_]+)'/g)) {
       toolNames.add(match[1]);
     }

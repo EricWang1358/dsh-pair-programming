@@ -1,10 +1,13 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { isolatedDriverDenyList } from '../lib/runtime/members.js';
 import { createDriverWorktrees } from '../lib/runtime/worktrees.js';
 import { spawnIsolatedMember, disposeIsolatedMember, configureIsolatedMembers } from '../lib/runtime/isolated-members.js';
 import { coordinationWorkspace, taskWorkspace } from '../lib/runtime/workspace-context.js';
 export async function run(check) {
+  const denied = isolatedDriverDenyList(new Set(['pair_task_claim', 'pair_propose', 'pair_gate_check', 'pair_backlog', 'read', 'Pwsh', 'Edit', 'pair_verify', 'pair_start', 'subagent', 'workflow', 'create_goal']));
+  check(denied.join(',') === 'pair_verify,pair_start,subagent,workflow,create_goal', 'isolated Driver keeps implementation/discovery tools but cannot self-review or start competing orchestration');
   // Public DSH delegation helpers execute here. Native profile acceptance adds
   // real registry publication, model turns, lifecycle and persisted sessions.
   const root = await mkdtemp(join(tmpdir(), 'pair-isolated-members-'));

@@ -1,0 +1,27 @@
+{
+  "kind": "offline-no-model",
+  "verified_at_utc": "2026-09-09T03:01:59.9515306Z",
+  "passed": 1438,
+  "failed": 0,
+  "suites": 45,
+  "exit_code": 0,
+  "tools_registered": 26,
+  "package_files": 85,
+  "stages": [
+    "tests/run.mjs with progress-only wrapper",
+    "syntax",
+    "runtime imports",
+    "build",
+    "package",
+    "DSH SDK startup"
+  ],
+  "log": "verify-design-frozen.log",
+  "log_sha256": "3916e6712c69946caf04c5365bb96b853bad78b712c9216bb2eb48ff8cce13f4",
+  "full_model_runs": 0,
+  "native_repair_evidence": "native-checkpoint-repair.json",
+  "limitations": [
+    "Full PM dual-driver autonomous convergence remains unproven.",
+    "Existing user disclosure.js edits were present during verification and are excluded from this commit.",
+    "A previous mixed-version test process failed; this result is from the subsequent frozen run."
+  ]
+}
