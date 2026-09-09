@@ -42,6 +42,17 @@ export async function run(report) {
       .map(async file => [file, await readFile(new URL('../' + file, import.meta.url), 'utf8')])));
     assert.equal(renderClient(file => inputs[file].replace(/\r?\n/g, '\r\n')), renderClient(), 'CRLF source checkouts produce the same generated JavaScript and embedded CSS');
   });
+  await check('seat history stays bounded, private and separate for both Drivers', () => {
+    const board = demoBoard();
+    board.members[0].replacementCount = 20;
+    board.members[0].seatHistory = Array.from({length:20},(_,i)=>({at:i+1,reason:'recovery',previousId:'private-session-id'}));
+    const panel = projectPairPanel(board);
+    assert.equal(panel.members[0].replacements,20);
+    assert.equal(panel.members[0].seatHistory.length,12);
+    assert.equal(panel.members[0].seatHistory[0].at,20);
+    assert.equal(panel.members[1].replacements,null);
+    assert.equal(JSON.stringify(panel).includes('private-session-id'),false);
+  });
   const fixture = await mountPanelFixture();
   try {
     await check('real DSH SessionStore and authenticated HostConnectionService route return the canonical board', async () => {
@@ -154,6 +165,16 @@ export async function run(report) {
     assert.equal(source.getSnapshot().status,'stale');assert.equal(source.getSnapshot().data.revision,'r');
     assert.ok([...timers.values()].some(v=>v.ms===2000));
     off();
+  });
+  await check('seat history renders collapsed with both Driver identities', () => {
+    const react={createElement:(type,props,...children)=>({type,props,children})};
+    const Dashboard=sandbox.createPairDashboard(react);
+    const team=projectPairPanel(demoBoard());
+    const tree=Dashboard({t:key=>key,data:{team,warnings:[],teams:[],observedAt:1},view:'overview',density:'compact',status:'live'});
+    const found=[];
+    function visit(node){if(Array.isArray(node)){node.forEach(visit);return;}if(!node||typeof node!=='object')return;if(node.props?.className==='pair-contract pair-seat-history')found.push(node);visit(node.children);}
+    visit(tree);assert.equal(found.length,1);assert.equal(found[0].type,'details');assert.equal(found[0].props.open,undefined);
+    const text=JSON.stringify(found[0]);assert.ok(text.includes('driver'));assert.ok(text.includes('driver-2'));assert.ok(text.includes('unknown'));
   });
   await check('panel registers a conversation view plus optional sidebar and disposes both',()=>{
     const views=[],removed=[],dictionary={};

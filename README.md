@@ -208,7 +208,7 @@ The Captain drafts stories (*"As a finance ops clerk, I want refund calls to be 
 | `oracleFirst` | `true` | `pair_propose` refuses a task whose acceptance oracle is not frozen (spikes need `no_oracle_reason` if they skip it; recorded on the cycle) |
 | `experimentalDualDrivers` / `dualDriverIntegrationCommand` | `false` / empty | opt-in default for two isolated Driver worktrees; it becomes active only with a runnable whole-suite integration command |
 | `oracleForkBudget` | `3` | freezes per task before `captain_override` is required — a soft budget that surfaces re-fork loops, never a wall |
-| `memberLifetime` | `cycle` | `cycle` respawns each seat from the board digest per Pair Cycle; `session` keeps one durable seat per role |
+| `memberLifetime` | `session` | `cycle` respawns each seat from the board digest per Pair Cycle; `session` keeps one durable seat per role |
 | `heartbeatMs` | `120000` | liveness sweep for stalled mailboxes; `0` disables. YAML-only — its interval is wired at startup, so it is deliberately absent from the live settings surface |
 | `workingLeaseMs` | `600000` | how long a seat may hold `working` without emitting a session event before the watchdog treats it as stalled; a genuinely long turn renews it. `0` disables. YAML-only |
 
