@@ -15,6 +15,7 @@ import { completionReadiness } from '../lib/protocol/completion.js';
 import { digestOracleFiles, workspaceFingerprint, runOracleCommand } from '../lib/tools/oracle-exec.js';
 import { navigatorPersona } from '../lib/protocol/personas.js';
 import { usageSectionText } from '../lib/prompt.js';
+import { oraclePreparationWindow } from '../lib/protocol/obligation.js';
 
 const execFileP = promisify(execFile);
 const scope = { beyond_request: 'nothing', preexisting_at_risk: 'product.txt checked independently' };
@@ -213,6 +214,7 @@ export async function run(check) {
     await git(['add', 'product.txt']); await git(['commit', '-m', 'second candidate']);
     check(await workspaceFingerprint(h.root, { stateDir: '.state' }) !== first, 'U3 two clean committed candidates have different fingerprints');
   });
+  await runDirectoryRecovery(check);
   await runFollowups(check);
   await runReviewRegressions(check);
   await runClosureRegression(check);
@@ -352,6 +354,7 @@ export async function runClosureRegression(check) {
     await ruled.call('pair_gate_check', { task_id: 't-1' }, 'cap');
     await ruled.edit(t => { t.tasks[0].status = 'completed'; t.tasks[0].attemptId = undefined; });
     await writeFile(join(ruled.root, 'later-task.txt'), 'a second task shipped its own file');
+    await ruled.edit(t => { t.protocol.phase = 'RETRO'; });
     await ruled.call('pair_arbitrate', { conflict_ref: 't-1 gate stale after t-2 edit', decision: 're-certify t-1 against the final tree', evidence: ['src/range.mjs:1'], rationale: 'a later task moved the tree this credential was bound to' }, 'cap');
     const re = await resultOf(ruled.call('pair_gate_check', { task_id: 't-1' }, 'cap'));
     check(re.value?.pass === true, `closure a ruling about the stale gate does not tighten it (${re.error ?? 'ok'})`);
@@ -416,4 +419,26 @@ export async function runReviewRegressions(check) {
       check(result.value?.verdict === (stage === 'final' ? 'accept' : 'checkpoint'), `passing ${stage} output mentioning an expected failure is not infrastructure failure`);
     } finally { await f.cleanup(); }
   }
+}
+
+export async function runDirectoryRecovery(check) {
+  const h=await fixture();
+  try {
+    await mkdir(join(h.root,'deliverables/nested'),{recursive:true});
+    await writeFile(join(h.root,'deliverables/nested/architecture.txt'),'reviewed architecture');
+    await h.edit(t=>{
+      t.tasks[0].deliverables=['deliverables/'];
+      t.tasks.push({id:'t-2',subject:'import',status:'pending',dependencies:['t-1'],createdAt:2,updatedAt:2});
+    });
+    await h.verify();
+    const before=await h.board();
+    check(oraclePreparationWindow(before,'t-2').future, 'unfinished directory task blocks future oracle before gate');
+    const gate=await h.call('pair_gate_check',{task_id:'t-1'},'cap');
+    check(gate.pass===true && gate.deliverables.checked.some(v=>v.includes('directory')), 'accepted directory deliverable gets real gate credential');
+    await h.call('pair_task_update',{task_id:'t-1',status:'completed',attempt_id:'attempt-1',gate_pass_id:gate.gate_pass_id},'drv');
+    const after=await h.board();
+    check(after.tasks[0].status==='completed' && !oraclePreparationWindow(after,'t-2').future, 'normal completion unlocks next oracle without dropping dependency');
+    check(JSON.stringify(before.protocol.cycles)===JSON.stringify(after.protocol.cycles) && JSON.stringify(before.tasks[0].deliverables)===JSON.stringify(after.tasks[0].deliverables), 'directory recovery preserves accepted cycles and frozen delivery declaration');
+  } catch(error) {check(false,'directory recovery: '+error.stack);}
+  finally {await h.cleanup();}
 }

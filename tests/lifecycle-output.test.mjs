@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { registerLifecycleTools } from '../lib/tools/lifecycle.js';
 import { lessonsFileOf } from '../lib/state/layout.js';
+import { readTeam, writeTeam } from '../lib/state/store.js';
 const USE_CASES = [{ actor: 'maintainer', intent: 'exercise lifecycle', outcome: 'observe correct state', acceptance_criteria: ['lifecycle call succeeds'] }];
 
 /** startHarness from lifecycle.test.mjs minus failure injection: pair_start must succeed here. */
@@ -45,6 +46,19 @@ export async function run(check) {
     const okA = await a.start({ goal: 'g', mode: 'light', name: 'lo-a', use_cases: USE_CASES }, { agent: a.captain });
     check(okA.team_id === 'lo-a' && a.spawns.length === 2, 'state A: pair_start succeeds with 2 spawns and the right team id');
     check(isJsonValue(okA) === true, 'state A: no lessons.json — output passes the lossless-JSON gate (no undefined carried_lessons)');
+
+    const fixedBoard = await readTeam(join(root, 'out-a'), okA.team_id);
+    fixedBoard.protocol.decisions.push({ id:'fixed-example', disposition:'fixed', closesDisclosure:'d-1' });
+    await writeTeam(join(root,'out-a'),fixedBoard);
+    const fixedStatus = await a.status({}, {agent:a.captain});
+    check(isJsonValue(fixedStatus), 'pair_status with fixed ruling passes actual DSH lossless JSON validator');
+    check(fixedStatus.residual_ledger[0].sink===null && fixedStatus.residual_ledger[0].at===null, 'fixed ruling missing sink/time fields are explicit nulls');
+    fixedBoard.tasks.push({id:'completed',subject:'finished',status:'completed',dependencies:[],createdAt:1,updatedAt:2});
+    fixedBoard.protocol.phase='RETRO';
+    await writeTeam(join(root,'out-a'),fixedBoard);
+    const recovery=await a.status({}, {agent:a.captain});
+    check(isJsonValue(recovery) && recovery.recovery_actions[0]?.tool==='pair_gate_check', 'RETRO status gives Captain lossless re-certification actions without a bypass');
+
 
     // State A2 (M13' regression): pair_stop keeps the archived dir for audit, so
     // findTeamByCaptain must skip DONE teams — the same captain session can then
