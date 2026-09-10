@@ -150,6 +150,13 @@ export async function run(check) {
   drifted.protocol.decisions = [{ id: 'd-1b044190', taskId: 't-1', conflictRef: 'plan t-1', decision: 'x', rationale: 'r', at: 7 }];
   check(JSON.stringify(gateBindingDiff(drifted, 't-1', bindingOf(graded))) === '["decisions: added d-1b044190"]',
     'only one ruling was added, and the diff names that ruling id');
+  // A caller that stored the digests without the id index must get what the
+  // digest can prove and nothing more: claiming every ruling was "added"
+  // because none could be compared is a diff that sends the captain to the
+  // wrong input.
+  const indexless = gateBindingDiff(drifted, 't-1', { breakdown });
+  check(indexless.every(line => !line.includes('added')) && indexless.some(line => line.startsWith('decisions: input changed')),
+    'without an id-level index the diff names the input that moved and claims no item was added');
   const recarded = credentialBoard();
   recarded.tasks[0].story.intent = 'change the plugin differently';
   recarded.protocol.cycles.push({ id: 'c-t-1-2-2', taskId: 't-1', step: 'PROPOSED', openedAt: 9 });
