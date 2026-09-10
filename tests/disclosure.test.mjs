@@ -49,6 +49,36 @@ function harness(root) {
   return { tool: name => defs.find(def => def.name === name).execute, captain: { id: 'cap', session: { header: { cwd: root }, append() {} } }, stateRoot: join(root, 'state') };
 }
 
+/**
+ * A planning-phase board with a declared gap and a spent budget.
+ *
+ * Measured (SG-career, 2026-09-10): `pair_arbitrate(closes_disclosure=…)` was
+ * refused five times with `task "t-1" used 2 of 2 planning arbitrations … spec
+ * is not frozen yet` — while the board simultaneously made that ruling a
+ * MANDATORY obligation. The gap was only closable once another Driver opened a
+ * cycle and the task left planning, which is a five-round loop to do paperwork
+ * the protocol itself demanded.
+ */
+function planningFixture({ id, captain, decisions }) {
+  const protocol = initialProtocolState();
+  protocol.phase = 'PLANNING';
+  protocol.decisions.push(...decisions);
+  return {
+    id, name: id, goal: 'close the declared gaps', mode: 'light', captainSessionId: captain,
+    createdAt: 1, updatedAt: 1, members: [], taskSeq: 2, evidenceStats: { cacheHits: 0, cacheMiss: 0 },
+    useCases: [{ id: 'UC-1', actor: 'viewer', intent: 'inspect', outcome: 'see the result', acceptanceCriteria: [{ id: 'UC-1.AC-1', text: 'visible' }, { id: 'UC-1.AC-2', text: 'stable' }] }],
+    tasks: [
+      { id: 't-1', subject: 'scene', status: 'pending', acceptanceRefs: ['UC-1.AC-1'], dependencies: [], createdAt: 1, updatedAt: 1,
+        oracle: { sha: 'beefcafe1234', files: ['o.mjs'], cmd: 'node o.mjs', redExit: 1, divergences: [], caseRefs: ['UC-1.AC-1'], nonGating: ['visual-quality'], nonGatingReason: 'no machine judge for the visual arm yet' } },
+      { id: 't-2', subject: 'hud', status: 'pending', acceptanceRefs: ['UC-1.AC-2'], dependencies: [], createdAt: 1, updatedAt: 1 },
+    ],
+    protocol,
+  };
+}
+
+const GAP_REF = 'oracle:t-1:beefcafe1234:non-gating';
+const dispute = (taskId, n) => ({ id: `d-dispute-${n}`, taskId, conflictRef: `plan ${taskId}`, decision: 'pick the first reading', rationale: 'the first reading is cheaper to reverse', at: n });
+
 export async function run(check) {
   check(!declares('nothing — the hunk is minimal') && !declares('none: request value used') && !declares('no deviations from the approved proposal') && declares('added a visual fallback'), 'disclosure parser distinguishes explicit none-style answers from an actual gap');
   const initial = fixture();
@@ -99,6 +129,59 @@ export async function run(check) {
     check(fixedRuling.disposition === 'fixed' && fixedRuling.sink === undefined, 'a fixed gap closes without naming a sink');
     const settled = await readTeam(h.stateRoot, 'disc');
     check(makeCompletionReceipt(settled, 'green').residuals.length === 1, 'the completion receipt carries the non-fixed residuals only');
+
+    /* ------------------------------------------------------------------ */
+    /* B2: closing a declared gap is bookkeeping, not a new dispute.        */
+    /* ------------------------------------------------------------------ */
+    // A ruling that discharges a board obligation must not be refused by, or
+    // charged against, the planning budget — which exists to stop a captain
+    // deliberating forever, not to tax the paperwork the board demanded.
+    const gapAgent = { id: 'cap-gap', session: { header: { cwd: root }, append() {} } };
+    const closeGap = (agent, extra = {}) => h.tool('pair_arbitrate')({
+      conflict_ref: GAP_REF, decision: 'accept the visual arm as a known limitation',
+      evidence: ['docs/visual-review.md: three arms judged by eye'], rationale: 'the structural contract is met; the visual arm has no machine judge yet',
+      closes_disclosure: GAP_REF, disposition: 'accepted', sink: 'issue', sink_ref: 'GH-17', ...extra,
+    }, { agent });
+    // Exhausted: two genuine disputes already recorded, and the task is still
+    // in planning (no cycle), so the budget is what stands between the captain
+    // and the obligation.
+    await createTeamDir(h.stateRoot, planningFixture({ id: 'spent', captain: 'cap-gap', decisions: [dispute('t-1', 1), dispute('t-1', 2), dispute('t-2', 3), dispute('t-2', 4)] }));
+    const closedError = await fails(() => closeGap(gapAgent));
+    check(closedError === '', 'a task whose planning budget is exhausted can still discharge its disclosure obligation');
+    const spentBoard = await readTeam(h.stateRoot, 'spent');
+    const closingRuling = spentBoard.protocol.decisions.find(d => d.closesDisclosure === GAP_REF);
+    check(closingRuling !== undefined && closingRuling.billing === 'bookkeeping',
+      'the ruling records which billing rule applied to it');
+    check(closingRuling !== undefined && closingRuling.chargedTo === undefined
+      && spentBoard.protocol.decisions.every(d => d.chargedTo === undefined),
+      'closing a declared gap charges no task');
+    const spentStatus = await h.tool('pair_status')({}, { agent: gapAgent });
+    check(spentStatus.residual_ledger.some(row => row.billing === 'bookkeeping') && spentStatus.summary.includes('bookkeeping'),
+      'pair_status states on the board which rule was applied to the closing ruling');
+    // The loophole in the other direction stays shut: a ruling that ALSO
+    // decides something is a new dispute, and is billed to the task it names —
+    // never to the task whose gap it happened to close.
+    const crossTask = await fails(() => closeGap(gapAgent, { task_id: 't-2' }));
+    check(crossTask.includes('"t-2"') && !crossTask.includes('"t-1"'),
+      'a ruling that also decides another task is billed to that task, not to the gap\'s subject');
+    const declared = await fails(() => closeGap(gapAgent, { new_dispute: true }));
+    check(declared.includes('used 2 of 2'),
+      'a ruling declared as a new dispute is billed even when it closes a gap');
+    // Room left in the budget: the bookkeeping ruling must not eat it.
+    const roomAgent = { id: 'cap-room', session: { header: { cwd: root }, append() {} } };
+    await createTeamDir(h.stateRoot, planningFixture({ id: 'room', captain: 'cap-room', decisions: [dispute('t-1', 1)] }));
+    check((await fails(() => closeGap(roomAgent))) === '', 'a declared gap closes while the budget still has room');
+    check((await fails(() => h.tool('pair_arbitrate')({
+      conflict_ref: 'plan t-1', decision: 'split the card', evidence: ['board: one card'],
+      rationale: 'two concerns cannot be verified independently', task_id: 't-1',
+    }, { agent: roomAgent }))) === '',
+    'the bookkeeping ruling consumed no planning arbitration: the next genuine dispute still fits');
+    const overflow = await fails(() => h.tool('pair_arbitrate')({
+      conflict_ref: 'plan t-1', decision: 'split it again', evidence: ['board: one card'],
+      rationale: 'still two concerns', task_id: 't-1',
+    }, { agent: roomAgent }));
+    check(overflow.includes('used 2 of 2') && overflow.includes('pick a side'),
+      'genuine disputes are billed exactly as before: the budget still trips at the cap');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
