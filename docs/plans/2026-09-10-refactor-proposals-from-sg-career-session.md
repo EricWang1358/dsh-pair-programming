@@ -365,3 +365,22 @@ G1–G6 可按真实依赖并行开发，但不能以“专家工作流稍后会
 恢复实施时先通过代码解决的未决项：产物批准/撤回状态的最小形状；与现有 task amendment/spec-fork 的唯一入口；角色受限上下文是否能由宿主原生权限保证；Experts 生命周期何时真正需要新 session；冷接管和设计修订是否共用 generation；环境输入与候选 fingerprint 如何区分；哪些 UI 信息只读显示就足够。无法从代码决定的产品取舍再逐项问用户，避免一次抛出大量配置问题。
 
 本计划不增加论文/模型能力结论。后续若要外部研究，针对上述具体缺口查原始论文/官方 SDK，并把结论与代码验收对应，避免“多模型通常更好”式无证据论断。
+---
+
+## G. r4 会话（同日深夜）新增：冻结闸门、仪器 P0 与元数据口径
+
+> 每条都带当场的可执行证据，并已写入 sg-career-workbench-r4 的板面裁决（d-4f2543bf、d-2e0ad2a4 等）。
+
+**G1 — pair_oracle 会收下一份『RED 是编译错误』的密封（建议按 P0 修）。** 实测：t-1 的冻结件第 682 行有未转义的内嵌双引号，node --check → exit 1 / SyntaxError: missing ) after argument list；pair_oracle 却把它当成合法 RED 收下（red_exit=1）。后果是这份标准**任何实现都无法变绿**，而板面会把它当成正常的『缺实现』红。建议：pair_oracle_write / pair_oracle 对 JS/ESM 工件自己解析一遍，解析失败即拒绝写入或归类为仪器失败；red_tail 出现 SyntaxError / ReferenceError 一律不得计为产品红。
+
+**G2 — 写 oracle 的席位没有 shell，无法自检语法。** Navigator/SPEC 只持有 pair_oracle_write + pair_oracle，连 pwsh 都被 I1 拒绝。本次是队长的 node --check 抓到的，而 Navigator 与 Challenger **都逐行读过那份 796 行文件、都引用了第 682 行、都没发现那对引号**。⇒ 闸门必须放在有 shell 的一侧（队长），或由插件在写入时就解析。会话内已定为流程：Navigator 写入 → 队长 node --check → exit 0 才 pair_oracle。
+
+**G3 — 仪器 P0 与 in-flight 周期的相互作用会把仪器锁死。** 现行规则是『product P0 停新周期；instrument P0 停验证与 gate，实现可继续』；但 oracle.js:121-124 又禁止在有 in-flight 周期时重冻 ⇒ **实现继续推进反而让仪器不可修复**。本次 driver 主动拒绝执行板面的 pair_propose 正是为此（它一提出，Navigator 就再也改不了坏 oracle）。建议二选一：(i) 编译级缺陷允许在 in-flight 周期上重冻；或 (ii) instrument P0 同时把新的 propose 义务挂起（frontier 上可见）。
+
+**G4 — oracleSha 与文件 sha256 应在同一处并列打印。** [PAIR:ORACLE] 只打印 digest，本会话因此产生三次混淆（『两个数不是一回事』『digest 变了吗』『字节数没变是不是没改』）。建议该消息同时给出：文件 sha256、字节数、行数、逐文件路径。
+
+**G5 — 冻结编号需要带原因。** freeze #4 与 #5 的 digest 完全相同（#5 是按 defect 重新冻结同一份字节）。只报编号会引出『哪个是当前』的歧义；建议每行打印 freeze #N (kind=defect|interpretation, reason=…)，并显示解释分歧额度还剩几次（defect fork 不吃额度这一点工具做对了）。
+
+**G6 — 风险生命周期在 frontier 上不可见。** 板面显示 captain owes pair_risk_close(r-4)，而工具要求先由 Driver mitigate 才允许 close（实测被拒：risk is OPEN, not MITIGATED）。建议 frontier 直接指出链条上的下一个执行者，或允许队长 mitigate，否则队长会反复撞同一面墙。
+
+**G7 — 一条正面、值得保留的设计。** 『文本层通过 ≠ 编译层通过』的处置本轮生效：挑战者主动把自己的『四点复核通过』降级为『文本层通过、编译层未验』，板面留痕（d-4f2543bf），而不是让一次未覆盖的复核变成共识。
