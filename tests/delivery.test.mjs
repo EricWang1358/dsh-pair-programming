@@ -180,8 +180,13 @@ export async function run(check) {
     const inside = deferred(), exitHost = deferred(); const hx = harness(root, async () => { inside.resolve(); await exitHost.promise; return 'ok'; });
     const fallback = hx.scheduler.kickMember(root, overlap.id, 'driver'); await entered(inside.promise);
     const direct = await deliverProtocolMessage(hx.ctx, hx.config, hx.caller, overlap, 'driver', encodeMessage('REJECT', { feedback: 'later correction' }), {});
+    check(direct.delivered === 'mailbox' && (await mailbox.readUnreadMailbox(state, overlap.id, 'driver')).length === 1, 'control mail appended during an in-flight fallback is durable before anything else runs');
     exitHost.resolve(); await fallback;
-    check(hx.calls.length === 1 && direct.delivered === 'mailbox' && (await mailbox.readUnreadMailbox(state, overlap.id, 'driver')).length === 1, 'direct notification coalesces with fallback in flight and preserves newly appended control mail');
+    // M16': the coalesced notification used to be dropped outright, which left
+    // this correction waiting for the next 120s sweep. It is now deferred to
+    // the end of the flight that swallowed it — preserved AND delivered.
+    check(hx.calls.length === 2 && hx.calls[1].text.includes('later correction'), 'direct notification coalesces with fallback in flight, and the control mail appended during it is delivered by the re-armed wake');
+    check(hx.calls.every(call => Buffer.byteLength(call.text, 'utf8') <= 16 * 1024), 'the re-armed wake stays inside the same delivery byte ceiling as the flight it follows');
 
     const failure = fixture('failure'); await createTeamDir(state, failure); await append(state, failure, 'driver', 'retry me');
     const hf = harness(root, async () => { throw new Error('DRAINING'); }); await hf.scheduler.kickMember(root, failure.id, 'driver');
@@ -271,12 +276,13 @@ export async function run(check) {
     const replacementEntered = await entered(newEntered.promise);
     check(replacementEntered, 'replacement enters delivery immediately while retired predecessor admission is hung');
     oldRelease.resolve(); await oldFlight;
+    check((await mailbox.readMailbox(state, generation.id, 'driver')).find(row => row.content === 'old leased message').readAt === undefined, 'retired admission never ACKs the old physical record into its successor');
     await append(state, generation, 'driver', 'while replacement hangs');
     const replacementDuplicate = hg.scheduler.kickMember(root, generation.id, 'driver');
     await new Promise(resolve => setImmediate(resolve));
     check(!replacementEntered || hg.calls.filter(row => row.childId === 'new-generation').length === 1, 'old flight completion cannot clear the replacement current flight');
     newRelease.resolve(); await Promise.all([newFlight, replacementDuplicate]);
-    check((await mailbox.readMailbox(state, generation.id, 'driver')).find(row => row.content === 'old leased message').readAt === undefined, 'retired admission never ACKs the old physical record into its successor');
+    check((await mailbox.readUnreadMailbox(state, generation.id, 'driver')).length === 0, 'the successor seat drains the record the retired flight could not ACK, on the re-armed wake instead of the next sweep');
 
     const turn = fixture('turn-generation'); turn.members[0].id = 'turn-driver'; await createTeamDir(state, turn);
     const turnEntered = deferred(), turnRelease = deferred(), idleDone = deferred();
