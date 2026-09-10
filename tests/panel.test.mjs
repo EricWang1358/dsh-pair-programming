@@ -20,6 +20,8 @@ export async function run(report) {
     board.tasks[3].status = 'completed';
     const changed = projectPairPanel(board);
     assert.equal(changed.counts.completed, 4); assert.equal(changed.counts.gateCurrent, 3); assert.equal(changed.counts.integrated, 3);
+    assert.equal(changed.progress.milestones[4],3,'completed status must not invent a gate');
+    assert.equal(changed.progress.milestones[3],3,'completed status must not invent a final review');
     board.tasks[0].subject += ' amended';
     assert.equal(projectPairPanel(board).tasks.rows[0].gate.current, false);
   });
@@ -52,6 +54,26 @@ export async function run(report) {
     assert.equal(panel.members[0].seatHistory[0].at,20);
     assert.equal(panel.members[1].replacements,null);
     assert.equal(JSON.stringify(panel).includes('private-session-id'),false);
+  });
+  await check('milestone progress shows accepted unfinished work without inflating completion', () => {
+    const board=demoBoard();board.tasks.forEach(t=>{t.status='in_progress';delete t.gatePassId;});board.protocol.gatePasses=[];
+    const first=projectPairPanel(board);
+    assert.equal(first.counts.completed,0);assert.ok(first.progress.percent>0 && first.progress.percent<100);
+    const score=first.progress.percent;
+    board.protocol.cycles.push({...board.protocol.cycles[0],id:'duplicate-accepted'});
+    assert.equal(projectPairPanel(board).progress.percent,score);
+    assert.equal(first.progress.eta.reason,'samples');
+    board.protocol.cycles.push({id:'rework',taskId:board.tasks[0].id,step:'GREEN',verify:{verdict:'reject'}});
+    assert.ok(projectPairPanel(board).progress.percent<score);
+    assert.equal(projectPairPanel(board).progress.eta.reason,'blocked');
+  });
+  await check('ETA uses observed team throughput without a dual Driver speed multiplier',()=>{
+    const board=demoBoard();
+    board.tasks.forEach(t=>{t.dependencies=[];});
+    const dual=projectPairPanel(board).progress.eta;
+    delete board.parallel;
+    const single=projectPairPanel(board).progress.eta;
+    assert.equal(dual.reason,'rough');assert.deepEqual(dual,single);assert.ok(dual.maxMinutes>=dual.minMinutes);
   });
   const fixture = await mountPanelFixture();
   try {

@@ -7,6 +7,11 @@ protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 
 ## [Unreleased]
 
+- Accept declared directories containing non-empty regular artifacts at the gate, preserving existing frozen cards and review evidence. Reject empty trees and workspace-escaping targets.
+- Ask for a user-approved local Git checkpoint before dual Driver startup in a non-Git or uncommitted repository; fail before team/member creation and never initialize silently.
+- Make fixed-disclosure residuals lossless-JSON safe in pair_status; expose Captain re-certification actions for completed tasks in RETRO without waiving independent review.
+- Show six-stage delivery progress alongside exact completion counts, intermediate timeline events, and a conservative historical-throughput time range once enough completed samples exist.
+
 - Show bounded, collapsed session replacement history per logical seat in the live panel. Persist successful replacement counts and reasons atomically; unknown legacy history remains explicitly unrecorded. This does not measure cache savings or archive host conversations.
 
 - Preserve replacement Driver workspace routing when retiring its predecessor, persist the new isolated composition for cold resume, and correct recovery instructions for unfinished cycles. Dual Driver seats continue to skip automatic cycle recycling.
