@@ -1,5 +1,5 @@
 /** Tool-handler behaviour through register-capture: member rollback and the raise budget. */
-import { mkdtemp, rm, writeFile, readFile, access } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readFile, access, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { retireSpawnedMembers, registerLifecycleTools } from '../lib/tools/lifecycle.js';
@@ -74,7 +74,7 @@ function stopHarness(root, { greenBuildOnStop = false, stateDir = 'stop-state' }
 }
 
 /** pair_start against a mock ctx; the failOnCall-th role refuses to spawn. */
-function startHarness(root, { failOnCall = 2, captainId = 'cap1', stateDir = 'start-state' } = {}) {
+function startHarness(root, { failOnCall = 2, captainId = 'cap1', stateDir = 'start-state', childPrefix = 'child-' } = {}) {
   const interrupts = []; const spawns = []; const starts = []; const defs = [];
   const schemas = [{ name: 'read' }, { name: 'write' }, { name: 'edit' }, { name: 'pair_start' }, { name: 'pair_stop' }, { name: 'pair_rotate' }, { name: 'pair_arbitrate' }];
   const ctx = {
@@ -91,13 +91,13 @@ function startHarness(root, { failOnCall = 2, captainId = 'cap1', stateDir = 'st
         starts.push(start);
         spawns.push(label);
         if (spawns.length === failOnCall) throw new Error('second role failed to spawn');
-        return { childId: `child-${spawns.length}` };
+        return { childId: `${childPrefix}${spawns.length}` };
       },
     },
   };
   registerLifecycleTools(ctx, { stateDir, memberProvider: 'pair', greenBuildOnStop: false }, { selections: { withPending: async (i, l, s, op) => op() }, scheduler: {} });
   const captain = { id: captainId, session: { header: { cwd: root }, append: () => {}, requestHeader: () => ({ config: { provider: 'p', model: 'm', reasoningEffort: 'high' } }) } };
-  return { interrupts, spawns, starts, defs, captain, stateRoot: join(root, stateDir) };
+  return { interrupts, spawns, starts, defs, captain, ctx, stateRoot: join(root, stateDir) };
 }
 
 function memberOf(id, name) {
@@ -267,13 +267,63 @@ export async function run(check) {
     check(ok.members.length === 2 && s1.spawns.length === 2 && s1.interrupts.length === 0, 'pair_start spawns both roles and interrupts nothing');
     check(s1.starts.every(start => start.request.agentOptions?.reasoningEffort === 'high'), 'member reasoning effort is persisted in alpha.5 continuable agentOptions');
     check(await exists(join(s1.stateRoot, 'a2-ok')), 'a successful team keeps its state dir');
+    const before=await readTeam(s1.stateRoot,'a2-ok');
+    before.tasks=[{id:'t-1',subject:'finished',status:'completed',dependencies:[],createdAt:1,updatedAt:1}];before.taskSeq=1;
+    before.protocol.cycles=[{id:'accepted',taskId:'t-1',step:'VERIFIED',verify:{verdict:'accept'}}];
+    before.protocol.phase='RETRO';await writeTeam(s1.stateRoot,before);
+    const boardStamp=gateStateFingerprint(before,'t-1');
+    const next=startHarness(root,{failOnCall:-1,captainId:'new-cap',childPrefix:'next-'});
+    const nextStart=next.defs.find(t=>t.name==='pair_start').execute;
+    const browse=await next.defs.find(t=>t.name==='pair_status').execute({list_runs:true},{agent:next.captain});
+    check(browse.runs.some(r=>r.team_id==='a2-ok'&&r.captain==='cap1'),'new conversation can discover a handoff without joining or waking it');
+    next.ctx.agents.get=()=>({status:'idle'});
+    check(await rejects(()=>nextStart({resume_team:'a2-ok',resume_from_captain:'cap1'},{agent:next.captain}),'PAIR_RESUME_LIVE'),'even loaded idle sessions must quiesce before cold handoff');
+    next.ctx.agents.get=()=>undefined;
+    check(await rejects(()=>nextStart({resume_team:'a2-ok',resume_from_captain:'wrong'},{agent:next.captain}),'PAIR_RESUME_STALE'),'handoff rejects a stale previous Captain identity');
+    const broken=startHarness(root,{captainId:'fail-cap',childPrefix:'failed-'});
+    const rawBefore=await readFile(join(s1.stateRoot,'a2-ok','team.json'),'utf8');
+    check(await rejects(()=>broken.defs.find(t=>t.name==='pair_start').execute({resume_team:'a2-ok',resume_from_captain:'cap1'},{agent:broken.captain}),'failed to spawn'),'partial handoff spawn fails without consuming the board');
+    check(await readFile(join(s1.stateRoot,'a2-ok','team.json'),'utf8')===rawBefore&&broken.interrupts.includes('failed-1'),'failed handoff preserves the exact board and retires its new orphan');
+    const adopted=await nextStart({resume_team:'a2-ok',resume_from_captain:'cap1'},{agent:next.captain});
+    const after=await readTeam(s1.stateRoot,'a2-ok');
+    check(adopted.resumed&&after.captainSessionId==='new-cap'&&after.protocol.phase==='RETRO','handoff transfers ownership without resetting the phase');
+    check(gateStateFingerprint(after,'t-1')===boardStamp&&after.tasks[0].status==='completed','handoff preserves accepted evidence and completed task gate inputs');
+    check(after.artifactNamespace===before.artifactNamespace&&after.members.every(m=>m.id.startsWith('next-')),'handoff preserves the run namespace but rebuilds seat identities');
+    check(await rejects(()=>s1.defs.find(t=>t.name==='pair_status').execute({}, {agent:s1.captain}),'do not belong'),'old Captain cannot mutate the adopted board through pair tools');
+
+    const blocked=startHarness(root,{failOnCall:-1,captainId:'other-cap',childPrefix:'other-'});
+    blocked.ctx.agents.get=id=>id==='new-cap'?{}:undefined;
+    check(await rejects(()=>blocked.defs.find(t=>t.name==='pair_start').execute({goal:'unrelated',name:'other',use_cases:USE_CASES},{agent:blocked.captain}),'PAIR_WORKSPACE_BUSY')&&blocked.spawns.length===0,'unrelated live teams cannot share a production checkout');
+    const duplicate=startHarness(root,{failOnCall:-1,captainId:'duplicate-cap',childPrefix:'next-'});
+    check(await rejects(()=>duplicate.defs.find(t=>t.name==='pair_start').execute({resume_team:'a2-ok',resume_from_captain:'new-cap'},{agent:duplicate.captain}),'reused')&&duplicate.interrupts.length===0,'invalid reused child identity never retires an existing seat');
+    const dual=startHarness(root,{failOnCall:-1,captainId:'dual-next',stateDir:'dual-resume'});
+    dual.captain.ctx={get:()=>undefined};dual.captain.options={provider:'p',model:'m'};dual.ctx.on=()=>{};
+    const creations=[];
+    dual.ctx.agents.create=async options=>{creations.push(options);return {agent:{id:options.sessionId},dispose:async()=>{}};};
+    const slots={driver:{path:join(root,'dual-driver')},driver2:{path:join(root,'dual-driver2')}};
+    for(const slot of Object.values(slots))await mkdir(slot.path);
+    const dualBoard=teamFixture({members:[memberOf('old-d1','driver'),{...memberOf('old-d2','driver2'),role:'driver'}],
+      parallel:{workspace:root,slots,pending:{}},tasks:[{id:'t-1',subject:'working',status:'in_progress',assignee:'driver',attemptId:'a-1',dependencies:[],createdAt:1,updatedAt:1}],
+      protocol:{...initialProtocolState(),phase:'ITERATING',cycles:[{id:'current',taskId:'t-1',step:'GREEN',owner:{memberId:'old-d1',attemptId:'a-1'}},{id:'accepted',taskId:'t-1',step:'VERIFIED',owner:{memberId:'old-d1',attemptId:'a-1'},verify:{verdict:'accept'}}]}});
+    await createTeamDir(dual.stateRoot,dualBoard);
+    const dualStart=dual.defs.find(t=>t.name==='pair_start').execute;
+    dualBoard.parallel.pending={tx:{}};await writeTeam(dual.stateRoot,dualBoard);
+    check(await rejects(()=>dualStart({resume_team:'t1',resume_from_captain:'cap1'},{agent:dual.captain}),'pending integration')&&creations.length===0,'handoff cannot hide an interrupted integration transaction');
+    dualBoard.parallel.pending={};await writeTeam(dual.stateRoot,dualBoard);
+    const race=await Promise.allSettled([dualStart({resume_team:'t1',resume_from_captain:'cap1'},{agent:dual.captain}),dualStart({resume_team:'t1',resume_from_captain:'cap1'},{agent:dual.captain})]);
+    const dualAfter=await readTeam(dual.stateRoot,'t1');
+    check(race.filter(r=>r.status==='fulfilled').length===1&&creations.length===2,'concurrent handoff requests create exactly one replacement pair');
+    check(creations[0].meta.cwd===slots.driver.path&&creations[1].meta.cwd===slots.driver2.path&&JSON.stringify(dualAfter.parallel)===JSON.stringify(dualBoard.parallel),'native isolated creation retains both reserved worktrees and integration state');
+    check(dualAfter.protocol.cycles[0].owner.memberId===dualAfter.members[0].id&&dualAfter.protocol.cycles[1].owner.memberId==='old-d1','handoff rebinds unfinished cycle ownership without rewriting accepted evidence');
+    await retireSpawnedMembers(dual.ctx,dual.captain,dual.stateRoot,dualAfter.members);
+
     const sm = startHarness(root, { failOnCall: -1, captainId: 'cap-solo', stateDir: 'solo-start' });
     const soloStarted = await sm.defs.find(x => x.name === 'pair_start').execute({ goal: 'g', mode: 'solo', name: 'explicit-solo', use_cases: USE_CASES }, { agent: sm.captain });
     check(soloStarted.mode === 'solo' && sm.spawns.length === 1 && sm.spawns[0].endsWith(':spec'), 'explicit mode=solo is reachable and spawns only the SPEC seat');
     const noScope = startHarness(root, { failOnCall: -1, captainId: 'cap-no-scope', stateDir: 'no-scope-start' });
     check(await rejects(() => noScope.defs.find(x => x.name === 'pair_start').execute({ goal: 'g', mode: 'solo', name: 'no-scope' }, { agent: noScope.captain }), 'missing required property "use_cases"'), 'pair_start refuses to lose the request before a team exists');
     // AC-A2-2..5: a later role failing rolls the earlier one back and rethrows.
-    const s2 = startHarness(root, { captainId: 'cap2' });
+    const s2 = startHarness(root, { captainId: 'cap2', stateDir:'rollback-state' });
     const startBad = s2.defs.find((x) => x.name === 'pair_start').execute;
     check(await rejects(() => startBad({ goal: 'g', mode: 'light', name: 'a2-fail', use_cases: USE_CASES }, { agent: s2.captain }), 'second role failed to spawn'), 'the spawn error propagates unchanged');
     check(JSON.stringify(s2.interrupts) === '["child-1"]', 'the already-spawned driver is interrupted exactly once');

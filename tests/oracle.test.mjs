@@ -19,6 +19,7 @@ import { withLock } from '../lib/state/lock.js';
 import { teamLockKey } from '../lib/state/layout.js';
 import { initialProtocolState } from '../lib/protocol/machine.js';
 import { gateStateFingerprint } from '../lib/protocol/gate.js';
+import { assertTaskOracleFiles, resolveTaskOracleFile } from '../lib/tools/oracle-exec.js';
 
 const GOOD_FORK = {
   readings: [
@@ -71,8 +72,21 @@ function harness(root, stateDir, cfg = {}) {
 const fails = (fn, needle) => fn().then(() => `no throw (expected ${needle})`, (e) => String(e?.message ?? e));
 
 export async function run(check) {
+  const runA={artifactNamespace:'run-a'},runB={artifactNamespace:'run-b'};
+  check(resolveTaskOracleFile(process.cwd(),'t-1','.pair-oracles/run-a/t-1/check.cjs',runA)!==resolveTaskOracleFile(process.cwd(),'t-1','.pair-oracles/run-b/t-1/check.cjs',runB),'same task ids in separate runs resolve to independent files');
+  for(const path of ['.pair-oracles/t-1/check.cjs','.pair-oracles/run-b/t-1/check.cjs','.pair-oracles/run-a/t-1/../../run-b/check.cjs']){
+    let rejected=false;try{resolveTaskOracleFile(process.cwd(),'t-1',path,runA);}catch{rejected=true;}check(rejected,'namespaced oracle rejects shared, foreign or escaping path '+path);
+  }
+  check(assertTaskOracleFiles('t-1',['.pair-oracles/t-1/legacy.cjs'],{})==='.pair-oracles/t-1','legacy frozen paths stay valid without migration');
+
   const root = await mkdtemp(join(tmpdir(), 'pair-oracle-'));
   try {
+    const scoped=harness(root,'scoped-state');
+    await createTeamDir(scoped.stateRoot,teamFixture({artifactNamespace:'run-a'}));
+    const scopedPath='.pair-oracles/run-a/t-1/accept.cjs';
+    await scoped.tool('pair_oracle_write')({task_id:'t-1',path:scopedPath,content:'process.exit(1);'},{agent:scoped.navigator});
+    check(await readFile(join(root,scopedPath),'utf8')==='process.exit(1);','real oracle writer uses the persisted run namespace');
+    check((await fails(()=>scoped.tool('pair_oracle_write')({task_id:'t-1',path:'.pair-oracles/run-b/t-1/accept.cjs',content:'other'},{agent:scoped.navigator}))).includes('run-a'),'real oracle writer refuses a different run namespace');
     const prepRoot = join(root, 'preparation'); await mkdir(prepRoot);
     const prep = harness(prepRoot, 'state');
     const prepBoard = teamFixture({ id: 'preparation', tasks: [taskOf({ oracle: { sha: 'current-seal' } }), taskOf({ id: 'future', status: 'pending', assignee: undefined })] });

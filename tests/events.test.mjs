@@ -53,6 +53,7 @@ export async function run(check) {
   // The dedupe set is module-level, so by the time this suite runs the real
   // vocabulary has already been logged once by earlier suites in this process.
   // Probe types nobody else uses isolate the logging contract from that.
+  logged.length = 0; // Ignore real vocabulary logs when this suite runs first.
   const probes = ['pair/__probe-alpha', 'pair/__probe-beta'];
   for (const type of probes) appendPairEvent(ctx, session, type, {});
   for (const type of probes) appendPairEvent(ctx, session, type, {});

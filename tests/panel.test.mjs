@@ -81,6 +81,19 @@ export async function run(report) {
   });
   const fixture = await mountPanelFixture();
   try {
+    await check('handoff preserves progress in both Captain views without exposing the board to outsiders', async()=>{
+      const original=structuredClone(fixture.board);
+      const before=await fixture.rpc('snapshot',{sessionId:'panel-captain'});
+      fixture.board.handoffs=[{from:'panel-captain',to:'new-captain',at:Date.now()}];fixture.board.captainSessionId='new-captain';
+      await writeTeam(fixture.root,fixture.board);
+      const old=await fixture.rpc('snapshot',{sessionId:'panel-captain'});
+      const ctx={sessions:{get:()=>({header:{cwd:fixture.workspace}})}};
+      const current=await readPanelSnapshot(ctx,fixture.config,{sessionId:'new-captain'});
+      assert.deepEqual(old.value.team.progress,before.value.team.progress);
+      assert.deepEqual(current.value.team.progress,before.value.team.progress);
+      assert.equal((await fixture.rpc('snapshot',{sessionId:'outsider'})).value.team,null);
+      fixture.board=original;await writeTeam(fixture.root,original);
+    });
     await check('real DSH SessionStore and authenticated HostConnectionService route return the canonical board', async () => {
       const response = await fixture.rpc('snapshot',{sessionId:'panel-captain'});
       assert.equal(response.ok,true);assert.equal(response.value.state,'ready');assert.equal(response.value.team.counts.total,8);

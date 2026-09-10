@@ -274,3 +274,20 @@ The plugin applies small increments, explicit product decisions and independent 
 ## License
 
 MIT.
+
+
+### Continuing a run in a new conversation
+
+After restarting DSH, open a conversation in the **same workspace** and ask to continue the existing Pair run. The Captain first discovers boards without spawning members:
+
+```js
+await tools.pair_status({ list_runs: true })
+await tools.pair_start({
+  resume_team: "<team_id from runs>",
+  resume_from_captain: "<captain from runs>"
+})
+```
+
+Omit new-team fields such as goal, use_cases and drivers. This explicit cold handoff replaces active seats while retaining the same board, task IDs, acceptance files, phase and isolated Driver worktrees. Accepted evidence is not rewritten; ordinary gate freshness checks still apply. Both Captain conversations can view progress, while only the new Captain owns the board. DONE/ABORTED archives cannot be reopened this way. Loaded predecessor sessions (including idle ones), missing worktrees and pending integration transactions require recovery before handoff; failed member creation leaves the original board intact.
+
+New runs use `.pair-oracles/<run UUID>/<task id>/` and prescribe `.pair-work/<run UUID>/` for scratch files. Read `artifact_root` and `scratch_root` from pair_start/pair_status instead of guessing paths. Legacy boards keep their frozen paths. This is artifact namespacing, not a filesystem sandbox: use separate working directories for unrelated projects running concurrently. Startup/handoff reject other loaded teams in the same checkout; coordination locks are process-local, so do not run multiple DSH hosts against one checkout. Old scratch files are not automatically deleted. Workspace retro lessons are carried only when explicitly requested with `inherit_lessons: true`; handoff keeps the existing board's lessons.

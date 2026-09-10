@@ -1,5 +1,15 @@
 # dsh-pair-programming
 
+### 重启后在新对话接续
+
+在同一工作区新开对话，明确要求接续原 Pair。Captain 先调用 `pair_status({list_runs:true})` 查找看板，再调用 `pair_start({resume_team:"原团队 ID",resume_from_captain:"查询返回的 captain"})`；不要同时传新目标、需求清单或 Driver 数量。
+
+接管重建成员会话，保留原看板、任务编号、验收文件、阶段和双 Driver 工作树。已签验收不被改写，凭证仍需通过正常的新鲜度检查。原 Captain 对话保留只读进度，新 Captain 接续工作。旧成员或 Captain 仍被宿主加载（即使空闲）、集成事务未恢复、工作树缺失时会拒绝接管；成员创建失败会清理新成员并保留原看板。终态归档不能通过此入口重开。
+
+新运行的验收目录为 `.pair-oracles/<运行 UUID>/<任务 ID>/`，临时文件应放在 `.pair-work/<运行 UUID>/`。以 `pair_start` / `pair_status` 返回的 `artifact_root`、`scratch_root` 为准。旧看板的冻结路径不搬动，也不自动删除历史文件。无关新项目默认不继承工作区复盘建议，需要时显式传 `inherit_lessons:true`。
+
+目录分区只隔离运行产物，不能隔离共享的业务源码。同一宿主的启动/接管会拒绝同一 checkout 中另一支已加载的团队；无关项目并行请使用独立工作目录。协调锁仅在当前进程内有效，不支持多个 DSH 宿主同时写同一 checkout。
+
 **一行 Agile，零红构建交付。**
 
 > AI 代理写代码像一个才华横溢却独来独往的黑客：快、自信、而且*没人看着*——没有评审、没有测试、没有门禁。`dsh-pair-programming` 把任意 [DeepSeek Harness](https://github.com/deepseek-ai) 会话变成一个**迷你敏捷团队**：每一行代码都必须经过提案评审、先失败的测试、和一道判定 DONE 的质量门禁。

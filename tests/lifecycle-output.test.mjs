@@ -109,9 +109,15 @@ export async function run(check) {
     const b = startHarness(root, 'out-b');
     await mkdir(join(root, 'out-b'), { recursive: true });
     await writeFile(lessonsFileOf(join(root, 'out-b')), JSON.stringify({ teamId: 't-prev', keep: ['k-1'], try: ['t-1'] }), 'utf8');
-    const okB = await b.start({ goal: 'g', mode: 'light', name: 'lo-b', use_cases: USE_CASES }, { agent: b.captain });
+    const okB = await b.start({ goal: 'g', mode: 'light', name: 'lo-b', use_cases: USE_CASES, inherit_lessons:true }, { agent: b.captain });
     check(isJsonValue(okB) === true, 'state B: with lessons.json — output passes the lossless-JSON gate');
     check(JSON.stringify(okB.carried_lessons) === '{"keep":["k-1"],"try":["t-1"]}', 'state B: carried_lessons is exactly the keep/try projection (teamId excluded)');
+    const fresh = startHarness(root, 'out-fresh');
+    await mkdir(join(root, 'out-fresh'), {recursive:true});
+    await writeFile(lessonsFileOf(join(root, 'out-fresh')), JSON.stringify({keep:['unrelated project'],try:[]}), 'utf8');
+    const freshResult=await fresh.start({goal:'different project',name:'fresh',use_cases:USE_CASES},{agent:fresh.captain});
+    check(freshResult.carried_lessons===null,'new project does not silently inherit workspace lessons');
+    check(freshResult.artifact_root!==okB.artifact_root,'new runs have distinct artifact roots even with identical task numbering');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

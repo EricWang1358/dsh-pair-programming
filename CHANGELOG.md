@@ -7,6 +7,14 @@ protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 
 ## [Unreleased]
 
+- Give new runs UUID-scoped oracle and scratch roots; preserve legacy frozen paths. Workspace lessons are opt-in to avoid unrelated-project carryover. Refuse a competing loaded team in the same checkout.
+- Add explicit cold Captain handoff through pair_start(resume_team, resume_from_captain) and read-only discovery through pair_status(list_runs=true). Preserve board identity, completed evidence, phase and dual Driver worktrees; rebind only unfinished cycle ownership. Roll back failed member creation, reject live predecessors/pending integrations, and retain read-only progress visibility in the old Captain conversation.
+
+- Fix the runtime panel returning HTTP 405 on DSH 0.1.5: register read-only endpoints on the authenticated shared /api Fetch carrier instead of the legacy channel whose WebServer access fails under Cordis service scoping. Retain legacy client fallback, distinguish connection/auth/read errors from an empty team, and exercise a real WebServer plus route disposal.
+
+- Restore /pair attachment admission on DSH 0.1.5-rc.1 with input.attachments while retaining the legacy images flag. Verify actual command execution and persisted image references against the native attachment store; reject malformed uploads before Captain receives a message.
+- Make the event logging regression test independent of suite ordering; retain the unknown-event persistence guard.
+
 - Accept declared directories containing non-empty regular artifacts at the gate, preserving existing frozen cards and review evidence. Reject empty trees and workspace-escaping targets.
 - Ask for a user-approved local Git checkpoint before dual Driver startup in a non-Git or uncommitted repository; fail before team/member creation and never initialize silently.
 - Make fixed-disclosure residuals lossless-JSON safe in pair_status; expose Captain re-certification actions for completed tasks in RETRO without waiving independent review.
