@@ -1,7 +1,7 @@
 # 功能工作流总表
 
-> 版本：0.13.2 ｜ 日期：2026-09-05 ｜ PROTOCOL_VERSION=5
-> 配套：[FRAGILITY.md](FRAGILITY.md)（架构脆弱点）、[LIFECYCLE.md](LIFECYCLE.md)（一个任务的完整时序）
+> 版本：0.14.1 ｜ 日期：2026-09-10 ｜ PROTOCOL_VERSION=8
+> 配套：[FRAGILITY.md](FRAGILITY.md)（架构脆弱点）、[LIFECYCLE.md](LIFECYCLE.md)（一个任务的完整时序）、[ENVIRONMENT-AND-VERDICTS.md](ENVIRONMENT-AND-VERDICTS.md)（判决分类 / 范围语义 / 环境输入 / 凭证新鲜度）
 >
 > 本表按 **Epic → User Story → Sub-feature** 三层展开插件的全部功能面。
 > 与代码冲突时以代码为准；本表回答的是"这条能力靠什么强制"，不是复述实现。
