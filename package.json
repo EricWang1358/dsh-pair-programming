@@ -43,7 +43,7 @@
       "patch": "./cordis.patch.yml"
     },
     "sdk": {
-      "testedCohort": "@deepseek-ai/dsh@0.1.5-rc.1 (cordis 4.0.2)",
+      "testedCohort": "@deepseek-ai/dsh@0.1.5-rc.2 (cordis 4.0.2)",
       "supportedDsh": ">=0.1.2-alpha <0.2",
       "note": "Beta+ gate: the plugin must start under this cohort. Bumping the DSH SDK requires re-running verify:startup and the real host-contract suite before re-enabling in any daily profile."
     },
