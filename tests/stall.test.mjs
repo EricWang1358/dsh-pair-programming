@@ -68,6 +68,29 @@ export async function run(check) {
   check(text.includes('board outranks'), 'C it tells the captain to re-check the canonical board before forwarding an old call');
   check(!text.includes('create_goal') && !goalLoopAdvice('st1').includes('create_goal'), 'C goal polling is removed from the liveness path');
 
+  /* ---- C2: the report names what is blocking, not just who is idle ----- */
+  //
+  // Measured: "[PAIR:STALL] … 299s without board progress" arrived twice while
+  // the Captain owed a structurally impossible pair_integrate and a ready,
+  // independent task sat unclaimed. The report named the idle seats and the
+  // captain's own obligation, so the only visible move was to re-read the same
+  // impossible call. A stall report that cannot say what is blocking is a
+  // heartbeat with a timestamp.
+  const cause = {
+    who: 'captain', tool: 'pair_integrate', ref: 't-1',
+    blocking: ['driver2 still owns the in-flight t-1', 'the reviewed candidate of t-1 has not been integrated'],
+    blocked_work: [{ taskId: 't-4', member: 'driver', reason: 'Task scope conflicts with in-flight t-1' }],
+    suggested_action: "execute the integration, or pair_yield(tool='pair_integrate', task_id='t-1') when you cannot",
+  };
+  const withCause = stallDiagnosis(team(), { ...quiet, unread: { driver: 0, navigator: 4 }, obligation: owed, blockingCause: cause });
+  check(withCause.blockingCause === cause, 'C2 the stall report carries the computed blocking cause instead of only "everyone is idle"');
+  const causeText = stallEscalation('st1', withCause, '[PAIR:NEXT] navigator owes pair_verify(cycle_id=c1)');
+  check(causeText.includes('blocking cause') && causeText.includes('pair_integrate') && causeText.includes('t-1'), 'C2 the escalation names which obligation is blocking');
+  check(causeText.includes('t-4') && causeText.includes('scope'), 'C2 ... and the ready work that is stuck behind it, with the rule refusing it');
+  check(causeText.includes('pair_yield'), 'C2 ... and the action the captain can actually take about it');
+  const noCause = stallEscalation('st1', stallDiagnosis(team(), { ...quiet, unread: { driver: 0, navigator: 4 }, obligation: owed }), '[PAIR:NEXT] x');
+  check(!noCause.includes('blocking cause'), 'C2 a board with no computed cause does not invent one');
+
   /* ---- D: the honest boundary ----------------------------------------- */
   const advice = goalLoopAdvice('st1');
   check(advice.includes('board-event driven') && advice.includes('idle captain'), 'D pair_start states that real board events re-enter the captain');

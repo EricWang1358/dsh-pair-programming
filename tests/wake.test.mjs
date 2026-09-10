@@ -12,6 +12,8 @@ import { installPairScheduler } from '../lib/runtime/scheduler.js';
 import { registerFlowTools } from '../lib/tools/flow.js';
 import { registerTaskTools } from '../lib/tools/task.js';
 import { createTeamDir, readTeam } from '../lib/state/store.js';
+import { appendMailbox, createMessage, readMailbox, readUnreadMailbox } from '../lib/state/mailbox.js';
+import { gateStateFingerprint } from '../lib/protocol/gate.js';
 import { initialProtocolState, openCycle } from '../lib/protocol/machine.js';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -314,6 +316,84 @@ export async function run(check) {
     tele = await readTeam(teleRoot, 'tele');
     check(tele.members[0].lastTurn?.endReason === 'error' && tele.members[0].lastTurn.lastError.includes('oracle crashed'), 'H member errors persist a captain-visible last-error summary');
     check(captainWakes.length === 1, 'H a member error re-enters an idle captain once');
+
+    // K: M16' — the LOST wake edge.
+    //
+    // The recorded failure: "a member sat idle with pending=1 in its mailbox
+    // and was never woken" (the O3 stall). The review of that report warns
+    // against recording "a board write is the only wake source" as fact — the
+    // runtime already kicks on delivery, on the idle edge and on every
+    // heartbeat. The edge that was missing is not a missing mechanism, it is a
+    // DROPPED one: `coalesceDelivery` returns `{busy:true}` the moment a second
+    // request for the same seat arrives while the first is still in flight, and
+    // every caller throws that return value away. The request is neither
+    // deferred nor retried, so the durable mail stays on the board and nothing
+    // re-reads it.
+    //
+    // WHICH EVENT SHOULD HAVE WOKEN WHOM: `kickMember(k1, driver)` — the
+    // recovery kick of a durable delivery to an idle seat — arrived while an
+    // earlier kick for the SAME seat was mid-flight, and was discarded instead
+    // of being re-armed when that flight ended.
+    const kRoot = join(root, 'k-state');
+    await createTeamDir(kRoot, teamFixture({ id: 'k1', tasks: [] }));
+    await appendMailbox(kRoot, 'k1', 'driver', createMessage('navigator', 'driver', '[PAIR:GO] the frozen oracle is RED — make it pass minimally'));
+    let releaseWake;
+    const wakeGate = new Promise((resolve) => { releaseWake = resolve; });
+    let wakes = 0;
+    const kctx = {
+      logger: { warn: () => {}, debug: () => {} }, on: () => {},
+      agents: { get: (id) => (id === 'cap1' ? { id: 'cap1', session: { append: () => {} } } : undefined) },
+      subagents: { sendMessage: async () => { wakes += 1; if (wakes === 1) { await wakeGate; throw new Error('the host refused the wake'); } return 'm-1'; } },
+    };
+    const ksched = installPairScheduler(kctx, { stateDir: 'k-state', heartbeatMs: 0 });
+    const inFlightWake = ksched.kickMember(root, 'k1', 'driver');
+    await waitFor(() => wakes === 1, 'the first wake to reach the host');
+    await ksched.kickMember(root, 'k1', 'driver'); // the wake that arrives while the first is in flight
+    // The board the report recorded: the seat is idle, one durable delivery is
+    // unread, and its wake was asked for while an earlier one still held the
+    // seat. Before this fix that state was terminal — nothing ever moved it.
+    const heldSeat = (await readTeam(kRoot, 'k1')).members.find(member => member.name === 'driver');
+    const heldMail = await readMailbox(kRoot, 'k1', 'driver');
+    check(wakes === 1 && heldSeat.status === 'idle' && heldMail.length === 1
+      && heldMail[0].readAt === undefined && heldMail[0].deliveryClaimId !== undefined,
+      'K the M16′ board: seat idle with one durable delivery leased to a wake the host is about to refuse');
+    releaseWake();
+    await inFlightWake.catch(() => undefined);
+    // The re-run belongs to the same flight, so no clock is involved here.
+    check(wakes === 2, 'K the wake swallowed by the in-flight kick is re-run when that flight ends, never discarded (M16′ regression)');
+    check((await readUnreadMailbox(kRoot, 'k1', 'driver')).length === 0, 'K and the re-run actually hands over the mail it was asked to deliver');
+    await ksched.kickMember(root, 'k1', 'driver');
+    await ksched.kickMember(root, 'k1', 'driver');
+    await settle();
+    check(wakes === 2, 'K idempotence: once the board revision is served, asking again produces no second model turn');
+
+    // K2: a wake is a message, not a protocol event. It must not write board
+    // state, create a ruling, or move the acceptance fingerprint — a nudge that
+    // could invalidate a gate credential would be worse than the silence it
+    // replaces.
+    const k2Root = join(root, 'k2-state');
+    const owing2 = teamFixture({ id: 'n2' });
+    const k2Cycle = openCycle(owing2.protocol, 't-1', { tddMode: 'enforce' });
+    k2Cycle.step = 'GREEN';
+    k2Cycle.oracleSha = 'd'.repeat(64);
+    owing2.tasks[0].oracle = { sha: k2Cycle.oracleSha };
+    await createTeamDir(k2Root, owing2);
+    const nudges2 = [];
+    const k2ctx = {
+      logger: { warn: () => {}, debug: () => {} }, on: () => {},
+      agents: { get: (id) => (id === 'cap1' ? { id: 'cap1', session: { append: () => {} } } : undefined) },
+      subagents: { sendMessage: async (_sender, targetId) => { nudges2.push(targetId); return 'm-1'; } },
+    };
+    const k2sched = installPairScheduler(k2ctx, { stateDir: 'k2-state', heartbeatMs: 0 });
+    const k2Before = await readTeam(k2Root, 'n2');
+    await k2sched.kickMember(root, 'n2', 'navigator');
+    const k2Nudged = await readTeam(k2Root, 'n2');
+    await k2sched.kickMember(root, 'n2', 'navigator');
+    check(nudges2.length === 1, 'K2 two sweeps at the same board revision produce one model turn, not two');
+    check(k2Nudged.updatedAt === k2Before.updatedAt && (k2Nudged.protocol.decisions ?? []).length === (k2Before.protocol.decisions ?? []).length,
+      'K2 a wake writes no board state and creates no ruling — it is not how a captain wakes a team');
+    check(gateStateFingerprint(k2Nudged, 't-1') === gateStateFingerprint(k2Before, 't-1'),
+      'K2 and it leaves the acceptance fingerprint untouched');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
