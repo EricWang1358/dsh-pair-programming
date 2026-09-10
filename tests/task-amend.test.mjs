@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { registerTaskTools } from '../lib/tools/task.js';
 import { createTeamDir, readTeam, writeTeam } from '../lib/state/store.js';
 import { initialProtocolState } from '../lib/protocol/machine.js';
+import { gateStateFingerprint } from '../lib/protocol/gate.js';
+import { allowedWriteSet, withinScope } from '../lib/protocol/scope.js';
 
 const fails = (fn) => fn().then(() => '', error => String(error?.message ?? error));
 const member = { id: 'driver-id', name: 'driver', role: 'driver', status: 'working', joinedAt: 1 };
@@ -80,6 +82,45 @@ export async function run(check) {
     await writeTeam(h.stateRoot, cyclic);
     const cycle = await fails(() => h.tool('pair_task_amend')({ task_id: 't-1', reason: 'bad graph', dependencies: ['t-2'] }, { agent: h.captain }));
     check(cycle.includes('creates a cycle'), 'task amend preserves the dependency DAG');
+
+    /* ---- scope extension (B4) ------------------------------------------- */
+    // Measured: pair_task_amend had no write_paths parameter at all, so the
+    // NORMAL event "implementation discovered it needs a regression leg" could
+    // only be worked around by moving files out of the repository, or by
+    // opening a second task — which was unclaimable in the deadlock it caused.
+    const scoping = await readTeam(h.stateRoot, 'amend');
+    scoping.parallel = { slots: {}, stateRelative: '.pair-programming' };
+    scoping.tasks[0].scope = { writes: ['src/a.mjs'], reads: [], resources: [], declared: true };
+    scoping.tasks[0].gatePassId = 'pass-old';
+    scoping.protocol.gatePasses = [{ id: 'pass-old', taskId: 't-1', binding: {} }];
+    await writeTeam(h.stateRoot, scoping);
+    const fingerprintBefore = gateStateFingerprint(await readTeam(h.stateRoot, 'amend'), 't-1');
+
+    const attempt = (fn) => fn().then((value) => ({ value }), (error) => ({ error: String(error && error.message ? error.message : error) }));
+    const extended = await attempt(() => h.tool('pair_task_amend')({
+      task_id: 't-1', reason: 'the regression leg needs its own directory', write_paths: ['src/a.mjs', 'scratch/regression'],
+    }, { agent: h.captain }));
+    const extendedBoard = await readTeam(h.stateRoot, 'amend');
+    const extendedTask = extendedBoard.tasks[0];
+    check(extended.value && extended.value.changed_fields.includes('scope') && extended.value.scope_writes.includes('scratch/regression'), 'write_paths can be extended before the first cycle, and the tool reports the resulting scope' + (extended.error ? ': ' + extended.error : ''));
+    check(extendedTask.scope.writes.length === 2 && extendedTask.scope.declared === true, 'the extension lands on the card as a declared write scope');
+    const record = extendedTask.amendments.at(-1);
+    check(record.changedFields.includes('scope') && record.scopeWrites.includes('scratch/regression') && record.reason.includes('regression leg'), 'the extension is explicit and visible in the audit trail: reason + what changed + who reported it');
+    check(gateStateFingerprint(extendedBoard, 't-1') !== fingerprintBefore, 'and it moves the task gate fingerprint, which is what makes a credential taken against the old scope stale');
+    check(extendedTask.gatePassId === undefined, 'the credential the card was holding is dropped with it');
+    check(withinScope(allowedWriteSet(extendedTask, extendedBoard.protocol.cycles).allowed, 'scratch/regression/new-leg.mjs'), 'and the declared directory now admits a new file inside it without a second declaration');
+    const noop = await fails(() => h.tool('pair_task_amend')({ task_id: 't-1', reason: 'second thoughts', write_paths: ['src/a.mjs', 'scratch/regression'] }, { agent: h.captain }));
+    check(noop.includes('no semantic change'), 'a scope amendment that changes nothing is still refused as audit noise');
+
+    const contested = await readTeam(h.stateRoot, 'amend');
+    contested.tasks[1].status = 'in_progress';
+    contested.tasks[1].assignee = 'driver';
+    contested.tasks[1].scope = { writes: ['src/b.mjs'], reads: [], resources: [], declared: true };
+    await writeTeam(h.stateRoot, contested);
+    const overlap = await fails(() => h.tool('pair_task_amend')({ task_id: 't-1', reason: 'widen to the whole source tree', write_paths: ['src'] }, { agent: h.captain }));
+    check(overlap.includes('SCOPE_CONFLICT') && overlap.includes('t-2'), 'an extension that overlaps another Driver\'s in-flight scope is refused before it can be written, and names the task it collides with');
+    const disjoint = await attempt(() => h.tool('pair_task_amend')({ task_id: 't-1', reason: 'a second, non-overlapping leg directory', write_paths: ['src/a.mjs', 'scratch/regression', 'scratch/legs'] }, { agent: h.captain }));
+    check(disjoint.value && disjoint.value.scope_writes.includes('scratch/legs'), 'while a non-overlapping extension goes through' + (disjoint.error ? ': ' + disjoint.error : ''));
 
     const started = await readTeam(h.stateRoot, 'amend');
     started.protocol.cycles.push({ id: 'c-1', taskId: 't-1', step: 'GO', openedAt: 2 });
