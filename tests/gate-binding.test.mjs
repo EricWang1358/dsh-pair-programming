@@ -21,7 +21,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { gateStateFingerprint, reviewStateFingerprint } from '../lib/protocol/gate.js';
+import { gateStateFingerprint, gateStateBreakdown, gateStateIndex, gateBindingDiff, reviewStateFingerprint } from '../lib/protocol/gate.js';
 import { initialProtocolState } from '../lib/protocol/machine.js';
 import { taskDesignContext } from '../lib/protocol/design.js';
 import { registerArbitrateTools } from '../lib/tools/arbitrate.js';
@@ -133,6 +133,31 @@ export async function run(check) {
   // running session wakes up stale — the very failure this matrix fixes.
   check(gateStateFingerprint(credentialBoard(), 't-1') === 'd62628b00ed017e562d0f073e08a53a0ee09c00ac597d81094ca747d9b6b84dd',
     'a board carrying only pre-rule records digests exactly as it did before the matrix (no live credential is invalidated by the upgrade)');
+
+  /* ---------------------------------------------------------------------- */
+  /* #16: the two exports a refusal is built from.                           */
+  /* ---------------------------------------------------------------------- */
+  const graded = credentialBoard();
+  const breakdown = gateStateBreakdown(graded, 't-1');
+  check(Object.keys(breakdown).sort().join() === 'cycles,decisions,design,risks,task'
+    && Object.values(breakdown).every(value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)),
+  'gateStateBreakdown names every judged input and digests each one');
+  const bindingOf = board => ({ breakdown, breakdownIndex: gateStateIndex(graded, 't-1') });
+  check(gateBindingDiff(graded, 't-1', bindingOf(graded)).length === 0
+    && gateBindingDiff(graded, 't-1', {}).length === 0 && gateBindingDiff(graded, 't-1', undefined).length === 0,
+  'a credential that recorded nothing, or whose board did not move, yields no invented diff line');
+  const drifted = credentialBoard();
+  drifted.protocol.decisions = [{ id: 'd-1b044190', taskId: 't-1', conflictRef: 'plan t-1', decision: 'x', rationale: 'r', at: 7 }];
+  check(JSON.stringify(gateBindingDiff(drifted, 't-1', bindingOf(graded))) === '["decisions: added d-1b044190"]',
+    'only one ruling was added, and the diff names that ruling id');
+  const recarded = credentialBoard();
+  recarded.tasks[0].story.intent = 'change the plugin differently';
+  recarded.protocol.cycles.push({ id: 'c-t-1-2-2', taskId: 't-1', step: 'PROPOSED', openedAt: 9 });
+  recarded.protocol.risks = [{ id: 'r-leak', severity: 'P1', status: 'OPEN', scenario: 's', openedAt: 9 }];
+  const lines = gateBindingDiff(recarded, 't-1', bindingOf(graded));
+  check(lines.includes('task: field "story.intent" changed') && lines.includes('cycles: added c-t-1-2-2@PROPOSED')
+    && lines.includes('risks: added r-leak(P1)'),
+  'a contract change, a new cycle and a new blocker are each named with their id');
 
   /* ---------------------------------------------------------------------- */
   /* The measured loop, end to end: a board-mandated ruling must not negate  */
