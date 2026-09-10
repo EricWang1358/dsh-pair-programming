@@ -47,6 +47,49 @@ export async function run(check) {
     check(okA.team_id === 'lo-a' && a.spawns.length === 2, 'state A: pair_start succeeds with 2 spawns and the right team id');
     check(isJsonValue(okA) === true, 'state A: no lessons.json — output passes the lossless-JSON gate (no undefined carried_lessons)');
 
+    // C3 (#18): the status projection must print the two contracts a team is
+    // judged by, from the modules that decide them — the effective write scope
+    // (protocol/scope.js, the one allowed-write-set shared by proposal, guard and
+    // integration) and the oracle's declared exit-code mapping. Both were
+    // previously reconstructible only by reading the plugin source, and the
+    // three-layer scope divergence was measured (B3).
+    const c3Board = await readTeam(join(root, 'out-a'), okA.team_id);
+    c3Board.tasks.push({
+      id: 't-c3', subject: 'status projection', status: 'pending', dependencies: [], createdAt: 1, updatedAt: 2,
+      scope: { declared: true, writes: ['src', 'docs'], reads: [], resources: [] },
+      oracle: { files: ['.pair-oracles/t-c3/a.mjs'], cmd: 'node .pair-oracles/t-c3/a.mjs', sha: 'x', redExit: 1, divergences: ['a hidden test could read the second sentence instead of the first'], instrumentExitCodes: [2], caseRefs: ['UC-1.AC-1'] },
+    });
+    await writeTeam(join(root, 'out-a'), c3Board);
+    const c3 = await a.status({}, { agent: a.captain });
+    const c3Row = (c3.effective_scope ?? []).find(row => row.task_id === 't-c3');
+    check(c3Row?.source === 'scope.writes' && c3Row.writes.includes('src') && c3Row.writes.includes('.pair-oracles/t-c3/a.mjs'),
+      'C3: effective_scope comes from the shared allowed-write-set (declared envelope + sealed oracle artifacts)');
+    check(c3.oracle_exit_semantics?.[0]?.exit_semantics?.['2']?.startsWith('instrument') === true
+      && c3.oracle_exit_semantics[0].exit_semantics['0'] === 'success',
+      'C3: the oracle exit-code contract is printed rather than reconstructed (2 = instrument, 0 = success)');
+    check(Array.isArray(c3.yielded_obligations) && c3.yielded_obligations.length === 0
+      && (c3.blocking_cause === null || typeof c3.blocking_cause?.suggested_action === 'string'),
+      'C3: yielded obligations are an explicit list and blocking_cause is either a named cause or an explicit null, never undefined');
+    check(c3.summary.includes('Effective scope (what may be written') && c3.summary.includes('Blocking cause:'),
+      'C3: both projections also reach the summary a captain actually reads');
+    check(isJsonValue(c3), 'C3: the enriched status still passes the lossless-JSON validator');
+
+    // The planning budget counts DISPUTES. A ruling that only discharged a
+    // declared disclosure is the board's own paperwork: charging it would let the
+    // board block the filing it demands (measured: five refusals of
+    // "used 2 of 2 planning arbitrations").
+    const { planningArbitrationsUsed } = await import('../lib/protocol/machine.js');
+    const budgetBoard = { cycles: [], decisions: [
+      { id: 'd-dispute', taskId: 't-1', rationale: 'r', at: 1 },
+      { id: 'd-book', taskId: 't-1', closesDisclosure: 'oracle:t-1:seal:non-gating', disposition: 'fixed', billing: 'bookkeeping', at: 2 },
+      { id: 'd-both', taskId: 't-1', closesDisclosure: 'oracle:t-1:seal:non-gating', disposition: 'fixed', billing: 'dispute', at: 3 },
+    ] };
+    const used = planningArbitrationsUsed(budgetBoard, 't-1');
+    check(used.count === 2 && used.decided.includes('d-dispute') && used.decided.includes('d-both') && !used.decided.includes('d-book'),
+      'a bookkeeping ruling is not charged to the task whose gap it closed, while a ruling that is also a dispute still is');
+    check(planningArbitrationsUsed({ cycles: [], decisions: [{ ...budgetBoard.decisions[1], billing: undefined }] }, 't-1').count === 1,
+      'and a ruling that cannot say what it is stays counted: a silent record is not assumed free');
+
     const fixedBoard = await readTeam(join(root, 'out-a'), okA.team_id);
     fixedBoard.protocol.decisions.push({ id:'fixed-example', disposition:'fixed', closesDisclosure:'d-1' });
     await writeTeam(join(root,'out-a'),fixedBoard);
@@ -104,6 +147,8 @@ export async function run(check) {
     } catch (error) {
       st3Error = error;
     }
+    check(st3?.blocking_cause === null && Array.isArray(st3?.yielded_obligations) && st3.yielded_obligations.length === 0,
+      'C3: on a terminal board nothing is owed, so blocking_cause is an explicit null rather than an absent key');
     check(st3 !== undefined && st3.phase === 'ABORTED' && st3.summary.includes('Team "lo-a" ('), `state A3: after stopping lo-a2, pair_status falls back to the first terminal archive (lo-a, ABORTED phase — tool-level audit face)${st3Error ? ` — got: ${st3Error.message}` : ''}`);
     // State B: lessons.json present — same gate, and only the keep/try projection is carried.
     const b = startHarness(root, 'out-b');

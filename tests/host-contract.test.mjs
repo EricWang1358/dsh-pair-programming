@@ -72,7 +72,7 @@ export async function run(check) {
   /* ---- tool schemas the host actually accepted -------------------------- */
   const schemas = ctx.tools.schemas();
   const pairTools = schemas.filter(schema => schema.name.startsWith('pair_'));
-  check(pairTools.length === 26 && ['pair_integrate', 'pair_backlog', 'pair_repair_verify_plan'].every(name => pairTools.some(tool => tool.name === name)), 'all 26 pair_* tools including integration, product backlog and command recovery are accepted by the real registry');
+  check(pairTools.length === 27 && ['pair_integrate', 'pair_backlog', 'pair_repair_verify_plan', 'pair_yield'].every(name => pairTools.some(tool => tool.name === name)), 'all 27 pair_* tools including integration, product backlog, command recovery and the captain yield are accepted by the real registry');
   check(pairTools.every(schema => typeof schema.description === 'string' && schema.description.length > 0), 'each carries a description the host kept');
   const badParams = pairTools.filter(schema => schema.parameters !== undefined && schema.parameters.type !== 'object');
   check(badParams.length === 0, 'and none declares a non-object parameter envelope');

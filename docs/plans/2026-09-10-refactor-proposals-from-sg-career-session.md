@@ -1,6 +1,21 @@
 # 重构建议：来自 SG-career 双驱动实测会话（2026-09-10）
 
-> **执行状态：暂停实施与发布（2026-09-10，用户最新指令）。** 本文是后续工作的统一入口，包含 SG-career 原始现场记录、当前已落地代码、待验收修复、GitHub 发布步骤以及 v0.15.0 设计。当前只整合计划，不继续改实现、不提交、不推送、不发布。
+> **执行状态：已恢复开工（2026-09-10，用户指令「按顺序提 issue，然后完成修复 + PR + merge」）。** 本文仍是统一入口。A–E 的现场证据与提案一律按各自的“复核注记”口径执行；F–I 为执行与发布口径。
+>
+> **工单总表（GitHub `EricWang1358/dsh-pair-programming`，按优先级顺序）**：
+>
+> | 项 | issue | 状态 | 项 | issue | 状态 |
+> |---|---|---|---|---|---|
+> | A1 | #5 | ✅ 已核对并关闭（残余转 #21） | B4 | #12 | 修复中 |
+> | A2 | #6 | 修复中 | B2 | #13 | 修复中 |
+> | A3 | #7 | 修复中 | B6 | #14 | 修复中 |
+> | B1 | #8 | 修复中 | B8 | #15 | 修复中 |
+> | B7 | #9 | 修复中 | C1 | #16 | 修复中 |
+> | B5 | #10 | 修复中 | C2 | #17 | 待文档批次 |
+> | B3 | #11 | 修复中 | C3 | #18 | 待集成批次 |
+> | D2 | #20 | ✅ 已实测并关闭（结论并入 A3） | D1 | #19 | 待真机冷恢复实测（本轮无法执行） |
+>
+> **核对/实测副产**：A1 的核对结论（枚举面 `ctx.tools.schemas()` 是全局视图、校验面 `restrict()` 走 `restrictableNames`）见 #5 评论，残余的 preset 平面 fail-open 登记为 #21；D2 的接线矩阵见 #20 评论，其中 `git worktree remove --force` **会穿透 junction 删除源目录内容**（实测静默、退出码 0）已升格为 A3 的硬性实现约束：种入只复制常规文件、跳过一切 link/junction。
 >
 > **读法**：A–E 保留原始会话的证据与提案，不能把其中的因果判断、优先级或 `[patched locally]` 当成已验证的通用结论。下方新增的“复核注记”及 F–I 为后续执行口径；行号来自现场，执行时按函数名定位。单项目观测不等于全宿主结论。
 >
@@ -86,6 +101,9 @@ function applyDelegatedPolicies(childCtx, policies) {
 2. **披露裁决不参与指纹**：披露是"必须被裁决"的记账项，把 `decision.closesDisclosure` 命中的条目从 fingerprint 里排除（或裁决后自动重绑该 cycle 的 binding）。
 3. **提供显式重绑**：`pair_verify(cycle, stage='rebind')` 或在 `pair_status.gate_credentials` 里给 `refresh_hint`，让"候选未变、只有板面记账变了"这种情况不必开新 cycle。
 **证据**：本会话 `gateFails=2`；`c-t-1-2-2 → c-t-1-3-3 → c-t-1-4-4 → c-t-1-5-5 → c-t-1-6-6` 中最后三个 cycle 无产品改动。
+**同日两次追加实测（决定了修复的优先级）**：
+- **"同候选重绑"这条路被工具关闭**：在 `c-t-4-1-1` 拿到 final ACCEPT、之后又落了一条披露裁决的情况下，重跑 `pair_verify(cycle_id=c-t-4-1-1, stage='final')` 返回 `cycle is already completed; its final verdict is immutable`。⇒ 一个已有 final verdict 的 cycle **无法**重新验证，绑定只能靠**新 cycle** 前移；被拒调用本身不留产品判决、不动板面（代价就是一次调用）。
+- **"披露裁决落在 ACCEPT 之后"确实会作废绑定**（t-4 上重现）：`:beyond` 裁决之后 driver 的 `pair_gate_check(t-4)` 得到 GATE_STALE，于是开出 no-op refresh cycle `c-t-4-2-2`。⇒ 在现规则下，**每一个被接受的特性 cycle 都要再付一个 refresh cycle**（t-1 付了 3 次，t-4 正在付第 1 次）。这把上面第 2、3 条建议从"优化"升级为"记在关键路径上的税"：只要 `beyond_request` 必填（它的价值见 E 节）与"ACCEPT 后任何板面写入都作废指纹"同时成立，这笔税就不可避免。
 
 ### B7 — "仪器失败"只是约定，不是一等公民 【P0】
 **复核注记（2026-09-10）**：`exit 2` 不是所有测试工具通用的“环境失败”。不能全局把 2 变成不计失败。应给每个冻结的执行契约声明退出码映射/结构化结果协议，保留普通命令非零失败的默认语义；进程创建失败、测试基础设施失败、断言失败、取消和超时分开。分类在 oracle freeze / verify / gate / integrate / stop 共用。脚本输出中出现 ENOENT 不足以证明解释器启动失败。
