@@ -73,6 +73,11 @@ whose creation context does not expose the `agent` service: the captain's delega
 policy reaches the child through whichever session is reachable, applied exactly once
 (both paths are mutation-probed).
 
+**Tested cohort.** The full suite, `verify:startup` and the real host-contract
+suite all ran against **@deepseek-ai/dsh@0.1.5-rc.2** (cordis 4.0.2); the cohort
+claim in `package.json` names it, so the drift check that caught the stale claim is
+green again.
+
 Also: `pair_status` prints yielded obligations and the blocking cause; the planning
 budget counter and its refusal share one predicate; `pair_task_update` names which gate
 input moved. Not delivered here, and tracked: the debt-key mail-volume reduction
