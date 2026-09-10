@@ -200,7 +200,7 @@ export async function run(check) {
     if (frozen) {
       const cycle = openCycle(protocol, 't-1', { tddMode: 'enforce', oracleSha: sha });
       Object.assign(cycle, { step: 'GREEN', owner: { memberId: 'drv', assignee: 'driver', attemptId: 'attempt-1' },
-        proposal: { files: [oracleFile], verify_plan: oracleCmd }, review: { verdict: 'go', auto: true, at: 2 },
+        proposal: { files: [oracleFile], verify_plan: oracleCmd, instrumentExitCodes: [2] }, review: { verdict: 'go', auto: true, at: 2 },
         red: { evidence: ['baseline red'], at: 1 }, green: { evidence: ['green'], at: 3 },
         report: { diff_summary: 'repair', test_results: 'green', at: 3 } });
       task.oracle = { sha, files: [oracleFile], cmd: oracleCmd, frozenAt: 1, forks: 1, caseRefs: [], instrumentExitCodes: [2] };
@@ -244,6 +244,23 @@ export async function run(check) {
     check(misdeclared.includes('not redefinable'), 'a declaration that would make success mean "no verdict" is refused at the freeze');
   } finally {
     await freezing.cleanup();
+  }
+
+  // The checkpoint path carries the same declaration on the PROPOSAL, because
+  // a checkpoint runs the cycle's own verify_plan rather than the frozen
+  // oracle. Measured failure this closes: a checkpoint whose command could not
+  // reach its fixture was recorded as checkpoint_red against the Driver's code.
+  const checkpointing = await toolFixture({ frozen: true });
+  try {
+    const refused = await fails(() => checkpointing.call('pair_verify', { cycle_id: checkpointing.cycleId, stage: 'checkpoint', beyond_request: 'nothing', preexisting_at_risk: 'nothing' }));
+    check(refused.includes('VERIFICATION_INFRASTRUCTURE') && refused.includes('No product verdict'), 'a checkpoint whose declared instrument exit occurs is refused instead of becoming checkpoint_red');
+    const afterRefusal = await checkpointing.board();
+    check(afterRefusal.protocol.cycles[0].verify === undefined && afterRefusal.protocol.stats.reject === 0, 'and it charges no rejection for a repair that was never run');
+    await checkpointing.edit((fresh) => { delete fresh.protocol.cycles[0].proposal.instrumentExitCodes; });
+    const judged = await checkpointing.call('pair_verify', { cycle_id: checkpointing.cycleId, stage: 'checkpoint', beyond_request: 'nothing', preexisting_at_risk: 'nothing' });
+    check(judged.verdict === 'reject' && judged.category === 'checkpoint_red', 'while the same undeclared exit still fails the checkpoint as a predeclared plan that does not pass');
+  } finally {
+    await checkpointing.cleanup();
   }
 
   const verifying = await toolFixture({ frozen: true });
