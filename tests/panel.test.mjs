@@ -2,9 +2,13 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { demoBoard, mountPanelFixture } from '../scripts/panel-fixture.mjs';
+import { demoBoard, mountPanelFixture, installFixtureApi } from '../scripts/panel-fixture.mjs';
 import { projectPairPanel } from '../lib/runtime/panel-model.js';
-import { createPanelHandler, readPanelSnapshot } from '../lib/runtime/panel-rpc.js';
+import { createPanelHandler, readPanelSnapshot, installPairPanel } from '../lib/runtime/panel-rpc.js';
+import { Context } from '@deepseek-ai/cordis';
+import { SessionStore } from '@deepseek-ai/dsh-session';
+import { HostConnectionService } from '@deepseek-ai/dsh-client-connection';
+import { WebServer } from '@deepseek-ai/dsh-host-webserver';
 import { createTeamDir, writeTeam } from '../lib/state/store.js';
 import { appendMailbox, createMessage } from '../lib/state/mailbox.js';
 import { renderClient } from '../scripts/build-client.mjs';
@@ -80,7 +84,7 @@ export async function run(report) {
     await check('real DSH SessionStore and authenticated HostConnectionService route return the canonical board', async () => {
       const response = await fixture.rpc('snapshot',{sessionId:'panel-captain'});
       assert.equal(response.ok,true);assert.equal(response.value.state,'ready');assert.equal(response.value.team.counts.total,8);
-      const unauth = await fetch(fixture.url+'/pair-runtime/snapshot',{method:'POST'});
+      const unauth = await fetch(fixture.url+'/api/pair-runtime/snapshot',{method:'POST'});
       assert.equal(unauth.status,401);
     });
     await check('panel isolates other sessions and rejects arbitrary endpoint, traversal team selector and malformed filters', async () => {
@@ -88,7 +92,16 @@ export async function run(report) {
       assert.equal((await fixture.rpc('snapshot',{sessionId:'missing'})).value.state,'unavailable');
       assert.equal((await fixture.rpc('snapshot',{sessionId:'panel-captain',teamId:'../../other'})).value.team,null);
       for (const args of [{offset:-1},{filter:'write'},{query:42},{sessionId:''}]) assert.equal((await fixture.rpc('snapshot',{sessionId:'panel-captain',...args})).ok,false);
-      assert.equal((await fixture.rpc('mutate',{sessionId:'panel-captain'})).ok,false);
+      await assert.rejects(fixture.rpc('mutate',{sessionId:'panel-captain'}),/HTTP 404/);
+    });
+    await check('shared Fetch routes validate envelopes before reading a session',async()=>{
+      const path=fixture.url+'/api/pair-runtime/snapshot';
+      for(const body of ['{broken',JSON.stringify({type:'client-request',rpcId:'bad',method:'other',payload:{sessionId:'panel-captain'}}),JSON.stringify({type:'client-request',method:'pair-runtime/snapshot'})]){
+        const response=await fetch(path,{method:'POST',headers:{'content-type':'application/json','x-panel-fixture':fixture.token},body});
+        assert.equal(response.status,400);
+      }
+      const response=await fetch(path,{method:'POST',headers:{'x-panel-fixture':fixture.token},body:'{}'});
+      assert.equal(response.status,415);
     });
     await check('atomic board writes refresh a native DSH long poll without waking a model', async () => {
       const first=await fixture.rpc('snapshot',{sessionId:'panel-captain'});
@@ -118,7 +131,7 @@ export async function run(report) {
       const waiting=fixture.rpc('watch',{sessionId:'panel-captain',revision:first.value.revision},controller.signal);
       controller.abort();await assert.rejects(waiting,{name:'AbortError'});
       assert.equal((await fixture.rpc('snapshot',{sessionId:'panel-captain'})).ok,true);
-      const response=await fetch(fixture.url+'/pair-runtime/snapshot',{method:'POST',headers:{origin:'https://untrusted.invalid','x-panel-fixture':fixture.token}});
+      const response=await fetch(fixture.url+'/api/pair-runtime/snapshot',{method:'POST',headers:{origin:'https://untrusted.invalid','x-panel-fixture':fixture.token}});
       assert.equal(response.status,403);
     });
     await check('history selects the active team first while keeping archived runs selectable', async () => {
@@ -150,6 +163,34 @@ export async function run(report) {
       assert.equal(result.value.state,'ready');assert.equal(disposed,1);
     });
   } finally { await fixture.close(); }
+  await check('panel registers its HTTP channel when webServer arrives after connection and sessions', async () => {
+    const late = await mountPanelFixture({lateWebServer:true});
+    try {
+      const response = await late.rpc('snapshot',{sessionId:'panel-captain'});
+      assert.equal(response.ok,true);assert.equal(response.value.state,'ready');
+    } finally { await late.close(); }
+  });
+  await check('real WebServer admits the panel route from an isolated plugin fiber', async () => {
+    const ctx = new Context();
+    try {
+      await ctx.plugin(WebServer,{host:'127.0.0.1',port:0});
+      await ctx.plugin(SessionStore);
+      const connection = new HostConnectionService(ctx,[],{isAuthenticated:()=>true});
+      installFixtureApi(ctx,connection);
+      const panel = ctx.plugin(c=>installPairPanel(c,{}));
+      await panel;
+      await new Promise(resolve=>setTimeout(resolve,40));
+      const response = await fetch('http://127.0.0.1:'+ctx.get('webServer').port+'/api/pair-runtime/snapshot', {
+        method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({type:'client-request',rpcId:'native-panel-probe',method:'pair-runtime/snapshot',payload:{sessionId:'unknown'}})
+      });
+      assert.equal(response.status,200);
+      const body=await response.json();assert.equal(body.result.ok,true);assert.equal(body.result.value.state,'unavailable');
+      await panel.dispose();
+      const removed=await fetch('http://127.0.0.1:'+ctx.get('webServer').port+'/api/pair-runtime/snapshot',{method:'POST'});
+      assert.equal(removed.status,404,'unloading only the panel removes its routes from the live host');
+    } finally { await ctx.fiber.dispose(); }
+  });
   const fresh = await mountPanelFixture({board:null});
   try {
     await check('opening the panel before team creation still detects the first board',async()=>{
@@ -166,6 +207,29 @@ export async function run(report) {
   }finally{await fresh.close();}
   const sourceText=await readFile(new URL('../lib/client/panel.js',import.meta.url),'utf8');
   const sandbox={AbortController,setTimeout,clearTimeout};vm.createContext(sandbox);vm.runInContext(sourceText,sandbox);
+  await check('client uses the shared API, falls back only for missing routes and retries modern transport on reconnect',async()=>{
+    const calls=[],timers=new Map();let seq=0;
+    const source=sandbox.createPairPanelSource(async(channel,endpoint)=>{
+      calls.push([channel,endpoint]);
+      if(channel==='/api')throw new Error('HTTP 405');
+      return {ok:true,value:{state:'empty',revision:'legacy'}};
+    },{sessionId:'s'},{setTimeout:(fn,ms)=>{timers.set(++seq,{fn,ms});return seq;},clearTimeout:id=>timers.delete(id)});
+    const off=source.subscribe(()=>{});await tick();
+    assert.deepEqual(calls,[['/api','pair-runtime/snapshot'],['/pair-runtime','snapshot']]);
+    assert.equal(source.getSnapshot().status,'live');
+    source.refresh();await tick();assert.equal(calls[2][0],'/api');off();assert.equal(timers.size,0);
+  });
+  await check('authentication failure never falls back or displays the no-team instruction',async()=>{
+    let count=0;
+    const source=sandbox.createPairPanelSource(async()=>{count++;throw new Error('HTTP 401');},{sessionId:'s'});
+    const off=source.subscribe(()=>{});await tick();
+    assert.equal(count,1);assert.equal(source.getSnapshot().status,'error');off();
+    const Dashboard=sandbox.createPairDashboard({createElement:(type,props,...children)=>({type,props,children})});
+    for(const [error,hint] of [['HTTP 405','route'],['HTTP 401','auth'],['pair-panel/read','read'],['offline','connection']]){
+      const tree=JSON.stringify(Dashboard({t:key=>key,data:null,status:'error',error,density:'compact'}));
+      assert.ok(tree.includes('errorHint.'+hint));assert.ok(!tree.includes('emptyHint'));
+    }
+  });
   await check('client aborts hidden/unmounted subscriptions and ignores late responses after refresh',async()=>{
     const calls=[],timers=new Map();let seq=0;
     const source=sandbox.createPairPanelSource((...args)=>new Promise(resolve=>calls.push({args,resolve})),{sessionId:'s'},

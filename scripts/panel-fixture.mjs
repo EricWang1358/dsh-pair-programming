@@ -38,20 +38,44 @@ export function demoBoard() {
   return team;
 }
 
-export async function mountPanelFixture({ serve, board = demoBoard() } = {}) {
+/** Test HTTP carrier around the real shared Fetch router; auth remains host-owned. */
+export function installFixtureApi(ctx, connection) {
+  const handler = connection.createSharedFetchHandler('/api');
+  return ctx.get('webServer').register({kind:'prefix',path:'/api',async handler(req,res) {
+    const rejection = connection.requestRejection(req);
+    if (rejection !== undefined) { res.writeHead(rejection);res.end();return; }
+    const controller = new AbortController();
+    const abort = () => controller.abort();res.on('close',abort);
+    try {
+      const chunks=[];for await (const chunk of req) chunks.push(chunk);
+      const response=await handler.fetch(new Request('http://127.0.0.1'+req.url, {
+        method:req.method,headers:req.headers,body:Buffer.concat(chunks),signal:controller.signal
+      }));
+      res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()));
+    } finally {res.off('close',abort);}
+  }});
+}
+
+export async function mountPanelFixture({ serve, board = demoBoard(), lateWebServer = false } = {}) {
   const workspace = await mkdtemp(join(tmpdir(), 'pair-panel-'));
   const config = resolveConfig({});
   const root = join(workspace, config.stateDir);
   const routes = new Map(), token = randomUUID(), ctx = new Context();
-  ctx.provide('webServer', { register(route) { routes.set(route.path, route); return () => routes.delete(route.path); } }, true);
+  const webServer = { register(route) { routes.set(route.path, route); return () => routes.delete(route.path); } };
+  if (!lateWebServer) ctx.provide('webServer', webServer);
   ctx.plugin(SessionStore);
   await new Promise(resolve => setTimeout(resolve, 40));
   ctx.sessions.create('panel-captain', { meta: { cwd: workspace } });
   ctx.sessions.create('outsider', { meta: { cwd: workspace } });
   // Only the HTTP listener/auth policy are fixtures. The RPC bridge and session store are DSH.
-  new HostConnectionService(ctx, [], { isAuthenticated: req => req.headers['x-panel-fixture'] === token });
+  const connection = new HostConnectionService(ctx, [], { isAuthenticated: req => req.headers['x-panel-fixture'] === token });
   installPairPanel(ctx, config);
   await new Promise(resolve => setTimeout(resolve, 40));
+  if (lateWebServer) {
+    ctx.provide('webServer', webServer);
+    await new Promise(resolve => setTimeout(resolve, 40));
+  }
+  installFixtureApi(ctx, connection);
   if (board) await createTeamDir(root, board);
   const server = createServer(async (req, res) => {
     try {
@@ -59,16 +83,16 @@ export async function mountPanelFixture({ serve, board = demoBoard() } = {}) {
       const route = [...routes.values()].find(r => path === r.path || path.startsWith(r.path + '/'));
       if (route) return await route.handler(req, res);
       if (serve && await serve(req, res, { token, board, root, save: () => writeTeam(root, board) })) return;
-      res.writeHead(404); res.end('not found');
+      res.writeHead(['GET', 'HEAD'].includes(req.method) ? 404 : 405); res.end('not found');
     } catch (error) { res.writeHead(500); res.end(String(error.stack)); }
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const url = 'http://127.0.0.1:' + server.address().port;
   return { ctx, config, workspace, root, board, url, token, routes,
     async rpc(method, payload, signal) {
-      const response = await fetch(url + '/pair-runtime/' + method, { method: 'POST', signal,
+      const response = await fetch(url + '/api/pair-runtime/' + method, { method: 'POST', signal,
         headers: { 'content-type': 'application/json', 'x-panel-fixture': token },
-        body: JSON.stringify({ type: 'client-request', rpcId: randomUUID(), method, payload }) });
+        body: JSON.stringify({ type: 'client-request', rpcId: randomUUID(), method: 'pair-runtime/' + method, payload }) });
       if (!response.ok) throw new Error('HTTP ' + response.status + ': ' + await response.text());
       return (await response.json()).result;
     },
