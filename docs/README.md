@@ -3,6 +3,7 @@
 > 版本：v4 ｜ PROTOCOL_VERSION=4 ｜ 日期：2026-09-04 ｜ 状态：已实现（`@ericwang1358/dsh-pair-programming@0.4.0`）
 > 口吻说明：本目录是设计存档，v1/v2 正文保留为历史，头顶各有一节 v3 导读。v4 的增量（solo 默认、需求覆盖矩阵、机判终态与 completion_receipt、机长写守卫、看板事件唤醒）以插件 `README.md` 与 `CHANGELOG.md` 为准。
 > 新设计只看三处：插件 `README.md`（中英双语）→ `01-design/DESIGN.md`（v3 正文）→ `01-design/REDESIGN-v3.md`（八轮实测推导，英文）。
+> 0.14.1 起，**判决分类、范围语义、环境输入与凭证新鲜度**的权威说明在 [07-workflow/ENVIRONMENT-AND-VERDICTS.md](07-workflow/ENVIRONMENT-AND-VERDICTS.md)；跨宿主重启的恢复口径（原会话恢复 vs 新 Captain 接管分别验收）也在其中。
 
 ## 这是什么
 

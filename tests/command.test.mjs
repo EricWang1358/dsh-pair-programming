@@ -37,6 +37,8 @@ export async function run(check) {
   check(h.def.input?.images === true, 'the command declares that it takes images — without this the composer refuses the submission before the handler ever runs');
   check(typeof h.def.input?.hint === 'string' && h.def.input.hint.includes('goal'), 'and still states what the free-form input is');
 
+  check(h.def.input?.attachments === true, 'DSH 0.1.5 attachment admission is explicitly enabled');
+
   /* ---- images ride the activation line --------------------------------- */
   const ok = h.invoke(' make the rain in this screenshot render as streaks', [image('a'), image('b')]);
   check(ok.kind === 'success', 'a goal with attachments is accepted');
@@ -44,7 +46,7 @@ export async function run(check) {
   const content = h.followups[0].content;
   check(content[0].type === 'text' && content[0].text.startsWith(`/${PAIR_COMMAND}`), 'the activation line comes first, because the gesture boundary matches on it');
   check(content.filter(block => block.type === 'image').length === 2, 'both images are carried into the goal message');
-  check(ok.text.includes('2 image(s)'), 'and the acknowledgment says the images went with it');
+  check(ok.text.includes('2 attachment(s)'), 'and the acknowledgment says the images went with it');
 
   /* ---- text still required, and a refusal must not cost the images ----- */
   const empty = h.invoke('   ', [image('a')]);
@@ -58,4 +60,7 @@ export async function run(check) {
   check(h.followups[1].content.length === 1, 'and carries only the activation line');
   check(!plain.text.includes('image'), 'with no mention of images that were never there');
   check(h.invoke('').kind === 'error', 'an empty goal is still a usage error');
+  const file = { type: 'file', attachment: { id: 'file-a', name: 'requirements.txt' } };
+  const mixed = h.invoke(' implement these requirements', [file, image('c')]);
+  check(mixed.kind === 'success' && JSON.stringify(h.followups.at(-1).content[1]) === JSON.stringify(file) && h.followups.at(-1).content[2].type === 'image', 'mixed file and image blocks retain their identity and order');
 }

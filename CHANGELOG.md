@@ -5,7 +5,91 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [0.14.1] — 2026-09-10
+
+Fixes the defects recorded by the SG-career dual-driver session
+(`docs/plans/2026-09-10-refactor-proposals-from-sg-career-session.md`); every item
+below carries its own reproduction or reverse-mutation probe. Contract reference:
+`docs/07-workflow/ENVIRONMENT-AND-VERDICTS.md`.
+
+**Peak set: what may be written is answered once.** A probe file was legal at the
+proposal layer, legal in the write guard, and refused at integration, so the team's
+only way past the contradiction was to move its own regression leg out of the
+repository. `protocol/scope.js` now computes one allowed write set that all three
+layers call, a declared directory covers its descendants, and `pair_status` prints
+each task's effective scope before a cycle opens. `pair_task_amend` accepts
+`write_paths` (before the first cycle), records the extension in the card's audit
+trail, refuses an overlap with another Driver's in-flight scope, and invalidates the
+credentials bound to the old scope instead of silently keeping them.
+
+**Instrument failure is a category, not a convention.** A legitimate oracle that
+could not read its own fixture printed the words a missing program prints and was
+refused as `VERIFICATION_INFRASTRUCTURE`; meanwhile `pair_integrate` read any
+non-zero exit — including the `exit 2` the team defined as "the measurement failed"
+— as a failed candidate. Not-run detection is now structural (spawn failure,
+126/127/9009, a shell message that names the program, and the locale-independent
+quoted-name rule), and the 0/1/2 convention is a **per-contract declaration**
+(`instrument_exit_codes`) shared by freeze, verify, gate, integrate and stop. Exit 2
+is deliberately not redefined globally: where nothing is declared, a non-zero exit is
+still a failure about the code. `pair_status` prints the mapping.
+
+**A credential is invalidated by judged inputs, not by board movement.** Two
+`GATE_STALE` refusals in one session each cost a reopened cycle and a fresh final
+ACCEPT, prompted by the rulings the board itself demanded. The digest now folds a
+matrix — requirement, acceptance, public contract, new cycle, new P0/P1 still bind;
+a ruling that only discharged a declared disclosure does not — and the refusal names
+the input with its id (`decisions: added d-feeaee89`) instead of listing candidates.
+Pre-rule boards digest byte-identically, so no live credential is invalidated by the
+upgrade. Closing a disclosure is no longer billed to the subject task's planning
+arbitration budget (a ruling that is also a dispute still is, and a record that cannot
+say what it is stays counted).
+
+**A wake that arrives during a flight is deferred, not dropped.** `coalesceDelivery`
+answered `{busy:true}` and all three callers discarded it, leaving a seat idle with
+`pending=1` and nothing left to re-read the board (M16'). Wakes are now re-armed at
+the end of the flight — one re-run per arrival, no queue — so repeated nudges cost one
+model turn per board revision and write no board state. The captain steer path uses
+the same seam.
+
+**A blocked captain no longer freezes the team.** A structurally impossible
+`pair_integrate` used to hold the frontier while an independent ready card went
+unclaimed and every seat sat idle. Captain and member obligations can now share the
+frontier, `pair_yield` gives up an obligation explicitly (with a reason, idempotent,
+expiring when its card moves), and the stall report carries a `blocking_cause` naming
+who owes what, what holds it up, and the suggested action. `pair_status` prints the
+same judgement.
+
+**Integration verifies a complete environment, on declared inputs only.** A worktree
+materialises tracked files, so a gitignored `data/` made the merged tree incomplete
+and the resulting PREREQ/instrument failures read as a failed candidate.
+`pair_start({ integration_runtime_paths })` names the runtime inputs; exactly those are
+copied after the merge and before verification, never overwriting a file the candidate
+brought, never following a link (measured: `git worktree remove --force` deletes
+*through* a Windows directory junction), and a declared-but-absent input is reported as
+an environment diagnostic rather than a verdict.
+
+**Dual-Driver availability.** `pair_start({drivers:2})` no longer aborts on a host
+whose creation context does not expose the `agent` service: the captain's delegated
+policy reaches the child through whichever session is reachable, applied exactly once
+(both paths are mutation-probed).
+
+Also: `pair_status` prints yielded obligations and the blocking cause; the planning
+budget counter and its refusal share one predicate; `pair_task_update` names which gate
+input moved. Not delivered here, and tracked: the debt-key mail-volume reduction
+(issue #15) and the live cross-restart cold-recovery measurement (issue #19). Known
+limit, recorded rather than silently changed: `claimEligibility` still vetoes every
+other claim while an in-flight card declares no scope at all — now named by
+`blocking_cause` instead of reading as "everyone is idle".
+
 ## [Unreleased]
+
+- Give new runs UUID-scoped oracle and scratch roots; preserve legacy frozen paths. Workspace lessons are opt-in to avoid unrelated-project carryover. Refuse a competing loaded team in the same checkout.
+- Add explicit cold Captain handoff through pair_start(resume_team, resume_from_captain) and read-only discovery through pair_status(list_runs=true). Preserve board identity, completed evidence, phase and dual Driver worktrees; rebind only unfinished cycle ownership. Roll back failed member creation, reject live predecessors/pending integrations, and retain read-only progress visibility in the old Captain conversation.
+
+- Fix the runtime panel returning HTTP 405 on DSH 0.1.5: register read-only endpoints on the authenticated shared /api Fetch carrier instead of the legacy channel whose WebServer access fails under Cordis service scoping. Retain legacy client fallback, distinguish connection/auth/read errors from an empty team, and exercise a real WebServer plus route disposal.
+
+- Restore /pair attachment admission on DSH 0.1.5-rc.1 with input.attachments while retaining the legacy images flag. Verify actual command execution and persisted image references against the native attachment store; reject malformed uploads before Captain receives a message.
+- Make the event logging regression test independent of suite ordering; retain the unknown-event persistence guard.
 
 - Accept declared directories containing non-empty regular artifacts at the gate, preserving existing frozen cards and review evidence. Reject empty trees and workspace-escaping targets.
 - Ask for a user-approved local Git checkpoint before dual Driver startup in a non-Git or uncommitted repository; fail before team/member creation and never initialize silently.

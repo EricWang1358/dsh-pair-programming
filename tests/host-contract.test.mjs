@@ -25,6 +25,8 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Context } from '@deepseek-ai/cordis';
 import { ToolRuntime } from '@deepseek-ai/dsh-tools';
@@ -70,7 +72,7 @@ export async function run(check) {
   /* ---- tool schemas the host actually accepted -------------------------- */
   const schemas = ctx.tools.schemas();
   const pairTools = schemas.filter(schema => schema.name.startsWith('pair_'));
-  check(pairTools.length === 26 && ['pair_integrate', 'pair_backlog', 'pair_repair_verify_plan'].every(name => pairTools.some(tool => tool.name === name)), 'all 26 pair_* tools including integration, product backlog and command recovery are accepted by the real registry');
+  check(pairTools.length === 27 && ['pair_integrate', 'pair_backlog', 'pair_repair_verify_plan', 'pair_yield'].every(name => pairTools.some(tool => tool.name === name)), 'all 27 pair_* tools including integration, product backlog, command recovery and the captain yield are accepted by the real registry');
   check(pairTools.every(schema => typeof schema.description === 'string' && schema.description.length > 0), 'each carries a description the host kept');
   const badParams = pairTools.filter(schema => schema.parameters !== undefined && schema.parameters.type !== 'object');
   check(badParams.length === 0, 'and none declares a non-object parameter envelope');
@@ -79,8 +81,29 @@ export async function run(check) {
   const commands = typeof ctx.commands.list === 'function' ? ctx.commands.list() : [];
   const pair = commands.find(entry => entry.name === PAIR_COMMAND);
   check(pair !== undefined, 'the /pair command registers on the real runtime');
-  check(pair?.input?.images === true, 'and the descriptor the composer reads declares image support — the exact field whose absence made /pair refuse screenshots');
+  check((pair?.input?.attachments ?? pair?.input?.images) === true, 'and the descriptor the composer reads declares image support — the exact field whose absence made /pair refuse screenshots');
   check(typeof pair?.input?.hint === 'string', 'with its input hint intact');
+
+  // Exercise upgraded admission with the real disk attachment store, without a model.
+  if (pair?.input?.attachments === true) {
+    const home = await mkdtemp(join(tmpdir(), 'pair-command-sdk-'));
+    let store;
+    try {
+      const { LocalAttachmentStore } = await import('@deepseek-ai/dsh-attachment-local');
+      store = ctx.plugin(LocalAttachmentStore, { dshHome: home });
+      await settle();
+      const messages = [];
+      const agent = { session: { append: () => ({ seq: 1 }) }, followup: message => messages.push(message) };
+      const screenshot = { type: 'image', mediaType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC' };
+      const accepted = await ctx.commands.execute(agent, '/pair inspect screenshot', [screenshot], new AbortController().signal);
+      check(accepted?.result.kind === 'success' && messages.length === 1 && messages[0].content[1]?.type === 'image' && typeof messages[0].content[1]?.attachment?.attachmentId === 'string', 'real host admission persists an image and forwards its durable reference to Captain');
+      const rejected = await ctx.commands.execute(agent, '/pair inspect screenshot', [{ ...screenshot, data: 'invalid base64!' }], new AbortController().signal);
+      check(rejected?.result.kind === 'error' && messages.length === 1, 'real host rejects malformed attachments before Captain is invoked');
+    } finally {
+      await store?.dispose();
+      await rm(home, { recursive: true, force: true });
+    }
+  }
 
   /* ---- the prompt section ---------------------------------------------- */
   const prompt = typeof ctx.systemPrompt.render === 'function' ? ctx.systemPrompt.render() : undefined;

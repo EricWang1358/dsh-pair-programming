@@ -133,4 +133,20 @@ export async function run(check) {
     await assert.rejects(h.call('pair_integrate',{task_id:'t-1'}),/INTEGRATION_STALE/);
     assert.equal(await git(h.root,'rev-parse','HEAD'),head);
   });
+  await scenario('a declared directory admits the file inside it end to end, proposal to merge',async h=>{
+    // The workaround B3 names: the probe directory had to be moved out of the
+    // repository because the guard admitted the file and integration did not.
+    // Both now read one allowed write set, so the probe lands.
+    await mkdir(join(h.parallel.slots.driver.path,'scratch','regression'),{recursive:true});
+    await writeFile(join(h.parallel.slots.driver.path,'scratch','regression','pool-link-guard.mjs'),'probe\n');
+    await h.edit(t=>{
+      const task=t.tasks.find(x=>x.id==='t-1');
+      task.scope={writes:['a.txt','scratch/regression'],reads:[],resources:[],declared:true};
+      t.protocol.cycles.find(c=>c.taskId==='t-1').proposal.files=['a.txt','scratch/regression/pool-link-guard.mjs'];
+    });
+    const gate=await h.gate('t-1');
+    assert.equal(gate.pass,true);
+    await h.call('pair_integrate',{task_id:'t-1'});
+    assert.equal(await readFile(join(h.root,'scratch','regression','pool-link-guard.mjs'),'utf8'),'probe\n');
+  });
 }

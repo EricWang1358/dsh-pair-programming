@@ -19,6 +19,7 @@ import { assessOracleReach } from '../lib/tools/oracle-exec.js';
 import { reachWarning, freezeRecord, oracleSummary } from '../lib/protocol/oracle.js';
 import { registerFlowTools } from '../lib/tools/flow.js';
 import { createTeamDir, readTeam } from '../lib/state/store.js';
+import { gateStateFingerprint } from '../lib/protocol/gate.js';
 
 const task = (over = {}) => ({ id: 't-1', subject: 's', status: 'in_progress', assignee: 'driver', attemptId: 'a-1', dependencies: [], createdAt: 1, updatedAt: 1, ...over });
 const member = (id, role) => ({ id, name: role, role, status: 'idle', joinedAt: 1 });
@@ -257,6 +258,84 @@ export async function run(check) {
     check(nextObligation(await readTeam(sp.stateRoot, 'ob2'))?.tool === 'pair_verify', 'F repair after renewed manual GO reaches verification despite the prior recorded REJECT');
     await sp.tool('pair_verify')({ cycle_id: manual.cycle_id, verdict: 'accept', evidence: ['both branches covered'] }, { agent: spikeNav });
     check(unverifiedCycles((await readTeam(sp.stateRoot, 'ob2')).protocol).length === 0, 'F a manual-review rejected cycle also closes through real existing repair APIs');
+
+    /* ---- G: B5 — a blocked Captain obligation must not hold the frontier -- */
+    //
+    // Measured (sg-career session, twice): "[PAIR:STALL] … 299s without board
+    // progress". The Captain owed a structurally impossible pair_integrate while
+    // a new task t-4 — independent scope, ready, unclaimed — was never
+    // dispatched, and all four seats were idle. The frontier is not an order of
+    // business: the Captain's debt and a member's claim are independent moves
+    // and must be able to sit on it together, or one stuck seat freezes a whole
+    // team that still has work it could do.
+    const scope = (writes) => ({ writes, reads: [], resources: [], declared: true });
+    const parallelBoard = ({ t1Scope, t4Scope, t1Status = 'in_progress' } = {}) => {
+      const board = {
+        id: 'obp', name: 'OBP', goal: 'g', mode: 'full', tddMode: 'enforce', pairStyle: 'traditional',
+        captainSessionId: 'cap1', createdAt: 1, updatedAt: 1,
+        parallel: { workspace: 'C:/ws', stateRoot: 'C:/ws/.pair-programming', stateRelative: '.pair-programming/parallel',
+          slots: { driver: { path: 'C:/ws/d1', branch: 'b1' }, driver2: { path: 'C:/ws/d2', branch: 'b2' } }, integrations: {} },
+        members: [
+          { id: 'c-d1', name: 'driver', role: 'driver', status: 'idle', joinedAt: 1 },
+          { id: 'c-d2', name: 'driver2', role: 'driver', status: 'idle', joinedAt: 1 },
+          { id: 'c-nav', name: 'navigator', role: 'navigator', status: 'idle', joinedAt: 1 },
+          { id: 'c-chal', name: 'challenger', role: 'challenger', status: 'idle', joinedAt: 1 },
+        ],
+        tasks: [
+          { id: 't-1', subject: 'candidate awaiting integration', status: t1Status, assignee: 'driver2', attemptId: 'a-1',
+            dependencies: [], createdAt: 1, updatedAt: 1, ...(t1Scope === undefined ? {} : { scope: t1Scope }) },
+          { id: 't-4', subject: 'independent scope', status: 'pending',
+            dependencies: [], createdAt: 2, updatedAt: 2, ...(t4Scope === undefined ? {} : { scope: t4Scope }) },
+        ],
+        taskSeq: 4, protocol: { ...initialProtocolState(), phase: 'CYCLING' }, evidenceStats: { cacheHits: 0, cacheMiss: 0 },
+      };
+      const done = openCycle(board.protocol, 't-1', { tddMode: 'enforce' });
+      done.verify = { verdict: 'accept', at: 5 };
+      board.protocol.gatePasses.push({ id: 'g-1', taskId: 't-1', at: 6, binding: {
+        gateStateSha: gateStateFingerprint(board, 't-1'),
+        taskAttempt: { attemptId: 'a-1', assignee: 'driver2' }, worktreeSha: 'w'.repeat(40) } });
+      board.tasks[0].gatePassId = 'g-1';
+      return board;
+    };
+
+    const disjoint = parallelBoard({ t1Scope: scope(['lib/a.js']), t4Scope: scope(['lib/b.js']) });
+    const both = obligations.obligationFrontier(disjoint);
+    check(both.some(o => o.who === 'captain' && o.tool === 'pair_integrate' && o.taskId === 't-1'), 'G the blocked Captain still owes the integration it cannot execute');
+    check(both.some(o => o.tool === 'pair_task_claim' && o.taskId === 't-4'), 'G THE B5 regression: a ready independent-scope task yields a claim obligation while the Captain obligation sits on the frontier');
+    check(nextObligation(disjoint, 'driver')?.taskId === 't-4', 'G and the idle Driver is dispatched to it instead of inheriting a debt it cannot execute');
+
+    const clashing = parallelBoard({ t1Scope: scope(['lib/a.js']), t4Scope: scope(['lib/a.js']) });
+    check(!obligations.obligationFrontier(clashing).some(o => o.tool === 'pair_task_claim'), 'G two cards declared on the same files are never dispatched in parallel');
+    check(nextObligation(clashing, 'driver') === undefined, 'G and no seat is woken to claim work the scope rules will refuse');
+
+    const hasYieldApi = typeof obligations.recordYield === 'function'
+      && typeof obligations.yieldedObligations === 'function' && typeof obligations.blockingCause === 'function';
+    check(hasYieldApi, 'G the frontier exposes the Captain’s escape hatch: a recorded yield and a blocking-cause projection');
+    if (hasYieldApi) {
+      const cause = obligations.blockingCause(disjoint);
+      check(cause?.tool === 'pair_integrate' && cause?.ref === 't-1', 'G the blocking cause names the obligation that holds the frontier');
+      check(cause?.suggested_action?.includes('pair_yield'), 'G and offers the action that is actually available: give it up explicitly');
+
+      const vetoed = parallelBoard({ t4Scope: scope(['lib/b.js']) });
+      const vetoCause = obligations.blockingCause(vetoed);
+      check(vetoCause?.blocked_work?.some(row => row.taskId === 't-4' && String(row.reason).includes('scope')),
+        'G a ready card no Driver can claim is reported with the scope rule that is refusing it, not as "everyone is idle"');
+      check(vetoCause?.blocking?.some(line => line.includes('t-1')), 'G and the in-flight card blocking it is named');
+
+      const fingerprintBefore = gateStateFingerprint(disjoint, 't-1');
+      const yielded = obligations.recordYield(disjoint, both.find(o => o.tool === 'pair_integrate'), 'the integration environment is missing the runtime data', 'cap1');
+      check(yielded.tool === 'pair_integrate' && yielded.taskId === 't-1' && String(yielded.reason).includes('missing the runtime data'),
+        'G the yield records the tool and the reason verbatim, so a team can act on it instead of on a trace');
+      const after = obligations.obligationFrontier(disjoint);
+      check(!after.some(o => o.tool === 'pair_integrate'), 'G after the yield the frontier stops reporting the obligation the Captain cannot execute');
+      check(after.some(o => o.tool === 'pair_task_claim' && o.taskId === 't-4'), 'G and the other ready work stays dispatchable');
+      check(obligations.yieldedObligations(disjoint).length === 1, 'G the yielded obligation is still readable from the board for pair_status');
+      const revived = structuredClone(disjoint);
+      // New evidence ON THAT CARD — a stamp later than the cycle the yield was recorded against.
+      revived.protocol.gatePasses.push({ id: 'g-2', taskId: 't-1', at: (revived.protocol.cycles[0]?.openedAt ?? 0) + 1, binding: {} });
+      check(obligations.yieldedObligations(revived).length === 0, 'G a yield expires when the work it gave up moves, so giving up once cannot hide a later obligation');
+      check(gateStateFingerprint(disjoint, 't-1') === fingerprintBefore, 'G a yield is not a gate input: giving up an obligation cannot stale the credential of the card it names');
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }

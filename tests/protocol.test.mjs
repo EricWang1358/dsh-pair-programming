@@ -129,7 +129,7 @@ export async function run(check) {
   // Carrying the hammer text there would be describing a control for a party
   // that does not exist, which is the prompt bloat this mode set out to cut.
   check(!usageSectionText({ tddMode: 'enforce' }).includes('queued work by default'), 'the solo protocol omits controls for seats it does not have');
-  check(PROTOCOL_VERSION === '7', 'personas versioned at v7 for isolated contributors and integration');
+  check(PROTOCOL_VERSION === '8', 'personas versioned at v8 for run isolation and explicit handoff');
   // A clean streak says the current size worked; it cannot prove a larger
   // patch remains reviewable. The old enlarge advice contradicted I2 live.
   const acceptedCycles = [1, 2, 3].map((n) => ({ id: `c${n}`, step: 'VERIFIED', verify: { verdict: 'accept' }, rejections: 0, attacks: 0 }));
