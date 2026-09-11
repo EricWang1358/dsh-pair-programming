@@ -5,6 +5,48 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [0.15.1] — 2026-09-11
+
+Two post-release fixes, each with its own reverse-mutation probe.
+
+**A member is refused a tool the host cannot classify (#21).** The member deny list is
+built from the host's **global** tool registry while `restrict()` validates a
+scope-aware set that also carries **ancestor** contributions — the agent-preset plane.
+A tool living only there is in neither set, so it was classified by neither layer: the
+write guard returned early for it, and the member rule then only asked whether the name
+was a write capability. **I1 failed open on exactly the seat it exists to constrain.**
+The waterfall now lets such a name reach the rule, the member rule is fail-closed with
+the mechanism and the remedy in the refusal, and with no registry to compare against
+the rule stays off — team formation already refuses a seat whose write names cannot be
+enumerated. The two sets coincide on this host, which is why nothing surfaced locally;
+this is the P2 that `AGENTS.md` §2.1.1 has carried since the first review round, and
+the failure mode the SDK itself documents.
+
+**A repeated owed call is folded to a pointer (#15, first cut).** `boundedMailboxPrompt`
+carries the recipient's owed call in the footer and **charges that footer against the
+per-record allowance** before any real mail is laid out, so restating the same sentence
+every delivery takes the space the mailbox content would have used — the shape behind
+the 446 KB the r4 session paid. The owed call is now identified by
+`debtKey(team, obligation)`, the same key the wake dedupe uses; when that debt was
+already delivered to this seat the footer becomes a pointer naming the tool and where
+the full instruction lives. The memory is durable on the member, written only when the
+debt changes rather than per delivery, and cleared with the seat so a replacement
+inherits nothing it was not told. Verified **cumulatively**, because one 16 KiB-capped
+prompt hides the effect; a moved board restores the full instruction in full.
+
+### Still open, named rather than implied
+
+- **#15** as a whole: this removes the repeated footer the protocol adds by
+  construction, which may not account for all 446 KB of measured traffic (member-to-
+  member letter volume is untouched). It stays open until a live measurement says so.
+- **#19** the end-to-end cold-recovery acceptance, which needs one host restart with a
+  live team. **#26** dual-Driver route coverage, which needs a `drivers: 2` environment.
+- **U4's escalation half** (waking a specialist because a problem belongs to it) still
+  needs a specialist seat, and **late-result rejection by superseded revision** still
+  needs a public-contract revision concept.
+
+Verified as a release candidate in one pass: `npm run verify` (typecheck, the full
+suite, runtime imports, build, package, startup) on the tagged tree.
 ## [0.15.0] — 2026-09-11
 
 One route rule per run, a board that cannot be read as the candidate, and the
