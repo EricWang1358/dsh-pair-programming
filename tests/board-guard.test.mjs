@@ -88,6 +88,37 @@ export async function run(check) {
     const stranger = await call('nobody', 'edit', { file_path: 'src.js' });
     check(stranger.kind === 'allow', 'an agent with no team on this board is untouched');
     check((await call('cap1', 'read', { file_path: 'src.js' })).kind === 'allow', 'non-mutating calls never reach a board read at all');
+
+    /* ---- #21: an unclassifiable name is not a licence for a member --------- */
+    // The deny list is built from the host's GLOBAL registry, while restrict()
+    // validates a scope-aware set that also carries ANCESTOR contributions (the
+    // agent-preset plane). A write tool living only there is in neither set, so both
+    // layers waved it through and I1 failed open on exactly the seat it constrains.
+    const known = new Set(['read', 'write', 'edit', 'pwsh', 'glob', 'grep']);
+    const unclassified = (id) => boardWriteDenial(live, id, ws, 'preset_render_tool', { file_path: 'src/a.js' }, { knownToolNames: known });
+    check(typeof unclassified('nav') === 'string',
+      '#21 a member is refused a tool the host registry does not carry: the plugin cannot classify it, and cannot-classify must not mean allow');
+    check(String(unclassified('nav')).includes('cannot classify') && String(unclassified('nav')).includes('read-only'),
+      '#21 and the refusal says what it cannot do and what the remedy is, rather than naming a rule the caller cannot act on');
+    check(boardWriteDenial(live, 'nav', ws, 'read', { file_path: 'src/a.js' }, { knownToolNames: known }) === undefined,
+      '#21 while a name the registry DOES carry is untouched — this closes one gap, it does not restrict reading');
+    check(unclassified('drv') === undefined && unclassified('drv') === undefined,
+      '#21 the Driver keeps every name: I1 constrains every seat that is not the writer');
+    check(unclassified('cap1') === undefined, '#21 and the captain routes to its own rule, which this does not change');
+    check(boardWriteDenial(live, 'nav', ws, 'preset_render_tool', { file_path: 'src/a.js' }) === undefined,
+      '#21 with no registry to compare against the rule stays off, so a host that cannot be enumerated is not bricked');
+
+    /* ---- #21: the pre-execute filter must not swallow it first ------------- */
+    const handlers2 = new Map();
+    const ctx2 = { on: (n, fn) => { handlers2.set(n, fn); return () => handlers2.delete(n); }, logger: { debug: () => {} },
+      tools: { schemas: () => [...known].map(name => ({ name })) } };
+    installBoardWriteGuard(ctx2, { stateDir: '.pair-programming' });
+    const pre2 = handlers2.get('tools/pre-execute');
+    const call2 = (id, name, args) => pre2({ name, arguments: args, agent: { id, session: { header: { cwd: ws } } } }, async () => ({ kind: 'allow' }));
+    const presetDenied = await call2('nav', 'preset_render_tool', { file_path: 'src.js' });
+    check(presetDenied.kind === 'deny' && String(presetDenied.reason).includes('cannot classify'),
+      '#21 end to end: the waterfall no longer returns early for an unclassifiable name, so the rule above is reachable at all');
+    check((await call2('nav', 'read', { file_path: 'src.js' })).kind === 'allow', '#21 and a known read tool still passes the whole pipeline');
   } finally {
     await rm(ws, { recursive: true, force: true });
   }
