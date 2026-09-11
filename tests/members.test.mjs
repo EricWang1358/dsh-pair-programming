@@ -118,6 +118,19 @@ export async function run(check) {
   check(navRouteFallbackActive() === true && navRouteFallbackReason().includes('用量耗尽'), 'a quota death marks the fallback with its reason');
   check(JSON.stringify(seatModelRequest({ navigatorModel: 'deepseek/deepseek-reasoner' }, 'navigator')) === '{}', 'while marked, the acceptance seat inherits the captain route wholesale (sticky)');
   check(JSON.stringify(seatModelRequest({ navigatorModel: 'deepseek/deepseek-reasoner' }, 'driver')) === '{}', 'and the flag never touches non-acceptance seats (they never had an override)');
+  // U1: now that a fallback belongs to a RUN, several runs can be degraded at once.
+  // Returning the first one's reason would report one run's state as the process state -
+  // exactly the conflation the per-run key exists to end.
+  clearNavRouteFallback();
+  setNavRouteFallback('run A degraded', { id: 'team-a' });
+  setNavRouteFallback('run B degraded', { id: 'team-b' });
+  check(navRouteFallbackReason().startsWith('2 runs are on a fallback route') && navRouteFallbackReason().includes('degraded'),
+    'U1 the process-wide readout states HOW MANY runs are degraded instead of presenting one run as the state of all');
+  clearNavRouteFallback();
+  setNavRouteFallback('only this run degraded', { id: 'team-a' });
+  check(navRouteFallbackReason() === 'only this run degraded',
+    'U1 while a single degraded run still reports its own reason verbatim, with no wrapper');
+  clearNavRouteFallback();
   clearNavRouteFallback();
   check(JSON.stringify(seatModelRequest({ navigatorModel: 'deepseek/deepseek-reasoner' }, 'navigator')).includes('deepseek-reasoner'), 'a successful route test clears the flag and the premium route returns');
   // The wake seam is ctx.subagents.sendMessage — model-authored mail between
