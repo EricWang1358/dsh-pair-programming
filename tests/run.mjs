@@ -34,6 +34,12 @@ const onlyAt = argv.indexOf('--only');
 const only = onlyAt === -1 ? undefined
   : String(argv[onlyAt + 1] ?? '').split(',').map(v => v.trim()).filter(Boolean);
 const timing = argv.includes('--timing');
+// --parallel N: run each selected suite in its OWN process, N at a time. The suites are
+// single-process and sequential by construction, so the long ones (worktrees ~4min,
+// verification ~2min) used to be pure wall-clock. Each child prints its own summary; this
+// parent aggregates the counts and the exit codes and never runs a suite itself.
+const parallelAt = argv.indexOf('--parallel');
+const parallel = parallelAt === -1 ? 1 : Math.max(1, Math.min(16, Number(argv[parallelAt + 1] ?? 2) || 2));
 if (onlyAt !== -1 && (only === undefined || only.length === 0)) {
   console.error('--only needs a comma-separated list of suite names, e.g. --only gate,scope');
   process.exit(2);
@@ -64,6 +70,40 @@ const selected = only === undefined ? suites
 if (only !== undefined && selected.length === 0) {
   console.error(`--only matched no suite. Known suites: ${suites.join(', ')}`);
   process.exit(2);
+}
+if (parallel > 1) {
+  const { spawn } = await import('node:child_process');
+  const self = fileURLToPath(import.meta.url);
+  const summary = /(\d+) passed, (\d+) failed/;
+  const outcomes = [];
+  const queue = [...selected];
+  await new Promise(resolve => {
+    let active = 0, done = 0;
+    const pump = () => {
+      while (active < parallel && queue.length > 0) {
+        const suite = queue.shift();
+        active++;
+        const child = spawn(process.execPath, [self, '--only', suite], { stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = '';
+        child.stdout.on('data', chunk => { out += String(chunk); });
+        child.stderr.on('data', chunk => { out += String(chunk); });
+        child.on('close', code => {
+          active--; done++;
+          const match = summary.exec(out);
+          outcomes.push({ suite, code, passed: match ? Number(match[1]) : 0, failed: match ? Number(match[2]) : (code === 0 ? 0 : 1) });
+          if (timing) console.log('  done ' + suite + ' (exit ' + String(code) + ')');
+          if (done === selected.length) resolve(); else pump();
+        });
+      }
+    };
+    pump();
+  });
+  const passed = outcomes.reduce((sum, row) => sum + row.passed, 0);
+  const failed = outcomes.reduce((sum, row) => sum + row.failed, 0);
+  const broken = outcomes.filter(row => row.code !== 0);
+  if (broken.length > 0) console.error(broken.map(row => 'FAILED ' + row.suite + ': ' + row.passed + ' passed / ' + row.failed + ' failed (exit ' + String(row.code) + ')').join(String.fromCharCode(10)));
+  console.log(String.fromCharCode(10) + passed + ' passed, ' + failed + ' failed across ' + selected.length + ' suites (parallel ' + parallel + ')');
+  process.exit(broken.length === 0 && failed === 0 ? 0 : 1);
 }
 const timings = [];
 for (const s of selected) {
