@@ -75,3 +75,19 @@ the recipient as a member **name**, `messages[].content` is a **string**, and it
 **`.text`** is the prompt. `obligation.js:239` decides *who* owes: with `oracleFirst` an oracle-less task
 owes `pair_oracle` to the **Navigator**, and the Driver owes `pair_propose` only when the task does not
 need an oracle.
+
+## Correction, later the same day: K2-5 is CLOSED
+
+The credential-projection row above still describes that cell as blocked — it was appended to across
+several attempts and became stale the moment the assertion landed. What is actually true now:
+
+`oracle.test.mjs` asserts the projection on a board whose credential came from a **real**
+`pair_gate_check`: the field reads **current** while the board is unchanged, and **NOT current** after
+it moves. The move is **out-of-band and shape-valid** — a **clone of a real cycle with a new id** —
+because five attempts established that a hand-built credential record is rejected by the store, a
+hand-pushed cycle is rejected the same way (the store validates on read and write), and **the protocol
+itself refuses to move a board carrying a valid credential** (`GATE_STALE`).
+
+That last fact is the design rather than an obstacle: the stale state exists for a board moved
+**outside** the protocol — a concurrent writer, a hand edit, an old or damaged board. All three cells
+are now asserted.
