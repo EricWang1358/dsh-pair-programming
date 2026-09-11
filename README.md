@@ -234,19 +234,7 @@ dsh plugin --profile web add @ericwang1358/dsh-pair-programming
 dsh web
 ```
 
-> **pnpm 10 build-script gate.** The plugin ships a `postinstall` step that links
-> the host's own `@deepseek-ai` module tree into the plugin (its peers are the
-> host's own packages, resolved for singleton identity). pnpm 10 blocks
-> dependency build scripts by default, so if the install ends with
-> `[ERR_PNPM_IGNORED_BUILDS]`, finish it manually:
->
-> ```sh
-> cd ~/.dsh/profiles/web
-> pnpm approve-builds   # select @ericwang1358/dsh-pair-programming, confirm
-> dsh plugin --profile web add @ericwang1358/dsh-pair-programming
-> ```
->
-> One-time per machine; pnpm remembers the approval.
+> **Installation hook:** postinstall only checks existing peer resolution and reports missing packages. It never provisions links or deletes dependency directories. A development link can be created explicitly; see Dependency setup and test safety below.
 
 To roll back: `dsh plugin --profile web remove @ericwang1358/dsh-pair-programming` (restart the app afterwards). Local-path installs work identically while developing.
 
@@ -291,3 +279,12 @@ await tools.pair_start({
 Omit new-team fields such as goal, use_cases and drivers. This explicit cold handoff replaces active seats while retaining the same board, task IDs, acceptance files, phase and isolated Driver worktrees. Accepted evidence is not rewritten; ordinary gate freshness checks still apply. Both Captain conversations can view progress, while only the new Captain owns the board. DONE/ABORTED archives cannot be reopened this way. Loaded predecessor sessions (including idle ones), missing worktrees and pending integration transactions require recovery before handoff; failed member creation leaves the original board intact.
 
 New runs use `.pair-oracles/<run UUID>/<task id>/` and prescribe `.pair-work/<run UUID>/` for scratch files. Read `artifact_root` and `scratch_root` from pair_start/pair_status instead of guessing paths. Legacy boards keep their frozen paths. This is artifact namespacing, not a filesystem sandbox: use separate working directories for unrelated projects running concurrently. Startup/handoff reject other loaded teams in the same checkout; coordination locks are process-local, so do not run multiple DSH hosts against one checkout. Old scratch files are not automatically deleted. Workspace retro lessons are carried only when explicitly requested with `inherit_lessons: true`; handoff keeps the existing board's lessons.
+
+
+### Dependency setup and test safety
+
+`npm run verify` and `verify:startup` never create, replace, or remove SDK links. The postinstall hook only reports unresolved peers. A missing host package is an installation problem, not permission to rewrite the running host's dependency tree.
+
+For a linked development checkout with no peer entry, explicitly run `npm run setup:peers -- --link --sdk "<host node_modules/@deepseek-ai>"`. Existing directories and links are refused, not replaced. Ordinary `npm run setup:peers` is read-only. Do not run package-manager mutations through a peer junction or run the full suite inside the DSH host's JavaScript process; use a separate Node process and an isolated checkout for release tests. Tests can mount native SDK fixtures and patch process-local module exports.
+
+Oracle and DoD commands still execute with the launching OS account's permissions. A cwd, timeout and role guard are not an OS sandbox. Do not use destructive/global-install commands as acceptance checks. This patch removes automatic dependency mutation; it does not claim to diagnose every host crash or sandbox arbitrary shell programs.

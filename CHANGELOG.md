@@ -88,6 +88,9 @@ other claim while an in-flight card declares no scope at all — now named by
 
 ## [Unreleased]
 
+- Make peer inspection, postinstall and startup verification read-only. Explicit SDK linking only creates a missing entry and refuses all existing directories/links; remove recursive dependency cleanup and implicit host discovery. Reject in-host imports of the full test runner before suite side effects or process.exit. Add isolated setup and host-survival regressions.
+
+
 - Give new runs UUID-scoped oracle and scratch roots; preserve legacy frozen paths. Workspace lessons are opt-in to avoid unrelated-project carryover. Refuse a competing loaded team in the same checkout.
 - Add explicit cold Captain handoff through pair_start(resume_team, resume_from_captain) and read-only discovery through pair_status(list_runs=true). Preserve board identity, completed evidence, phase and dual Driver worktrees; rebind only unfinished cycle ownership. Roll back failed member creation, reject live predecessors/pending integrations, and retain read-only progress visibility in the old Captain conversation.
 

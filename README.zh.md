@@ -214,18 +214,7 @@ dsh plugin --profile web add @ericwang1358/dsh-pair-programming
 dsh web
 ```
 
-> **pnpm 10 构建脚本门。** 本插件带一个 `postinstall` 步骤，把宿主自带的
-> `@deepseek-ai` 模块树链接进插件（它的 peer 就是宿主自己的包，需单例解析）。
-> pnpm 10 默认拦截依赖的构建脚本，若安装以 `[ERR_PNPM_IGNORED_BUILDS]` 结尾，
-> 手动补完：
->
-> ```sh
-> cd ~/.dsh/profiles/web
-> pnpm approve-builds   # 空格选中 @ericwang1358/dsh-pair-programming，回车确认
-> dsh plugin --profile web add @ericwang1358/dsh-pair-programming
-> ```
->
-> 每台机器一次性；pnpm 会记住批准。
+> **安装检查**：postinstall 仅只读检查依赖，不创建或删除 SDK 链接。开发检出需要链接时显式执行 `npm run setup:peers -- --link --sdk "<host node_modules/@deepseek-ai>"`；已有目录或链接一律拒绝替换。全量测试必须使用独立 Node 进程，不能在 DSH 内 import 测试入口。
 
 回滚：`dsh plugin --profile web remove @ericwang1358/dsh-pair-programming`（之后重启应用）。开发期用本地路径安装，命令等价。
 
