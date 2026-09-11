@@ -91,6 +91,23 @@ export async function run(check) {
     } finally { await rm(pauseRoot, { recursive: true, force: true }).catch(() => {}); }
   }
 
+  /* ---- #75: whose action lifts a pause ------------------------------------- */
+  // The matrix above is scheduler-level bookkeeping. This one asks the question the pause
+  // contract turns on: a MEMBER's tool call also kicks the team, and it must not undo a
+  // pause the captain set - only the captain's own action re-engages the run.
+  {
+    const kickRoot = await mkdtemp(join(tmpdir(), 'pair-kick-'));
+    const kickState = join(kickRoot, 'kick-state');
+    await createTeamDir(kickState, teamFixture({ id: 'kick' }));
+    const ks = installPairScheduler({ logger: { warn() {} }, on: () => {}, agents: { get: () => undefined }, subagents: {} }, { stateDir: 'kick-state', heartbeatMs: 0 });
+    try {
+      ks.untrackTeam(kickRoot, 'kick');
+      await ks.kickTeam(kickRoot, 'kick', undefined, undefined, { background: true });
+      check(ks.trackedTeams().length === 0, '#75 a member-triggered kick does not lift the captain pause');
+      await ks.kickTeam(kickRoot, 'kick', undefined, undefined);
+      check(ks.trackedTeams().length === 1, '#75 while the captain own action does re-engage the run');
+    } finally { await rm(kickRoot, { recursive: true, force: true }).catch(() => {}); }
+  }
   /* ---- the pause / resume / takeover matrix (review item 3) ---------------- */
   // The round-40 review asked for this path to be reviewed as a whole, because the pieces
   // are individually reasonable and can cancel each other out (#63 was exactly that). Each
