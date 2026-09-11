@@ -32,6 +32,7 @@ import { recycleMember } from '../lib/runtime/recycle.js';
 import { spawnIsolatedMember } from '../lib/runtime/isolated-members.js';
 import { createTeamDir } from '../lib/state/store.js';
 import { seatModelRequest, setNavRouteFallback, clearNavRouteFallback } from '../lib/runtime/members.js';
+import { readFile } from 'node:fs/promises';
 import { initialProtocolState } from '../lib/protocol/machine.js';
 import { installNavModelStatus } from '../lib/integrations/nav-model.js';
 
@@ -205,6 +206,19 @@ export async function run(check) {
     const aCleared = seatRoute(await pathRecycle(aRoot, 'st-a', 'team-a', { existingBoard: true }), 'navigator');
     check(aCleared === PREMIUM_JSON, 'AC-1d: a successful route test clears the fallback and restores the seat to its configured route');
 
+    // U1, the LEGACY key. config.memberModel is declared, defaulted and typed, and the
+    // plan's rule for it is explicit: "do not treat a config field existing as routing
+    // taking effect", and "a field that never took effect in the past must not suddenly
+    // start charging". Its status is therefore pinned rather than assumed - it routes
+    // nobody today, and the day someone wires it up this fails, so that migration has to
+    // be shown deliberately instead of shipping as a side effect.
+    check(JSON.stringify(seatModelRequest({ memberModel: 'legacy/legacy-v1' }, 'navigator', board('legacy-a', 'cap'))) === '{}',
+      'U1 the legacy memberModel key routes nobody: a declared field is not a working route');
+    check(JSON.stringify(seatModelRequest({ memberModel: 'legacy/legacy-v1', navigatorModel: 'premium/premium-v1' }, 'navigator', board('legacy-b', 'cap'))) === PREMIUM_JSON,
+      'U1 and it cannot displace the documented role route either');
+    const routingSource = await readFile(new URL('../lib/runtime/members.js', import.meta.url), 'utf8');
+    check(routingSource.includes('memberModel') === false,
+      'U1 and no routing module reads it at all, so the pin above is a property of the resolver rather than of one branch');
     // ---- #26: the non-gating blind spot, made executable. ------------------
     // The line that used to live here printed the isolated seat's route and decided
     // nothing ('probe did not complete'), so "the route an isolated (dual-Driver) seat
