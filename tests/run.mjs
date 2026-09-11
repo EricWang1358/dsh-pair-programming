@@ -53,6 +53,9 @@ suites.push('gate-binding.test.mjs');
 // U1's acceptance suite: ported from the oracle frozen by the v15-u1-routing Navigator
 // before any implementation existed (see the file header for the two instrument repairs).
 suites.push('route-isolation.test.mjs');
+// J1's directed filesystem regression: the runtime-input seed may not follow a link
+// on any ancestor of a declared path, in either direction.
+suites.push('runtime-input-boundary.test.mjs');
 const selected = only === undefined ? suites
   : suites.filter(s => only.some(needle => s.includes(needle)));
 if (only !== undefined && selected.length === 0) {
@@ -62,6 +65,7 @@ if (only !== undefined && selected.length === 0) {
 const timings = [];
 for (const s of selected) {
   const startedAt = Date.now();
+  if (timing) console.log(`START ${s} (${timings.length + 1}/${selected.length})`);
   const mod = await import(new URL(`./${s}`, import.meta.url).href);
   await mod.run(check);
   if (typeof mod.runBaton === 'function') await mod.runBaton(check);
