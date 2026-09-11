@@ -18,6 +18,9 @@ import {
 import { ceStatusLine } from '../lib/integrations/ce-status-line.js';
 import { ceMomentLine, ceMomentCoverage } from '../lib/integrations/ce-moments.js';
 import { usageSectionText } from '../lib/prompt.js';
+import { boundedMailboxPrompt } from '../lib/runtime/mail-delivery.js';
+import { initialProtocolState, openCycle } from '../lib/protocol/machine.js';
+import { nextObligation } from '../lib/protocol/obligation.js';
 import {
   candidateRoots, inspectRoot, readCommitSha, probeCe, probeSummary, fingerprint, CE_MANIFEST,
 } from '../lib/integrations/ce-probe.js';
@@ -88,6 +91,32 @@ function fakeSettings() {
 }
 
 export async function run(check) {
+  /* ---- L2 at the seat: what the owed member actually reads ---- */
+  // The fixture proves ITSELF first. Three earlier attempts failed because the board did not
+  // actually owe the seat anything, and the assertions then measured nothing - a synthetic
+  // board that produces no obligation makes every downstream check vacuous. obligation.js:239
+  // is why this shape: with oracleFirst true an oracle-less task owes pair_oracle to the
+  // NAVIGATOR; the Driver only owes pair_propose when the task does not need an oracle.
+  // ce-ideate turned out to be a USER-surface skill, so pair_propose correctly emits nothing -
+  // the fixture has to owe a call whose skill the lane serves to the MODEL. pair_review does:
+  // the Navigator owes it while a cycle sits at PROPOSED, and ce-code-review is model-surface.
+  const seatTeam = { id: 'm', name: 'm', goal: 'g', mode: 'light', tddMode: 'enforce', captainSessionId: 'cap', oracleFirst: false,
+    members: [{ id: 'd1', name: 'driver', role: 'driver', status: 'idle', joinedAt: 1 },
+      { id: 'n1', name: 'navigator', role: 'navigator', status: 'idle', joinedAt: 1 }],
+    tasks: [{ id: 't-1', subject: 's', status: 'in_progress', assignee: 'driver', attemptId: 'a' }],
+    taskSeq: 1, protocol: { ...initialProtocolState(), phase: 'CYCLING' } };
+  const seatCycle = openCycle(seatTeam.protocol, 't-1', { tddMode: 'enforce' });
+  Object.assign(seatCycle, { step: 'PROPOSED', owner: { memberId: 'd1', assignee: 'driver', attemptId: 'a' } });
+  const seatConfig = { ceLanes: 'advisory', oracleFirst: false };
+  const owed = nextObligation(seatTeam, 'navigator', { oracleFirst: false });
+  check(owed?.tool === 'pair_review',
+    'the fixture owes the Navigator a review in the first place (' + (owed?.tool ?? 'nothing') + ') - without this the assertions below would measure nothing');
+  const seatMail = [{ id: 'mail-1', from: 'captain', content: 'carry on' }];
+  const armedText = boundedMailboxPrompt(seatMail, seatTeam, 'navigator', seatConfig).text;
+  const offText = boundedMailboxPrompt(seatMail, seatTeam, 'navigator', { ...seatConfig, ceLanes: 'off' }).text;
+  check(armedText.includes('Skill for pair_review: ce-code-review'),
+    'the delivery a member reads names the skill covering the call it owes (L2 at the seat)');
+  check(!offText.includes('Skill for '), 'and names none while the lane is off - an off lane costs nothing');
   /* ---- the allowlist is closed, partitioned, and accounted for --------- */
   const all = [...CE_ALLOWED_NAMES, ...CE_WRITE_LANE, ...CE_DEFERRED];
   check(new Set(all).size === all.length, 'no skill appears in two lists');

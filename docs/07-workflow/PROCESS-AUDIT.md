@@ -36,17 +36,27 @@ structural checks:    clean
 
 Re-run it after touching anything that wakes a seat, writes the board, or adds a module.
 
-## Assertions that are blocked, and on what
+## Assertions: closed, and still blocked
 
-Three cells are written down but **not** asserted, all blocked on the same missing fixture: a board
-on which a **named member** has a **successful** lifecycle (a call it owes, completes, and integrates).
+**Closed 2026-09-11 — L2 at the seat.** The delivery a member reads names the skill covering the
+call it owes, asserted against a fixture that **proves itself first**: `owed.tool === 'pair_review'`
+before anything downstream is measured. Two earlier attempts failed for reasons that were mine,
+not the fixture's — I passed the slot that owed nothing, and I expected `pair_propose → ce-ideate`
+when `ce-ideate` is a **user-surface** skill, so the lane correctly refused to name it (only skills
+the lane serves to the MODEL are named). The correction matters: **this cell was never blocked on a
+missing fixture**, and the previous version of this section said it was.
 
 | cell | what it would assert | why it is blocked |
 |---|---|---|
 | credential projection (K2-5) | `pair_status.gate_credentials[].board_state_current` flips stale after a board move and back after a re-gate | `pair_status` throws on the synthetic board the verification suite can build |
 | tool-level pause path (K2-6, #75) | a member's kick carries `background: true`, the captain's `false`, observed on the real call path | every `pair_task_update` call in `parallel-tasks` is **rejected**, so no successful path exists |
-| L2 at the seat | the delivery a member reads names the skill covering the call it owes | `nextObligation` returns nothing on a synthetic board even with a PROPOSED cycle, an owner and a CYCLING phase — producing one that owes needs the same fixture |
 
-**Shapes learned while failing at the third one** (worth not re-deriving): `boundedMailboxPrompt(messages, team, recipient, config, pending)` takes the recipient as a member **name**, `messages[].content` is a **string**, and it returns an object whose **`.text`** is the prompt.
+The lesson the closed one taught, now applied by default: **a fixture must prove it produces the
+condition it exists for**, as its own assertion, before any assertion that depends on it. Three
+attempts measured nothing because the board owed nothing, and the failure looked like a product bug.
 
-Planned order when the fixture exists: build it once (a parallel team whose tasks reach `completed` and are integrated), then close all three cells in one pass.
+Shapes worth not re-deriving: `boundedMailboxPrompt(messages, team, recipient, config, pending)` takes
+the recipient as a member **name**, `messages[].content` is a **string**, and it returns an object whose
+**`.text`** is the prompt. `obligation.js:239` decides *who* owes: with `oracleFirst` an oracle-less task
+owes `pair_oracle` to the **Navigator**, and the Driver only owes `pair_propose` when the task does not
+need an oracle.
