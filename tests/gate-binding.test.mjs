@@ -268,5 +268,23 @@ export async function run(check) {
     const lateRefusal = await attempt(() => h.tool('pair_gate_check')({ task_id: 't-1' }, { agent: third }));
     check(lateRefusal.error.includes('GATE_STALE'),
       '#131 while a blocker raised AFTER the review still refuses the gate (the arm is not weakened)');
+
+    /* -------------------------------------------------------------------- */
+    /* #126: a blocker on ANOTHER card is that card's business.               */
+    /* -------------------------------------------------------------------- */
+    const fourth = { id: 'cap4', session: { header: { cwd: root }, append() {} } };
+    const elsewhere = credentialBoard({ id: 'elsewhere', name: 'Elsewhere', captainSessionId: 'cap4' });
+    elsewhere.protocol.risks = [{ id: 'r-elsewhere', severity: 'P0', status: 'OPEN', scenario: 'the other card emits a wrong name', trigger: 't', suggestion: 'x', raisedBy: 'challenger', scope: 'product', taskId: 't-2', openedAt: 6 }];
+    await arm(elsewhere, fourth);
+    const crossCard = await attempt(() => h.tool('pair_gate_check')({ task_id: 't-1' }, { agent: fourth }));
+    check(crossCard.error === '' && crossCard.value?.pass === true,
+      `#126 a P0 attributed to another card does not block this one (got: ${crossCard.error || JSON.stringify(crossCard.value?.failures)})`);
+    const fifth = { id: 'cap5', session: { header: { cwd: root }, append() {} } };
+    const ownCard = credentialBoard({ id: 'own', name: 'Own', captainSessionId: 'cap5' });
+    ownCard.protocol.risks = [{ ...elsewhere.protocol.risks[0], taskId: 't-1' }];
+    await arm(ownCard, fifth);
+    const blockedOwn = await attempt(() => h.tool('pair_gate_check')({ task_id: 't-1' }, { agent: fifth }));
+    check(blockedOwn.error.includes('open P0') && blockedOwn.error.includes('r-elsewhere'),
+      `#126 while the same P0 attributed to THIS card still refuses it (got: ${blockedOwn.error})`);
   } finally { await rm(root, { recursive: true, force: true }); }
 }
