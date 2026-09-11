@@ -80,12 +80,54 @@ export async function mailVolumeReport(workspace, stateDir = '.pair-programming'
   const top = largest.sort((a, b) => b.bytes - a.bytes).slice(0, 8);
   return { rows, totals, bySender, byType, top };
 }
+/**
+ * What one message TYPE is actually made of. The volume number cannot answer the
+ * composition question: a letter whose bulk is its envelope is padding and can be
+ * bounded, while a letter whose bulk is its own decision text is a record. Measured on
+ * the archived board: 690 ARBITRATE letters, median 2 KB, of which decision 54%,
+ * evidence 24%, rationale 16% - content, not wrapper.
+ */
+export async function dissect(workspace, stateDir = '.pair-programming', type = 'ARBITRATE') {
+  const stateRoot = join(workspace, stateDir);
+  let entries = [];
+  try { entries = await readdir(stateRoot, { withFileTypes: true }); } catch { return { error: 'no state directory at ' + stateRoot }; }
+  const fields = new Map();
+  const sizes = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const team = await readTeam(stateRoot, entry.name).catch(() => undefined);
+    if (team === undefined) continue;
+    for (const recipient of ['captain', ...(team.members ?? []).map(m => m.name)]) {
+      for (const message of await readMailbox(stateRoot, team.id, recipient).catch(() => [])) {
+        const decoded = decodeMessage(message.content ?? '');
+        if (decoded?.type !== type) continue;
+        sizes.push(Buffer.byteLength(String(message.content ?? ''), 'utf8'));
+        for (const [key, value] of Object.entries(decoded.body ?? {})) {
+          fields.set(key, (fields.get(key) ?? 0) + Buffer.byteLength(JSON.stringify(value), 'utf8'));
+        }
+      }
+    }
+  }
+  const total = sizes.reduce((sum, size) => sum + size, 0);
+  sizes.sort((a, b) => a - b);
+  return { type, count: sizes.length, total, median: sizes[Math.floor(sizes.length / 2)] ?? 0, max: sizes.at(-1) ?? 0,
+    byField: [...fields.entries()].sort((a, b) => b[1] - a[1]) };
+}
 
 if (process.argv[1] !== undefined && process.argv[1].endsWith('mail-volume-report.mjs')) {
   const workspace = process.argv[2];
   if (workspace === undefined) { console.error('usage: node scripts/mail-volume-report.mjs <workspace> [--state-dir .pair-programming]'); process.exit(2); }
   const flag = process.argv.indexOf('--state-dir');
-  const { rows, totals, bySender, byType, top, error } = await mailVolumeReport(workspace, flag === -1 ? '.pair-programming' : process.argv[flag + 1]);
+  const stateDir = flag === -1 ? '.pair-programming' : process.argv[flag + 1];
+  const dissectAt = process.argv.indexOf('--dissect');
+  if (dissectAt !== -1) {
+    const shape = await dissect(workspace, stateDir, process.argv[dissectAt + 1] ?? 'ARBITRATE');
+    if (shape.error !== undefined) { console.error(shape.error); process.exit(2); }
+    console.log(shape.type + ' letters: ' + shape.count + ', total ' + kb(shape.total) + 'K, median ' + kb(shape.median) + 'K, max ' + kb(shape.max) + 'K');
+    for (const [key, bytes] of shape.byField) console.log('  ' + key.padEnd(18) + kb(bytes) + 'K  ' + Math.round(100 * bytes / Math.max(1, shape.total)) + '%');
+    process.exit(0);
+  }
+  const { rows, totals, bySender, byType, top, error } = await mailVolumeReport(workspace, stateDir);
   if (error !== undefined) { console.error(error); process.exit(2); }
   const width = Math.max(6, ...rows.map(r => r.team.length));
   console.log('team'.padEnd(width) + '  recipient   msgs  selected     mail    prompt      owed  overhead');

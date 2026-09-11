@@ -7,7 +7,8 @@ import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { forkProblems, redProblem, computeVerdict, freezeRecord, oracleSummary, resolveCycleOracle } from '../lib/protocol/oracle.js';
+import { forkProblems, redProblem, computeVerdict, freezeRecord, oracleSummary, resolveCycleOracle, boundedRedTail } from '../lib/protocol/oracle.js';
+import { readMailbox } from '../lib/state/mailbox.js';
 import { digestOracleFiles, runOracleCommand, resolveInside } from '../lib/tools/oracle-exec.js';
 import { boardDigest, DIGEST_BUDGET_CHARS } from '../lib/protocol/digest.js';
 import { memberIsStale } from '../lib/runtime/recycle.js';
@@ -79,6 +80,21 @@ export async function run(check) {
   }
   check(assertTaskOracleFiles('t-1',['.pair-oracles/t-1/legacy.cjs'],{})==='.pair-oracles/t-1','legacy frozen paths stay valid without migration');
 
+  // #15: the red tail in a freeze letter, bounded. Measured on an archived board:
+  // ORACLE letters are 391K across 68 freezes and red_tail is HALF of it - a diagnostic
+  // the frozen command reproduces on demand, not a decision that must be preserved whole.
+  const hugeTail = ('diagnostic line' + String.fromCharCode(10)).repeat(700);
+  const capped = boundedRedTail(hugeTail, 'abcdef0123456789deadbeef', 2048);
+  check(Buffer.byteLength(capped, 'utf8') < 4096 && capped.startsWith('diagnostic line'),
+    '#15 an oversized red tail is cut to a bounded head instead of riding whole in every freeze letter');
+  check(capped.includes('[elided') && capped.includes('abcdef012345678') && capped.includes('reproduces'),
+    '#15 and the elision says how much was dropped, what reproduces it, and the signature that makes it checkable');
+  check(capped.slice(0, capped.indexOf('[elided')).trimEnd().split(String.fromCharCode(10)).every(line => line === 'diagnostic line'),
+    '#15 the cut lands on a line boundary when one exists: a diagnostic must not end mid-token');
+  check(Buffer.byteLength(boundedRedTail('x'.repeat(9000), 'sha', 2048), 'utf8') < 4096,
+    '#15 and a tail with no newline at all is still bounded rather than passed through');
+  check(boundedRedTail('short tail', 'sha') === 'short tail',
+    '#15 while a tail inside the budget is returned BYTE-IDENTICAL - no gratuitous rewriting of the record');
   const root = await mkdtemp(join(tmpdir(), 'pair-oracle-'));
   try {
     const scoped=harness(root,'scoped-state');
@@ -391,6 +407,13 @@ export async function run(check) {
     check((await readTeam(g1.stateRoot, 'g1team')).tasks[0].oracle === undefined, 'G1 and the task carries no oracle after that refusal');
     await writeFile(join(g1Root, brokenPath), 'const absent = globalThis.__nothingImplementedYet;\nif (absent === undefined) { console.log("acceptance not met"); process.exit(1); }\nprocess.exit(0);\n');
     const healthy = await g1.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK, oracle_files: [brokenPath], oracle_cmd: 'node ' + brokenPath }, { agent: g1.navigator });
+    await writeFile(join(g1Root, brokenPath), 'for (let i = 0; i < 200; i++) console.log("noise line " + i + " " + "y".repeat(400));' + String.fromCharCode(10) + 'process.exit(1);' + String.fromCharCode(10));
+    const noisy = await g1.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK, oracle_files: [brokenPath], oracle_cmd: 'node ' + brokenPath }, { agent: g1.navigator });
+    const letters = (await readMailbox(g1.stateRoot, 'g1team', 'driver')).filter(row => String(row.content).startsWith('[PAIR:ORACLE]'));
+    const letterBody = JSON.parse(String(letters.at(-1).content).slice(String(letters.at(-1).content).indexOf(String.fromCharCode(10))));
+    check(noisy.oracle_sha?.length === 64, '#15 the noisy freeze itself succeeded');
+    check(Buffer.byteLength(String(letterBody.red_tail ?? ''), 'utf8') < 4096 && String(letterBody.red_tail ?? '').includes('[elided'),
+      '#15 end to end: a freeze whose command prints 500 lines delivers a bounded red tail, with the elision stated');
     check(healthy.oracle_sha?.length === 64, 'G1 a valid acceptance artifact still freezes RED - the parse gate does not block real work');
     // G4: the freeze reports the artifact beside the digest — per file its sha256, its
     // byte count and its line count. Three confusions in one session came from a seal
