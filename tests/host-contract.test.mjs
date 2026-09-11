@@ -111,7 +111,7 @@ export async function run(check) {
     check(prompt.includes('pair'), 'the usage section reaches the rendered system prompt');
     check(prompt.includes('Compound Engineering'), 'and carries the CE paragraph when a lane is armed');
   } else {
-    check(true, 'this build exposes no synchronous prompt render; section registration was still accepted above');
+    check.skip('the usage section reaches the rendered system prompt', 'this build exposes no synchronous prompt render; section registration was still accepted above');
   }
 
   /* ---- the CE provider, through the registry that validates it ---------- */

@@ -64,7 +64,7 @@
     "verify:runtime-imports": "node scripts/verify-runtime-imports.mjs",
     "verify:package": "node scripts/verify-package.mjs",
     "verify:startup": "node scripts/verify-startup.mjs",
-    "verify": "node scripts/typecheck.mjs && node tests/run.mjs && node scripts/verify-runtime-imports.mjs && node scripts/build.mjs && node scripts/verify-package.mjs && node scripts/verify-startup.mjs",
+    "verify": "node scripts/typecheck.mjs && node tests/run.mjs --allow-skips && node scripts/verify-runtime-imports.mjs && node scripts/build.mjs && node scripts/verify-package.mjs && node scripts/verify-startup.mjs",
     "prepublishOnly": "node scripts/verify-runtime-imports.mjs && node scripts/build.mjs && node scripts/verify-package.mjs"
   },
   "peerDependencies": {
