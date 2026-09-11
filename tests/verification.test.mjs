@@ -519,6 +519,8 @@ export async function runDirectoryRecovery(check) {
     await h.verify();
     const before=await h.board();
     check(oraclePreparationWindow(before,'t-2').future, 'unfinished directory task blocks future oracle before gate');
+    check(!oraclePreparationWindow(before,'t-1').future && !oraclePreparationWindow(before,'t-1').paused,
+      '#129 the window never blocks the card whose own candidate is under verification — only the next one');
     const gate=await h.call('pair_gate_check',{task_id:'t-1'},'cap');
     check(gate.pass===true && gate.deliverables.checked.some(v=>v.includes('directory')), 'accepted directory deliverable gets real gate credential');
     await h.call('pair_task_update',{task_id:'t-1',status:'completed',attempt_id:'attempt-1',gate_pass_id:gate.gate_pass_id},'drv');
