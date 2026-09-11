@@ -1,6 +1,6 @@
 /** gate + risks: the hard completion gate and risk lifecycle. */
 import { runGate } from '../lib/protocol/gate.js';
-import { openRisk, mitigateRisk, closeRisk, wontfixRisk, openBlockingRisks, hasOpenP0, closeProblems, teamAuthoredPaths } from '../lib/protocol/risks.js';
+import { openRisk, mitigateRisk, closeRisk, wontfixRisk, openBlockingRisks, hasOpenP0, closeProblems, teamAuthoredPaths, blocksVerification, blocksImplementation } from '../lib/protocol/risks.js';
 import { initialProtocolState, openCycle } from '../lib/protocol/machine.js';
 import { runDodCommand } from '../lib/tools/gate-exec.js';
 import { EvidenceCache } from '../lib/state/evidence-cache.js';
@@ -45,6 +45,20 @@ export async function run(check) {
   let closedOnce = 're-ruled';
   try { wontfixRisk(p, r.id, 'the closed P0 is a false alarm after all'); } catch (error) { closedOnce = String(error.message); }
   check(closedOnce.includes('already settled'), '#127 and a CLOSED ticket is not re-ruled either');
+  // #126: a ticket that names a card blocks THAT card; an unattributed one blocks every card.
+  // Its own protocol, so the gate scenarios below keep the clean board they were written against.
+  const q = initialProtocolState();
+  const r4 = openRisk(q, { severity: 'P0', scenario: 's', trigger: 't', suggestion: 'x', raisedBy: 'challenger', taskId: 't-2' });
+  const r5 = openRisk(q, { severity: 'P1', scenario: 's', trigger: 't', suggestion: 'x', raisedBy: 'challenger' });
+  check(openBlockingRisks(q, ['P0', 'P1'], 't-2').map(x => x.id).join() === [r4.id, r5.id].join(),
+    '#126 the owning card sees its own P0 and the team-wide P1');
+  check(openBlockingRisks(q, ['P0', 'P1'], 't-1').map(x => x.id).join() === r5.id,
+    '#126 another card sees only the unattributed ticket');
+  check(openBlockingRisks(q, ['P0', 'P1']).length === 2, '#126 asking without a card still means the whole team');
+  check(blocksVerification(q, 't-1').length === 0 && blocksVerification(q, 't-2').length === 1,
+    '#126 an open P0 on one card does not make another card unverifiable');
+  check(blocksImplementation(q, 't-1').length === 0 && blocksImplementation(q, 't-2').length === 1,
+    '#126 and it does not halt new cycles on another card either');
   let threw = false;
   try { openRisk(p, { severity: 'P9', scenario: 's', trigger: 't', suggestion: 'x', raisedBy: 'challenger' }); } catch { threw = true; }
   check(threw, 'invalid severity rejected');
