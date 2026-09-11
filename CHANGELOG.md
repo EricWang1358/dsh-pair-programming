@@ -5,6 +5,95 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [0.15.0] — 2026-09-11
+
+One route rule per run, a board that cannot be read as the candidate, and the
+retrofit of the parallel r4 session's live findings. Every item carries a
+reproduction or a reverse-mutation probe; the contract reference stays
+`docs/07-workflow/ENVIRONMENT-AND-VERDICTS.md`.
+
+**One route rule per RUN (U1).** The quota fallback was a module-level variable, so
+one team's acceptance seat dying of exhaustion silently re-routed every OTHER team's
+navigator onto the captain's model — the seventh route-resolution path and the only
+one that crossed team boundaries. It is keyed by the run now, and all seven
+production sites pass their team: `lifecycle` (initial spawn and the M20 retry),
+`recycle`, `resume`, `scheduler`. A call with no team keeps the process-scope marker,
+because the settings route test belongs to no run — and that is what the pinned
+suite asserts. Acceptance is the oracle the Navigator seat froze BEFORE any
+implementation existed: 7 passed / 3 failed against the leak, 10 / 0 after.
+
+**The acceptance author cannot read the candidate through the board (U2).** The SPEC
+seat's four-tool allow-list was already enforced, but one of those four is
+`pair_status`, which answered with the raw board: every cycle's proposal files, RED
+test files, GREEN evidence and diff summary, the Driver's tuned-to-the-instrument
+declaration, and every other card's sealed oracle including its command. A seat that
+reads the candidate before writing the standard has had the standard shaped by the
+answer. `pair_status` now projects for that seat only; the card, its criteria, its own
+oracle, the goal and the coverage matrix all stay.
+
+**The freeze says what it sealed (G4, G5).** The ORACLE message printed one combined
+digest and a number: three confusions in one session about whether the digest was a
+file sha256, whether it had moved, and whether an unchanged byte count meant unchanged
+bytes. It now reports per-file sha256, byte count and line count beside the digest,
+and every freeze after the first names its kind, its reason and the interpretation
+budget left (a defect fork reports the budget it did NOT consume).
+
+**An acceptance artifact that does not parse is refused, not sealed (G1).** The freeze
+gate demands a FAILING command, and a parse error is exactly that — a broken artifact
+was sealed as the RED the whole task is measured against, then failed identically at
+every verdict while no implementation could turn it green. The plugin now parses the
+oracle's own JS/ESM artifacts at write and at freeze. It parses the FILE, never the
+run's output, so an oracle that asserts a `SyntaxError` in the code under test is
+untouched.
+
+**A defect fork can repair the instrument (G3).** The in-flight refusal is right for an
+INTERPRETATION fork and wrong for a DEFECT one: an invalid standard is not one the
+Driver is working to, it is one that measures nothing, so the only repair path was to
+drive an unsatisfiable standard to a verdict first. A defect fork may now cross the
+cycle and the repaired seal is written onto it, with the replaced digest and the
+evidence recorded.
+
+**The risk row names a call the tool accepts (G6).** It read `pair_risk_close`, which
+is not a registered tool, and it named `close` for an OPEN risk while `closeRisk`
+refuses anything not MITIGATED. It now names `pair_risk` with the action reachable
+from the risk's status and shows the two-step lifecycle.
+
+**A link on any ancestor of a declared path no longer crosses the boundary (J1).**
+The runtime-input seed checked the final node and contained the path LEXICALLY, so a
+junction on an ancestor copied outside content in and wrote outside the checkout. Every
+ancestor segment is checked on both sides and the resolved real path is compared with
+the real root.
+
+**The checkout's owner is a board on disk (J2).** The availability check asked which
+sessions were loaded, so after a host restart an unrelated team could start in a
+checkout a live board still owned; reopening the first conversation then woke its
+members into it. Ownership is now answered from the board, `pair_start` and handoff
+share that reading, and a reopened conversation keeps read-only visibility instead of
+waking anyone.
+
+**Wake dedupe pinned as a contract (U4, first slice).** One turn per obligation, board
+revision and seat generation. No production change: the machinery held this, and only
+the repeat half was ever asserted; the generation dimension is now pinned and its
+sensitivity shown by a targeted mutation.
+
+### Not delivered in this release, named rather than implied
+
+- **U4's escalation half** (waking a specialist because a problem belongs to it) needs a
+  specialist seat, which this release does not add; **late-result rejection by
+  superseded revision** needs a public-contract revision concept. Only the dedupe
+  property is in.
+- **#15** mail volume (the debt-key/revision dedupe and its byte-quantified test),
+  **#21** the preset-plane write-tool enumeration gap, **#26** dual-Driver route
+  coverage (the oracle arm is declared non-gating, and the honest gate needs a
+  `drivers: 2` environment).
+- **#19** the real cold-recovery acceptance: J2's event/scheduler regression is in, but
+  the end-to-end measurement still needs one host restart with a live team.
+- The **mailbox** surface is not projected for the SPEC seat: nothing currently sends
+  candidate content to it, and projecting content out of a delivered message needs its
+  own decision about what may legitimately be delivered.
+
+Verified as a release candidate in one pass: `npm run verify` (typecheck, the full
+suite, runtime imports, build, package, startup) on the tagged tree.
 ## [0.14.1] — 2026-09-10
 
 Fixes the defects recorded by the SG-career dual-driver session

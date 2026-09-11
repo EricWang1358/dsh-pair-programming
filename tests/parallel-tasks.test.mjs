@@ -146,9 +146,12 @@ export async function run(report) {
       a.status = 'claimed'; a.attemptId = 'one'; a.workspace = claimed.workspace; a.baseHead = reclaimed.base_head;
       parallel.slots.driver.baseHead = reclaimed.base_head;
       await writeTeam(parallel.stateRoot, current);
-      await call('pair_oracle_write', { task_id: a.id, path: '.pair-oracles/t-1/test.mjs', content: 'A oracle' }, 'n');
-      await call('pair_oracle_write', { task_id: b.id, path: '.pair-oracles/t-2/test.mjs', content: 'B oracle' }, 'n');
-      assert.equal(await readFile(join(a.workspace, '.pair-oracles/t-1/test.mjs'), 'utf8'), 'A oracle');
+      // The artifact must PARSE: pair_oracle_write refuses a .mjs draft that cannot be
+      // parsed (G1), because a broken artifact sealed as the standard can never go
+      // green. A placeholder string was fine only while nothing checked it.
+      await call('pair_oracle_write', { task_id: a.id, path: '.pair-oracles/t-1/test.mjs', content: 'console.log("A oracle");\n' }, 'n');
+      await call('pair_oracle_write', { task_id: b.id, path: '.pair-oracles/t-2/test.mjs', content: 'console.log("B oracle");\n' }, 'n');
+      assert.equal(await readFile(join(a.workspace, '.pair-oracles/t-1/test.mjs'), 'utf8'), 'console.log("A oracle");\n');
       await assert.rejects(readFile(join(b.workspace, '.pair-oracles/t-1/test.mjs')), /ENOENT/);
       await assert.rejects(call('pair_task_update', { task_id: a.id, attempt_id: 'one', status: 'in_progress' }, 'b'), /TASK_OWNER/);
       current.protocol.gatePasses.push({ id: 'pass', taskId: a.id, binding: {} }); a.gatePassId = 'pass'; a.status = 'in_progress';
