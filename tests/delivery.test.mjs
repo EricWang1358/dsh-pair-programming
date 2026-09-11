@@ -312,6 +312,32 @@ export async function run(check) {
       '#15 the report sees the durable bytes the delivery did not carry, and the wire stays bounded while it does');
     check(composition.byType.length > 0 && composition.bySender.length > 0 && composition.top.length > 0,
       '#15 and it attributes the backlog by sender, type and largest message, which is what turned an interpretation into a measurement');
+
+    // U2, mailbox leg: the acceptance author never receives the candidate in a letter.
+    // No plugin path sends that seat the candidate today, so the guarantee held only by
+    // absence of senders; projecting at the delivery boundary makes it hold by
+    // construction. The Reviewer is the control: it must still receive the same letter
+    // in full, or this narrows the protocol instead of one seat.
+    const mailTeam = fixture('spec-mail');
+    mailTeam.members.push({ id: 'spec-seat', name: 'spec', role: 'spec', status: 'idle', joinedAt: 1 });
+    await createTeamDir(state, mailTeam);
+    const hMail = harness(root);
+    const candidateLetter = encodeMessage('GREEN', { cycle_id: 'c-1', diff_summary: 'src/secret-approach.mjs +40/-2',
+      green_evidence: ['the suite went green'], test_results: 'full green', case_refs: ['UC-1.AC-1'] });
+    await deliverProtocolMessage(hMail.ctx, hMail.config, hMail.captain, mailTeam, 'spec', candidateLetter, {});
+    const specLetter = decodeMessage((await mailbox.readMailbox(state, mailTeam.id, 'spec')).at(-1).content);
+    check(specLetter.body.diff_summary === undefined && specLetter.body.green_evidence === undefined && specLetter.body.test_results === undefined,
+      'U2 the mailbox leg holds by construction: a letter to the SPEC seat cannot carry the candidate');
+    check(specLetter.body.cycle_id === 'c-1' && JSON.stringify(specLetter.body.case_refs) === '["UC-1.AC-1"]',
+      'U2 while the public facts it works from - the cycle and the contract - survive the projection');
+    await deliverProtocolMessage(hMail.ctx, hMail.config, hMail.captain, mailTeam, 'navigator', candidateLetter, {});
+    const navLetter = decodeMessage((await mailbox.readMailbox(state, mailTeam.id, 'navigator')).at(-1).content);
+    check(navLetter.body.diff_summary !== undefined && navLetter.body.green_evidence !== undefined,
+      'U2 and the Reviewer still receives the candidate in full: this narrows one seat, not the protocol');
+    const cleanLetter = encodeMessage('ORACLE', { cycle_id: 'c-2', chosen_reading: 'every valid regex must be expressible' });
+    await deliverProtocolMessage(hMail.ctx, hMail.config, hMail.captain, mailTeam, 'spec', cleanLetter, {});
+    check((await mailbox.readMailbox(state, mailTeam.id, 'spec')).at(-1).content === cleanLetter,
+      'U2 and a letter with nothing to project is stored BYTE-IDENTICAL: the boundary never rewrites a message gratuitously');
     const research = fixture('research'); research.members[1].id = 'research-nav';
     research.tasks = [{ id: 'research-1', subject: 'read-only investigation', type: 'spike', assignee: 'navigator', status: 'pending', dependencies: [], createdAt: 1, updatedAt: 1 }];
     await createTeamDir(state, research); const ha = harness(root); await ha.scheduler.kickMember(root, research.id, 'navigator');
