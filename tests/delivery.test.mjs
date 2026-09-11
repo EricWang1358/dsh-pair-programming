@@ -6,6 +6,7 @@ import * as mailbox from '../lib/state/mailbox.js';
 import { createTeamDir, readTeam, writeTeam, commitMemberReplacement } from '../lib/state/store.js';
 import { retireSpawnedMembers } from '../lib/runtime/retire.js';
 import { prepareMailboxDelivery, finishMailboxDelivery } from '../lib/runtime/mail-delivery.js';
+import { mailVolumeReport } from '../scripts/mail-volume-report.mjs';
 import { initialProtocolState, openCycle } from '../lib/protocol/machine.js';
 import { encodeMessage, decodeMessage } from '../lib/protocol/messages.js';
 import { installPairScheduler } from '../lib/runtime/scheduler.js';
@@ -290,6 +291,27 @@ export async function run(check) {
       { id: 'driver-2', joinedAt: 2 });
     check(swapped === true && (await readTeam(state, volume.id)).members.find(m => m.name === 'driver')?.obligationDelivered === undefined,
       '#15 and a replacement seat inherits nothing: the memory is cleared with the seat it was written for');
+
+    // #15: the measurement that CORRECTED the issue's premise, pinned as a property.
+    // A real archived board (SG-career: 732 messages, 1517K durable) showed the wire is
+    // already bounded - the volume is the durable backlog, dominated by captain
+    // ARBITRATE letters (813K) and navigator ORACLE freezes (341K), while one delivery
+    // per recipient costs 77K. The reason the wire stays small is here: an oversized
+    // record is replaced by a reference and read on demand.
+    const bigMail = fixture('big-mail');
+    await createTeamDir(state, bigMail);
+    await append(state, bigMail, 'driver', 'y'.repeat(200 * 1024));
+    const oversizedDelivery = await prepareMailboxDelivery(state, bigMail.id, 'driver', { stateDir: 'state' }, { memberId: 'driver' });
+    await finishMailboxDelivery(state, oversizedDelivery, true, undefined);
+    check(oversizedDelivery.bytes <= 16 * 1024, '#15 a 200K letter is not carried whole: the delivery stays inside its own byte cap');
+    check(oversizedDelivery.text.includes('PAIR:MAIL_REFERENCE') && oversizedDelivery.text.includes('pair_mailbox_read'),
+      '#15 and the oversized record becomes a durable reference the seat reads on demand');
+    check(oversizedDelivery.text.includes('y'.repeat(1000)) === false, '#15 so the body really is absent from the wire, not merely counted as absent');
+    const composition = await mailVolumeReport(root, 'state');
+    check(composition.totals.mail >= 200 * 1024 && composition.totals.prompt <= 16 * 1024 * 4,
+      '#15 the report sees the durable bytes the delivery did not carry, and the wire stays bounded while it does');
+    check(composition.byType.length > 0 && composition.bySender.length > 0 && composition.top.length > 0,
+      '#15 and it attributes the backlog by sender, type and largest message, which is what turned an interpretation into a measurement');
     const research = fixture('research'); research.members[1].id = 'research-nav';
     research.tasks = [{ id: 'research-1', subject: 'read-only investigation', type: 'spike', assignee: 'navigator', status: 'pending', dependencies: [], createdAt: 1, updatedAt: 1 }];
     await createTeamDir(state, research); const ha = harness(root); await ha.scheduler.kickMember(root, research.id, 'navigator');
