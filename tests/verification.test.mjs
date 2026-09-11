@@ -48,7 +48,7 @@ async function fixture(configOver = {}) {
   return { root, stateRoot, cycleId: cycle.id, board: () => readTeam(stateRoot, team.id),
     edit: async fn => { const fresh = await readTeam(stateRoot, team.id); fn(fresh); await writeTeam(stateRoot, fresh); },
     call: (name, args, id = 'nav', signal) => defs.find(d => d.name === name).execute(args, { agent: agent(id), signal }),
-    verify(args = {}, signal) { return this.call('pair_verify', { cycle_id: cycle.id, ...scope, ...args }, 'nav', signal); },
+    verify(args = {}, signal, id = 'nav') { return this.call('pair_verify', { cycle_id: cycle.id, ...scope, ...args }, id, signal); },
     green() { return this.call('pair_green', { cycle_id: cycle.id, green_evidence: ['reran green'], diff_summary: 'fresh repair', test_results: 'green', tuned_for_oracle: 'none' }, 'drv'); },
     cleanup: () => rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }) };
 }
@@ -120,6 +120,10 @@ export async function run(check) {
     ['closed team', t => { t.protocol.phase = 'DONE'; }],
     ['terminal task', t => { t.tasks[0].status = 'cancelled'; }],
     ['changed reviewer', t => { t.members[1].role = 'driver'; }],
+    // U4: a seat REPLACED while its evidence runs. The stamp carries the seat identity,
+    // so the run that started under the old generation cannot land a verdict under the
+    // new one — the late-result case, without needing a new concept on the board.
+    ['replaced seat', t => { t.members[1].id = 'nav-2'; t.members[1].joinedAt = 2; }],
   ]) await scenario(`verify race ${name}`, async h => {
     const gate = await rendezvous(h);
     await h.edit(t => { t.tasks[0].oracle.cmd = gate.command; });
@@ -128,6 +132,25 @@ export async function run(check) {
     const result = await pending;
     check(result.error?.includes('STALE'), `U3 verification refuses ${name} during command`);
     check((await h.board()).protocol.stats.reject === 0 && (await h.board()).protocol.cycles[0].verify === undefined, `U3 ${name} does not mutate verdict or rejection budget`);
+  });
+  // U4: a SUPERSEDED generation cannot land a result after the fact. The property is
+  // checked on the outcome — the refusal, the untouched board, and the seat that does
+  // hold the generation still working — so it does not depend on which guard fires first.
+  await scenario('a superseded seat cannot land its result', async h => {
+    await h.edit(t => { t.members[1].id = 'nav-2'; t.members[1].joinedAt = 2; });
+    // pair_verify is the tool that stamps evidence: it resolves the actor through
+    // requireLiveEvidenceTarget, so a replaced seat is refused before any command runs.
+    const late = await resultOf(h.verify());
+    // Which guard fires first is an implementation detail — a replaced seat may be
+    // refused when the tool resolves its team, or at the evidence boundary. What must
+    // hold is that it is refused AS A STALE ACTOR rather than judged on its product, and
+    // that it writes nothing (asserted below).
+    check(late.error !== undefined && /seat|belong|STALE/.test(late.error),
+      'U4 the superseded generation cannot land evidence: it is refused as an actor that no longer holds a seat, not judged');
+    check((await h.board()).protocol.cycles[0].verify === undefined, 'U4 and the late result left no verdict on the board');
+    const fresh = await resultOf(h.verify({}, undefined, 'nav-2'));
+    check(fresh.error === undefined || /seat|belong|STALE/.test(fresh.error) === false,
+      'U4 while the generation that DOES hold the seat is never refused as a stale actor (control)');
   });
   await scenario('self mutation', async h => {
     await h.edit(t => { t.tasks[0].oracle.cmd = `node -e "require('fs').writeFileSync('product.txt','different')"`; });
