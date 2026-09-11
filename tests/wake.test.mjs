@@ -91,6 +91,32 @@ export async function run(check) {
     } finally { await rm(pauseRoot, { recursive: true, force: true }).catch(() => {}); }
   }
 
+  /* ---- the pause / resume / takeover matrix (review item 3) ---------------- */
+  // The round-40 review asked for this path to be reviewed as a whole, because the pieces
+  // are individually reasonable and can cancel each other out (#63 was exactly that). Each
+  // cell below is one interleaving; a red here is a finding, not a style point.
+  {
+    const matrix = await mkdtemp(join(tmpdir(), 'pair-pause-matrix-'));
+    const mk = (stateDir) => installPairScheduler({ logger: { warn() {} }, on: () => {}, agents: { get: () => undefined }, subagents: {} }, { stateDir, heartbeatMs: 0 });
+    try {
+      const s = mk('pause-matrix');
+      s.trackTeam(matrix, 'A'); s.untrackTeam(matrix, 'A'); s.trackTeam(matrix, 'A', { background: true });
+      check(s.trackedTeams().length === 0, 'matrix 1: a paused run stays paused through a heartbeat pass already in flight');
+      s.trackTeam(matrix, 'A');
+      check(s.trackedTeams().length === 1, 'matrix 2: a delivery re-engages a paused run');
+      s.trackTeam(matrix, 'B'); s.untrackTeam(matrix, 'A');
+      check(s.trackedTeams().map(t => t.teamId).join(',') === 'B', 'matrix 3: a pause is scoped to its own run');
+      s.trackTeam(matrix, 'B', { background: true });
+      check(s.trackedTeams().map(t => t.teamId).join(',') === 'B', 'matrix 4: a background track for another run does not resurrect the paused one');
+      s.untrackTeam(matrix, 'A');
+      check(s.trackedTeams().map(t => t.teamId).join(',') === 'B', 'matrix 5: re-pausing an already-paused run changes nothing');
+      s.untrackTeam(matrix, 'B');
+      check(s.trackedTeams().length === 0, 'matrix 6: stopping both leaves the sweep empty');
+      const afterRestart = mk('pause-matrix');
+      afterRestart.trackTeam(matrix, 'A');
+      check(afterRestart.trackedTeams().length === 1, 'matrix 7: a fresh scheduler (host restart) rediscoveries deliberately - a restart is re-engagement, not a background track');
+    } finally { await rm(matrix, { recursive: true, force: true }).catch(() => {}); }
+  }
   /* ---- process-local state is released with the seats that own it ------- */
   // lastNudge / memberActivity / parkedAttempts are keyed by CHILD SESSION ID,
   // and memberLifetime:'cycle' mints a fresh id on every accepted cycle — so
