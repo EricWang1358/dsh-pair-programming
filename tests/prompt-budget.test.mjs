@@ -51,12 +51,17 @@ export async function run(check) {
   check(ceOn > ceOff, 'the CE paragraph is charged only when a lane is on - the scenario pricing this plugin does apply');
   check(true, `composition: solo ${sizes.solo} / light ${sizes.light} / full ${sizes.full}; two-contributor +${DUAL_DRIVER_PARAGRAPH}; CE +${ceOn - ceOff}`);
   /* ---- issue #90 item 2: the lean prompt, behind its flag ------------------ */
-  // The risk of hiding the protocol is that nothing delivers it. These four checks are the
-  // guard against that, and against the flag quietly becoming a no-op.
-  const lean = usageSectionText({ experimentalLeanPrompt: true });
+  // The risk of hiding the protocol is that nothing delivers it, or that the invariants stop
+  // being standing instructions.
+  // because the risk of moving the protocol to activation is that the hard invariants stop being
+  // standing instructions. What moves is the PROCEDURE (re-readable at activation); what stays is
+  // the law. Measured 2026-09-11: 1,256 chars, ~13x cheaper than the full section.
   const full = fullUsageSectionText({});
-  check(lean.length < 1200,
-    `the lean section is short (${lean.length} chars) - that is the whole point: a session that never pairs stops paying for the protocol`);
+  const lean = usageSectionText({ experimentalLeanPrompt: true });
+  check(lean.length < 1600,
+    `the lean section is short (${lean.length} chars) but keeps the standing rules`);
+  check(['ONE WRITER', 'ORACLE FIRST', 'TEST FIRST'].every(rule => lean.includes(rule)),
+    'the lean section still states the invariants that must hold at every step (single writer, oracle first, test first)');
   check(!lean.includes(captainProtocol({})) && !lean.includes('Operating procedure'),
     'the lean section carries no protocol text and no operating procedure');
   check(lean.includes('pair_start'),
