@@ -131,6 +131,7 @@ export async function run(check) {
       st1Error = error;
     }
     check(st1 !== undefined && st1.summary.includes('Team "lo-a2"'), 'state A3: pair_status resolves to the live team lo-a2 while lo-a is archived');
+  check(st1.summary.includes('Loads'), 'the board line carries the CE load ledger, so a credential refusal is never unexplained (wiring, not just rendering)');
     check(st1Error === undefined, `state A3: no "belongs to multiple active teams" while a DONE archive coexists${st1Error ? ` — got: ${st1Error.message}` : ''}`);
     let stopped2;
     let stop2Error;
