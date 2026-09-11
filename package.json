@@ -1,6 +1,6 @@
 {
   "name": "@ericwang1358/dsh-pair-programming",
-  "version": "0.15.1",
+  "version": "0.15.2",
   "description": "Agile pair programming for DeepSeek Harness: a self-contained Driver/Navigator/Challenger protocol runtime with quality gates, on host subagent primitives. No third-party plugin dependencies.",
   "type": "module",
   "main": "lib/index.js",
