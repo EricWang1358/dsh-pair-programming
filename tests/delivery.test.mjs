@@ -246,6 +246,50 @@ export async function run(check) {
     const disabledOracle = fixture('disabled-oracle'); disabledOracle.tasks = [{ id: 'ready', subject: 'legacy', status: 'pending', dependencies: [], createdAt: 1, updatedAt: 1 }];
     await createTeamDir(state, disabledOracle); const hd = harness(root); await hd.scheduler.kickTeam(root, disabledOracle.id);
     check(hd.calls.length === 1 && hd.calls[0].childId === 'driver' && hd.calls[0].text.includes('pair_task_claim'), 'scheduler honors config.oracleFirst=false instead of waking an oracle author');
+
+    // #15: the obligation footer is charged against the delivery budget, so repeating
+    // it delivery after delivery does not merely take space — it takes the space real
+    // mail would have used. Measured CUMULATIVELY on purpose: one prompt is capped at
+    // 16 KiB and a single delivery hides the effect entirely.
+    const volume = fixture('volume');
+    volume.tasks = [{ id: 'v-1', subject: 'impl', status: 'in_progress', assignee: 'driver', attemptId: 'a-1', dependencies: [], oracle: { sha: 'seal-v' }, createdAt: 1, updatedAt: 1 }];
+    const vcycle = openCycle(volume.protocol, 'v-1', { tddMode: 'enforce' }); vcycle.step = 'GO'; vcycle.oracleSha = 'seal-v';
+    await createTeamDir(state, volume);
+    const deliver = async () => {
+      await append(state, volume, 'driver', 'board mail for the volume case');
+      const prepared = await prepareMailboxDelivery(state, volume.id, 'driver', { stateDir: 'state' }, { memberId: 'driver' });
+      await finishMailboxDelivery(state, prepared, true, undefined);
+      return prepared;
+    };
+    const firstPrompt = await deliver();
+    check(firstPrompt.text.includes('pair_green'), '#15 the first delivery carries the full owed call');
+    check(firstPrompt.text.includes('unchanged since your last delivery') === false, '#15 and it is the full instruction, not the pointer');
+    check((await readTeam(state, volume.id)).members.find(m => m.name === 'driver')?.obligationDelivered?.debt !== undefined,
+      '#15 the delivery records which debt it just told this seat about, so the next one can tell');
+    const collapsed = [await deliver(), await deliver(), await deliver(), await deliver()];
+    check(collapsed.every(p => p.text.includes('unchanged since your last delivery')),
+      '#15 a repeated, unmoved owed call is folded to a pointer instead of being restated in full');
+    check(collapsed.every(p => p.text.includes('pair_green')), '#15 and the pointer still names the call, which is the actionable part of it');
+    const saving = firstPrompt.bytes - collapsed[0].bytes;
+    check(saving >= 100, '#15 the fold is worth real bytes on every delivery (saved ' + saving + ')');
+    check(4 * saving >= 400, '#15 measured cumulatively, because a single 16 KiB-capped prompt hides the effect');
+    const movedBoard = await readTeam(state, volume.id);
+    movedBoard.protocol.cycles[0].step = 'RED';
+    await writeTeam(state, movedBoard);
+    const afterMove = await deliver();
+    check(afterMove.text.includes('unchanged since your last delivery') === false,
+      '#15 and when the board moves the full instruction comes back: this collapses a restatement, not a change');
+    const swapBoard = await readTeam(state, volume.id);
+    const originalSeat = swapBoard.members.find(m => m.name === 'driver');
+    originalSeat.obligationDelivered = { debt: 'stale-debt', at: 1 };
+    await writeTeam(state, swapBoard);
+    check((await readTeam(state, volume.id)).members.find(m => m.name === 'driver').obligationDelivered !== undefined,
+      '#15 the board carries the delivered-debt memory for the current seat');
+    const swapped = await commitMemberReplacement(state, volume.id,
+      { name: 'driver', id: originalSeat.id, joinedAt: originalSeat.joinedAt, role: originalSeat.role },
+      { id: 'driver-2', joinedAt: 2 });
+    check(swapped === true && (await readTeam(state, volume.id)).members.find(m => m.name === 'driver')?.obligationDelivered === undefined,
+      '#15 and a replacement seat inherits nothing: the memory is cleared with the seat it was written for');
     const research = fixture('research'); research.members[1].id = 'research-nav';
     research.tasks = [{ id: 'research-1', subject: 'read-only investigation', type: 'spike', assignee: 'navigator', status: 'pending', dependencies: [], createdAt: 1, updatedAt: 1 }];
     await createTeamDir(state, research); const ha = harness(root); await ha.scheduler.kickMember(root, research.id, 'navigator');
