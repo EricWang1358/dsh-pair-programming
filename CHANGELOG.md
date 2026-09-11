@@ -5,6 +5,51 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [0.15.8] — 2026-09-11
+
+A batch of nine merges: three product fixes from the round-40 review, and the test
+infrastructure that made them worth trusting. Released together, per the rule that fixes
+accumulate and ship as a batch.
+
+**The pause survives background compensation (#63).** `untrackTeam` removed a run, but the
+heartbeat pass already in flight re-tracked it through `kickTeam`, so the pause lasted only
+until that pass ended and later sweeps kept scanning — v0.15.7 documented this as "at most one
+more nudge" and understated it. Tracking now separates **deliberate re-engagement** from
+**background compensation**: the heartbeat marks its own kick and a background track cannot
+clear a pause, while a delivery, a start or a resume still does.
+
+**A partial scan is unknown occupancy, not an empty checkout (#63).** `inspectTeams` reports a
+corrupt board through `{ errors, complete }` instead of throwing, and `workspaceOwner` only
+handled the throw — so "cannot read the owner" read as "nobody owns it". It now refuses and
+names the unreadable board.
+
+**A root-level runtime input seeds again (#63).** `stillInside` required *strictly* inside while
+the target check resolves the **parent** directory, so a file declared at the checkout root was
+refused with a misleading "resolves outside the disposable checkout".
+
+**The test runner can no longer lie quietly (#65–#71).** `--parallel N` runs each suite in its
+own process and reports per-suite counts and durations; `check.skip(name, reason)` gives a
+deliberate omission its own count, its own line, and a **failure unless the gate acknowledges
+it**; `tests/skip-baseline.json` makes a **new** skip a failure even when acknowledged; a
+filtered run echoes the set it selected and refuses a `--only` word that matches nothing, or an
+unknown flag. The four git fixtures no longer inherit the developer's git config and can no
+longer hang the suite, and `scripts/typecheck.mjs` runs its per-file check in a bounded pool
+(13.2s → 2.9s over 149 files).
+
+### Still open, named rather than implied
+
+- **K2-3**: splitting the pure-behaviour parts of `parallel-tasks` and `integration` out of the
+  real-repository scenarios. The costs are now measured (worktrees 114.2s, integration 90.4s,
+  verification 56.6s) but the split is not done.
+- **K2-4**'s cost items: the `worktrees` suite and `integration`'s per-scenario repositories.
+- The two path reviews the round-40 review asked for: pause/resume/takeover, and
+  modify/invalidate/re-certify.
+- **#19** claim 4 (the old session not returning with authority) is asserted at unit level, not
+  measured live; the D1 write-back is in the plan document.
+- **#26** second bullet needs a `drivers: 2`-capable workspace; **U4's escalation half** needs a
+  specialist seat and **late-result rejection by a superseded revision** needs a revision concept.
+
+Verified as one batch in a single pass: `npm run verify` on the tagged tree.
 ## [0.15.7] — 2026-09-11
 
 **The pause, described accurately.** `pair_interrupt` returns after ISSUING a cancel signal;
