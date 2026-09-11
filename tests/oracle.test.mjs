@@ -324,6 +324,13 @@ export async function run(check) {
     check(liveCycle.oracleRepair?.fromOracleSha === invalidSeal && String(liveCycle.oracleRepair.defectEvidence).length > 0, 'G3 with the replaced digest AND the defect evidence recorded on the cycle itself');
     check(liveCycle.step === stepBefore && liveCycle.step !== 'CLOSED', 'G3 and the Driver keeps its cycle, at the same step: the repair changes the standard it is judged by, not the work it did');
     check(resolveCycleOracle(liveCycle, afterRepair.tasks[0]).error === undefined, 'G3 and the repaired cycle resolves cleanly against the task record');
+    // G5: a defect re-freeze of the same bytes and an interpretation fork used to be
+    // distinguishable only by their number, which is how a session lost track of which
+    // seal was current.
+    check(repaired.summary.includes('freeze #2 (kind=defect') && repaired.summary.includes('reason:'),
+      'G5 a re-freeze names its KIND and its reason, so the current seal is not a guess');
+    check(repaired.interpretation_forks_left === 2 && repaired.freeze_kind === 'defect',
+      'G5 and a defect fork reports the interpretation budget it did NOT consume');
     // H3: the legacy step tools refuse an oracle cycle by naming the right move.
     const redAdvice = await fails(() => h2.tool('pair_red')({ cycle_id: live.cycle_id, test_files: ['t.mjs'], red_evidence: ['fails'] }, { agent: h2.driver }), 'oracle');
     check(redAdvice.includes('IS its RED') && redAdvice.includes('pair_green'), 'H3 pair_red on an oracle cycle names the oracle, not a chain error');
@@ -385,6 +392,17 @@ export async function run(check) {
     await writeFile(join(g1Root, brokenPath), 'const absent = globalThis.__nothingImplementedYet;\nif (absent === undefined) { console.log("acceptance not met"); process.exit(1); }\nprocess.exit(0);\n');
     const healthy = await g1.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK, oracle_files: [brokenPath], oracle_cmd: 'node ' + brokenPath }, { agent: g1.navigator });
     check(healthy.oracle_sha?.length === 64, 'G1 a valid acceptance artifact still freezes RED - the parse gate does not block real work');
+    // G4: the freeze reports the artifact beside the digest — per file its sha256, its
+    // byte count and its line count. Three confusions in one session came from a seal
+    // that printed nothing else.
+    check(healthy.artifact_metrics?.files?.[0]?.sha256?.length === 64
+      && healthy.artifact_metrics.bytes > 0 && healthy.artifact_metrics.lines > 0,
+    'G4 the freeze reports the artifact it sealed: per-file sha256, bytes and lines');
+    check(healthy.summary.includes('artifact ') && healthy.summary.includes('file sha256')
+      && healthy.artifact_metrics.files[0].sha256.startsWith(healthy.summary.match(/file sha256 ([0-9a-f]+)/)[1]),
+    'G4 and the board summary carries the same numbers the digest was computed over');
+    check(healthy.freeze_kind === 'interpretation' && healthy.interpretation_forks_left === 2,
+    'G5 the freeze says which kind it is and how much interpretation budget is left');
   } finally {
     delete process.env.FIXED;
     await rm(root, { recursive: true, force: true });
