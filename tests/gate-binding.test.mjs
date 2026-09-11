@@ -26,7 +26,8 @@ import { initialProtocolState } from '../lib/protocol/machine.js';
 import { taskDesignContext } from '../lib/protocol/design.js';
 import { registerArbitrateTools } from '../lib/tools/arbitrate.js';
 import { registerLifecycleTools } from '../lib/tools/lifecycle.js';
-import { createTeamDir, readTeam } from '../lib/state/store.js';
+import { createTeamDir, readTeam, writeTeam } from '../lib/state/store.js';
+import { closeRisk, mitigateRisk } from '../lib/protocol/risks.js';
 import { digestOracleFiles, workspaceFingerprint } from '../lib/tools/oracle-exec.js';
 
 /**
@@ -111,6 +112,26 @@ export async function run(check) {
   check(!moved(board => { board.protocol.cycles[0].verify.binding.breakdown = { task: 'a'.repeat(64) }; }), 'a stored input breakdown is excluded from the digest it describes');
 
   check(moved(board => { board.protocol.risks = [{ id: 'r-leak', severity: 'P1', status: 'OPEN', scenario: 's', openedAt: 6 }]; }), 'a new P1 blocker still invalidates the credential');
+
+  // #131: the register is hashed as a set of TICKETS, so resolving one is the
+  // remedy the credential was waiting for while raising one still moves it.
+  const withRisk = credentialBoard();
+  withRisk.protocol.risks = [{ id: 'r-leak', severity: 'P1', status: 'OPEN', scenario: 's', trigger: 't', suggestion: 'x', raisedBy: 'challenger', scope: 'product', openedAt: 6 }];
+  const openPrint = gateStateFingerprint(withRisk, 't-1');
+  const lifecycle = (status, extra) => { const board = credentialBoard(); board.protocol.risks = [{ ...withRisk.protocol.risks[0], status, ...extra }]; return gateStateFingerprint(board, 't-1'); };
+  check(lifecycle('CLOSED', { closedAt: 9, closeEvidence: 'node oracle.mjs: 0', closingArtifact: { cmd: 'node oracle.mjs', exit: 0, paths: ['oracle.mjs'] } }) === openPrint,
+    '#131 closing the blocker does not move the credential: the ticket is bound, its lifecycle is not');
+  check(lifecycle('WONTFIX', { closedAt: 9, wontfixRationale: 'cannot happen in this deployment' }) === openPrint,
+    '#131 and neither does a captain ruling it a false alarm');
+  check(lifecycle('MITIGATED', { mitigatedAt: 8, mitigationEvidence: 'fixed in gate.js' }) === openPrint,
+    '#131 nor the Driver mitigating it (MITIGATED still blocks, so the gate re-judges that state live)');
+  const lifecycledAgain = credentialBoard();
+  lifecycledAgain.protocol.risks = [{ ...withRisk.protocol.risks[0], confirmedBy: 'navigator', confirmationNote: 'looks fine', reopenedAt: 11 }];
+  check(gateStateFingerprint(lifecycledAgain, 't-1') === openPrint,
+    '#131 and a lifecycle field added to the ticket later cannot reintroduce the invalidation (the binding is an allowlist)');
+  const rewordedRisk = credentialBoard();
+  rewordedRisk.protocol.risks = [{ ...withRisk.protocol.risks[0], scenario: 'a different failure mode' }];
+  check(gateStateFingerprint(rewordedRisk, 't-1') !== openPrint, '#131 but a reworded blocker still moves it: the ticket itself is what is bound');
   check(moved(board => { board.tasks[0].acceptanceRefs = ['UC-1.AC-1', 'UC-1.AC-2']; }), 'a requirement/acceptance change still invalidates the credential');
   check(moved(board => { board.tasks[0].story.intent = 'change the plugin differently'; }), 'a change to the card\'s own contract still invalidates the credential');
   check(moved(board => { board.useCases[0].design.failureBehavior = 'refuse silently'; }), 'a public-contract (design) change still invalidates the credential');
@@ -222,5 +243,30 @@ export async function run(check) {
       'a genuine board change after the review still refuses the gate');
     check(refusal.includes('decisions:') && refusal.includes(dispute.decision_id),
       'the refusal names the changed input AND the ruling id that moved it');
+
+    /* -------------------------------------------------------------------- */
+    /* #131: the measured deadlock — final ACCEPT, then the captain closes    */
+    /* the blocker the gate itself waits for, and the gate answers GATE_STALE. */
+    /* -------------------------------------------------------------------- */
+    const third = { id: 'cap3', session: { header: { cwd: root }, append() {} } };
+    const blocked = credentialBoard({ id: 'blocked', name: 'Blocked', captainSessionId: 'cap3' });
+    blocked.protocol.risks = [{ id: 'r-leak', severity: 'P0', status: 'OPEN', scenario: 'the emitted name will not match the acceptance test', trigger: 'any run of the emitter', suggestion: 'fix the emitter', raisedBy: 'challenger', scope: 'product', openedAt: 6 }];
+    await arm(blocked, third);
+    const refusedByRisk = await attempt(() => h.tool('pair_gate_check')({ task_id: 't-1' }, { agent: third }));
+    check(refusedByRisk.error.includes('open P0') && refusedByRisk.error.includes('r-leak') && !refusedByRisk.error.includes('GATE_STALE'),
+      `an open P0 refuses the gate on its own rule, before any credential is judged (got: ${refusedByRisk.error})`);
+    const stored = await readTeam(h.stateRoot, 'blocked');
+    mitigateRisk(stored.protocol, 'r-leak', 'the emitter now fails loudly on an unmatched name');
+    closeRisk(stored.protocol, 'r-leak', 'verified by the frozen acceptance test', { closingCmd: 'node oracle.mjs', closingExit: 0, closingPaths: ['oracle.mjs'] });
+    await writeTeam(h.stateRoot, stored);
+    const afterClose = await attempt(() => h.tool('pair_gate_check')({ task_id: 't-1' }, { agent: third }));
+    check(afterClose.error === '' && afterClose.value?.pass === true && typeof afterClose.value.gate_pass_id === 'string',
+      '#131 closing the blocker after the final ACCEPT lets the gate issue the credential instead of answering GATE_STALE');
+    const raisedLater = await readTeam(h.stateRoot, 'blocked');
+    raisedLater.protocol.risks.push({ id: 'r-late', severity: 'P1', status: 'OPEN', scenario: 'raised after the review', trigger: 't', suggestion: 'x', raisedBy: 'challenger', scope: 'product', openedAt: 12 });
+    await writeTeam(h.stateRoot, raisedLater);
+    const lateRefusal = await attempt(() => h.tool('pair_gate_check')({ task_id: 't-1' }, { agent: third }));
+    check(lateRefusal.error.includes('GATE_STALE'),
+      '#131 while a blocker raised AFTER the review still refuses the gate (the arm is not weakened)');
   } finally { await rm(root, { recursive: true, force: true }); }
 }
