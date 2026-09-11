@@ -419,6 +419,20 @@ export async function run(check) {
     check(cancelStarted.includes('already has cycles') && cancelStarted.includes('pair_arbitrate'), 'a started task refuses silent cancellation and names the way through');
     const cancelPlanned = await updateTask({ task_id: 't-9', status: 'cancelled', attempt_id: 'a-1' }, { agent: flh.captain }).then(() => 'ok', (e) => String(e?.message ?? e));
     check(cancelPlanned === 'ok', 'an unplanned task still cancels normally (the guard is not over-broad)');
+    // #128: the refusal names a way through, so that way has to exist. Measured on SG-career:
+    // the captain landed two rulings exactly as instructed and was refused again, which left
+    // `failed` as the only exit and locked pair_stop into ABORTED.
+    const ruled = flowHarness(root, 'cancel-ruled-state');
+    const updateRuled = ruled.defs.find((x) => x.name === 'pair_task_update').execute;
+    const ruling = { id: 'd-cancel-1', taskId: 't-1', conflictRef: 'cancel t-1', decision: 'stop this card', evidence: ['board: the scope moved'], rationale: 'the deliverable is no longer wanted', at: 9 };
+    await createTeamDir(ruled.stateRoot, teamFixture({ tasks: [tsk('t-1')], protocol: { ...initialProtocolState(), cycles: [{ taskId: 't-1', openedAt: 5 }], decisions: [ruling] } }));
+    const cancelRuled = await updateRuled({ task_id: 't-1', status: 'cancelled', attempt_id: 'a-1' }, { agent: ruled.captain }).then(() => 'ok', (e) => String(e?.message ?? e));
+    check(cancelRuled === 'ok', `#128 a ruling attributed to the card is the recorded reason the refusal asks for (got: ${cancelRuled})`);
+    const bookkeeping = flowHarness(root, 'cancel-bookkeeping-state');
+    const updateBookkeeping = bookkeeping.defs.find((x) => x.name === 'pair_task_update').execute;
+    await createTeamDir(bookkeeping.stateRoot, teamFixture({ tasks: [tsk('t-1')], protocol: { ...initialProtocolState(), cycles: [{ taskId: 't-1', openedAt: 5 }], decisions: [{ ...ruling, id: 'd-disclosure-1', billing: 'bookkeeping' }] } }));
+    const cancelBookkeeping = await updateBookkeeping({ task_id: 't-1', status: 'cancelled', attempt_id: 'a-1' }, { agent: bookkeeping.captain }).then(() => 'ok', (e) => String(e?.message ?? e));
+    check(cancelBookkeeping.includes('already has cycles'), `#128 while a ruling that only discharged a disclosure is not a reason to cancel (got: ${cancelBookkeeping})`);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
