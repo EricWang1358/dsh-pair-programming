@@ -51,12 +51,18 @@ function scratch() {
 
 export async function run(check) {
   const roots = [];
+  // K2-2: a scenario that cannot exercise its case must SKIP, with the reason, rather
+  // than reach the line below and be counted as a pass. The wrapper hands the case a
+  // skip(); the runner counts it separately and refuses a skip it has not been told to
+  // expect (tests/skip-baseline.json).
   const scenario = (name, fn) => {
     const dirs = scratch();
     roots.push(dirs.root);
+    let skipped;
+    const skip = reason => { skipped = reason; };
     try {
-      const result = fn(dirs);
-      check(true, name);
+      const result = fn(dirs, skip);
+      if (skipped === undefined) check(true, name); else check.skip(name, skipped);
       return result;
     } catch (error) {
       check(false, name + ': ' + String(error?.message ?? error));
@@ -98,10 +104,18 @@ export async function run(check) {
     });
 
     // ---- 4. the leaf itself as a direct link ----------------------------------
-    scenario('J1 a direct file link is refused at the leaf', dirs => {
+    scenario('J1 a direct file link is refused at the leaf', (dirs, skip) => {
       writeFileSync(join(dirs.outside, 'real.json'), '{"secret":"leaf"}\n');
       try { linkFile(join(dirs.outside, 'real.json'), join(dirs.workspace, 'link.json')); }
-      catch { return; } // a host without symlink privilege: the leaf case is covered by the ancestor cases
+      catch (error) {
+        // Only a RECOGNISED privilege limitation skips. Swallowing every error is how a
+        // red case becomes a green one (K2-2, measured): this catch used to return quietly,
+        // and the scenario then reported "ok" for a case that never ran.
+        const code = String(error?.code ?? '');
+        if (!['EPERM', 'EACCES', 'ENOSYS', 'UNKNOWN'].includes(code)) throw error;
+        skip('this host cannot create a file symlink (' + code + '); the ancestor-link cases above cover the same boundary');
+        return;
+      }
       const report = seedRuntimeInputs(dirs.workspace, dirs.worktree, ['link.json']);
       assert.equal(report.seeded.length, 0, 'a leaf link was copied');
       assert.equal(existsSync(join(dirs.worktree, 'link.json')), false);

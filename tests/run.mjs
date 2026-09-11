@@ -61,6 +61,16 @@ if (onlyAt !== -1 && (only === undefined || only.length === 0)) {
   console.error('--only needs a comma-separated list of suite names, e.g. --only gate,scope');
   process.exit(2);
 }
+// K2-1: the filter must not be able to lie. An unknown flag is refused rather than
+// ignored, and EVERY word of --only has to match something - the measured defect was a
+// typo in a second word that silently ran fewer suites while the run still read green.
+const KNOWN_FLAGS = ['--only', '--timing', '--parallel', '--allow-skips'];
+for (const token of argv) {
+  if (token.startsWith('--') && !KNOWN_FLAGS.includes(token)) {
+    console.error('unknown flag ' + token + '; known flags: ' + KNOWN_FLAGS.join(', '));
+    process.exit(2);
+  }
+}
 
 // Each suite exports an async run(check) so state is isolated.
 const suites = ['peer-setup.test.mjs', 'protocol.test.mjs', 'state.test.mjs', 'lock.test.mjs', 'gate.test.mjs', 'story.test.mjs', 'coverage.test.mjs', 'settings.test.mjs', 'client.test.mjs', 'members.test.mjs', 'lifecycle.test.mjs', 'lifecycle-output.test.mjs', 'collapse.test.mjs', 'wake.test.mjs', 'oracle.test.mjs', 'obligation.test.mjs', 'scope.test.mjs', 'stall.test.mjs', 'solo.test.mjs', 'board-guard.test.mjs', 'task-amend.test.mjs', 'disclosure.test.mjs', 'attention.test.mjs', 'ce.test.mjs', 'lessons.test.mjs', 'command.test.mjs', 'ce-registry.test.mjs', 'events.test.mjs', 'host-contract.test.mjs', 'command-shape.test.mjs', 'nav-model.test.mjs', 'ledger.test.mjs', 'settings-host.test.mjs'];
@@ -84,9 +94,14 @@ suites.push('runtime-input-boundary.test.mjs');
 suites.push('workspace-ownership.test.mjs');
 const selected = only === undefined ? suites
   : suites.filter(s => only.some(needle => s.includes(needle)));
-if (only !== undefined && selected.length === 0) {
-  console.error(`--only matched no suite. Known suites: ${suites.join(', ')}`);
-  process.exit(2);
+if (only !== undefined) {
+  const unmatched = only.filter(word => !suites.some(name => name.includes(word)));
+  if (unmatched.length > 0) {
+    console.error('--only matched no suite for: ' + unmatched.join(', ') + ' — a word that selects nothing must fail, not shrink the run silently');
+    console.error('known suites: ' + suites.join(', '));
+    process.exit(2);
+  }
+  if (selected.length === 0) { console.error('--only selected nothing. Known suites: ' + suites.join(', ')); process.exit(2); }
 }
 if (parallel > 1) {
   const { spawn } = await import('node:child_process');
