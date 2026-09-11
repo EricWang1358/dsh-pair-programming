@@ -76,8 +76,26 @@ export function compareRecovery(before, after) {
       held: JSON.stringify(was.settled) === JSON.stringify(team.settled),
       detail: String(was.settled.cycles.length) + ' settled cycle(s), ' + String(was.settled.tasks.length) + ' completed task(s)' });
     const changedGenerations = team.members.filter(m => (was.members.find(w => w.name === m.name)?.id ?? m.id) !== m.id);
+    // A claim that is hardcoded true is not a measurement, and this one was: it said an
+    // unfinished cycle had moved onto the new generation without ever looking. It now
+    // compares the open cycles' owners before and after, and holds only when an owner
+    // actually changed to a seat that exists in the AFTER state.
+    const beforeOpen = new Map((was.open ?? []).map(cycle => [cycle.id, cycle.owner]));
+    const afterOpen = new Map((team.open ?? []).map(cycle => [cycle.id, cycle.owner]));
+    const liveIds = new Set((team.members ?? []).map(m => m.id));
+    const moved = [];
+    const stragglers = [];
+    for (const [id, owner] of afterOpen) {
+      const wasOwner = beforeOpen.get(id);
+      const wasId = wasOwner?.memberId;
+      if (wasId === undefined || wasId === owner?.memberId) { stragglers.push(id); continue; }
+      (liveIds.has(owner?.memberId) ? moved : stragglers).push(id);
+    }
     claims.push({ team: team.id, claim: 'an unfinished cycle moved onto the new generation',
-      held: true, detail: changedGenerations.length === 0 ? 'no seat was replaced in this restart' : 'replaced: ' + changedGenerations.map(m => m.name).join(',') });
+      held: stragglers.length === 0,
+      detail: (moved.length === 0 ? 'no unfinished cycle changed owner' : 'moved: ' + moved.join(','))
+        + (stragglers.length === 0 ? '' : ' | still on an old or unknown seat: ' + stragglers.join(','))
+        + (changedGenerations.length === 0 ? ' | no seat was replaced in this restart' : ' | replaced seats: ' + changedGenerations.map(m => m.name).join(',')) });
   }
   return claims;
 }
@@ -95,6 +113,13 @@ async function selfTest() {
     ['a changed verdict signature DOES move it', JSON.stringify(settledFingerprint(board)) !== JSON.stringify(settledFingerprint(tampered))],
     ['an open cycle is not in the settled half', openFingerprint({ protocol: { cycles: [{ id: 'c-2', step: 'GO' }] } }).length === 1 && settledFingerprint({ protocol: { cycles: [{ id: 'c-2', step: 'GO' }] } }).cycles.length === 0],
   ];
+  const beforeSnap = { teams: [{ id: 't', phase: 'CYCLING', captainSessionId: 'cap', members: [{ name: 'driver', id: 'old', role: 'driver' }],
+    settled: { cycles: [], tasks: [] }, open: [{ id: 'c-1', owner: { memberId: 'old', attemptId: 'a' } }] }] };
+  const withSeat = (ownerId) => ({ teams: [{ ...beforeSnap.teams[0], members: [{ name: 'driver', id: 'new', role: 'driver' }],
+    open: [{ id: 'c-1', owner: { memberId: ownerId, attemptId: 'a' } }] }] });
+  const migrationClaim = snapshot => (compareRecovery(beforeSnap, snapshot).find(c => c.claim.startsWith('an unfinished cycle')) ?? {}).held;
+  results.push(['a migrated open cycle holds the claim', migrationClaim(withSeat('new')) === true]);
+  results.push(['an open cycle still on the old seat FAILS the claim', migrationClaim(withSeat('old')) === false]);
   for (const [name, ok] of results) console.log((ok ? 'ok   ' : 'FAIL ') + name);
   return results.every(([, ok]) => ok);
 }
