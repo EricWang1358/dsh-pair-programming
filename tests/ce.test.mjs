@@ -282,6 +282,13 @@ export async function run(check) {
   check(ceStatusLine({ ceLanes: 'advisory', ceSoloLane: 'full', ceProbe: found }).includes('widens'), 'the board line names what this workspace sees when no team is live');
   check(ceStatusLine({ ceLanes: 'off', ceSoloLane: 'gesture' }).includes('gesture'), 'and does so even when the pair lane itself is off');
   check(ceStatusLine({ ceLanes: 'advisory' }).includes('no probe has run'), 'an armed lane with no detection says so rather than implying skills exist');
+  // The ledger is what the gate acts on, so the board line must be able to say it.
+  const noLedger = ceStatusLine({ ceLanes: 'advisory', ceProbe: found });
+  check(noLedger.includes('Loads: not read in this process'), 'an unread ledger says so rather than implying nothing was loaded');
+  const blindLedger = ceStatusLine({ ceLanes: 'advisory', ceProbe: found, ceLoads: { readable: false, loads: [] } });
+  check(blindLedger.includes('UNREADABLE'), 'an unreadable ledger reads as unknown, never as empty');
+  const dirtyLedger = ceStatusLine({ ceLanes: 'advisory', ceProbe: found, ceLoads: { readable: true, loads: [{ name: 'ce-work' }], violation: { ok: false, reason: 'owns an execution loop' } } });
+  check(dirtyLedger.includes('Loads during this team: 1') && dirtyLedger.includes('LANE VIOLATION'), 'a shipping-lane load names itself on the board, because the gate will refuse the credential for it');
 
   const promptOff = usageSectionText({ tddMode: 'enforce', pairStyle: 'traditional', defaultMode: 'solo', ceLanes: 'off' });
   const promptOn = usageSectionText({ tddMode: 'enforce', pairStyle: 'traditional', defaultMode: 'solo', ceLanes: 'advisory' });
