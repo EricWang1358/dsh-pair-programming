@@ -1,3 +1,11 @@
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+// This runner exits its process and loads suites that patch process-local APIs.
+// Refuse in-host import BEFORE any suite or exit call can affect DSH.
+if (!process.argv[1] || realpathSync(process.argv[1]) !== realpathSync(fileURLToPath(import.meta.url))) {
+  throw new Error('PAIR_TEST_PROCESS_REQUIRED: run node tests/run.mjs in a separate process; never import the runner into DSH');
+}
+
 /**
  * Test runner: aggregates the pure-logic unit suites. Offline, no deps.
  * Exits nonzero on any failure so `pnpm test` gates the pipeline.
@@ -32,7 +40,7 @@ if (onlyAt !== -1 && (only === undefined || only.length === 0)) {
 }
 
 // Each suite exports an async run(check) so state is isolated.
-const suites = ['protocol.test.mjs', 'state.test.mjs', 'lock.test.mjs', 'gate.test.mjs', 'story.test.mjs', 'coverage.test.mjs', 'settings.test.mjs', 'client.test.mjs', 'members.test.mjs', 'lifecycle.test.mjs', 'lifecycle-output.test.mjs', 'collapse.test.mjs', 'wake.test.mjs', 'oracle.test.mjs', 'obligation.test.mjs', 'scope.test.mjs', 'stall.test.mjs', 'solo.test.mjs', 'board-guard.test.mjs', 'task-amend.test.mjs', 'disclosure.test.mjs', 'attention.test.mjs', 'ce.test.mjs', 'lessons.test.mjs', 'command.test.mjs', 'ce-registry.test.mjs', 'events.test.mjs', 'host-contract.test.mjs', 'command-shape.test.mjs', 'nav-model.test.mjs', 'ledger.test.mjs', 'settings-host.test.mjs'];
+const suites = ['peer-setup.test.mjs', 'protocol.test.mjs', 'state.test.mjs', 'lock.test.mjs', 'gate.test.mjs', 'story.test.mjs', 'coverage.test.mjs', 'settings.test.mjs', 'client.test.mjs', 'members.test.mjs', 'lifecycle.test.mjs', 'lifecycle-output.test.mjs', 'collapse.test.mjs', 'wake.test.mjs', 'oracle.test.mjs', 'obligation.test.mjs', 'scope.test.mjs', 'stall.test.mjs', 'solo.test.mjs', 'board-guard.test.mjs', 'task-amend.test.mjs', 'disclosure.test.mjs', 'attention.test.mjs', 'ce.test.mjs', 'lessons.test.mjs', 'command.test.mjs', 'ce-registry.test.mjs', 'events.test.mjs', 'host-contract.test.mjs', 'command-shape.test.mjs', 'nav-model.test.mjs', 'ledger.test.mjs', 'settings-host.test.mjs'];
 suites.push('stability.test.mjs');
 suites.push('drift.test.mjs');
 suites.push('delivery.test.mjs');
@@ -42,6 +50,9 @@ suites.push('product.test.mjs', 'backlog.test.mjs', 'repair.test.mjs', 'design.t
 suites.push('panel.test.mjs', 'deliverables.test.mjs');
 suites.push('yield.test.mjs');
 suites.push('gate-binding.test.mjs');
+// U1's acceptance suite: ported from the oracle frozen by the v15-u1-routing Navigator
+// before any implementation existed (see the file header for the two instrument repairs).
+suites.push('route-isolation.test.mjs');
 const selected = only === undefined ? suites
   : suites.filter(s => only.some(needle => s.includes(needle)));
 if (only !== undefined && selected.length === 0) {
