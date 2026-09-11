@@ -5,6 +5,49 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [0.15.5] — 2026-09-11
+
+The cold-recovery measurement was finally run on a real board. It confirmed the hand-over,
+and it found **two defects on the way** — both fixed here, plus the procedure that makes the
+measurement repeatable.
+
+**Measured (#19).** On `sg-career-workbench`, adopted after a host restart: the board is
+discoverable read-only, the hand-over succeeded (new captain, all three seats regenerated),
+and the settled half — 7 cycles and 2 completed tasks, with owner, digest, verdict and gate
+credential — is **byte-identical** across both the restart and the hand-over.
+
+**The hand-over refusal now names what blocks it.** The first attempt failed with `The new
+Captain already leads a live team` because the session still led its own team in **RETRO** —
+which counts as non-terminal here. The refusal said neither which team blocked it nor what to
+do; it now names the team and its phase, states that one session leads at most one
+non-terminal team, and gives both ways forward. The same rule G6 applied to the risk row.
+
+**An unowned open cycle is no longer reported as a failed migration.** The probe had flagged
+the board's single open cycle as not migrated; inspection showed it carries **no owner** and
+its task **failed with no attemptId**, so the resume path's re-stamp conditions cannot apply
+and there was nothing to migrate. That was an instrument failure dressed as a product red —
+the distinction this project keeps paying for. Unowned cycles are now named and do not count
+against the claim, while a cycle still pointing at an old or unknown seat still fails it.
+
+**The probe's migration claim is measured, not asserted.** It was `held: true` — hardcoded —
+which meant a claim that could never fail. It now compares each open cycle's owner before and
+after. Self-test 8/8, covering both directions of every comparison.
+
+**`docs/07-workflow/COLD-RECOVERY.md`** records the procedure, the four acceptance claims and
+what a failure of each means — including the operational fact that cost a round: the plugin
+resolves the workspace from the calling session's cwd, so a live team can only be adopted from
+the session whose cwd is its workspace, while the probe takes a path and can be run anywhere.
+
+### Still open, named rather than implied
+
+- **#19**: claim 4 (the old session not returning with authority) is asserted at unit level,
+  not measured live; and the write-back into the plan's D1 section is the user's file.
+- **#26**: its second bullet — a real `drivers: 2` run for non-self-authored evidence — needs
+  a workspace whose root is a clean committed Git repository.
+- **U4's escalation half** still needs a specialist seat, and **late-result rejection by a
+  superseded public-contract revision** still needs a revision concept.
+
+Verified as one batch in a single pass: `npm run verify` on the tagged tree.
 ## [0.15.4] — 2026-09-11
 
 Three follow-throughs on U1, all of them seams the design named and the code had not
