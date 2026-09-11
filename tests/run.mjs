@@ -115,6 +115,7 @@ if (parallel > 1) {
       while (active < parallel && queue.length > 0) {
         const suite = queue.shift();
         active++;
+        const childAt = Date.now();
         const child = spawn(process.execPath, [self, '--only', suite], { stdio: ['ignore', 'pipe', 'pipe'] });
         let out = '';
         child.stdout.on('data', chunk => { out += String(chunk); });
@@ -122,8 +123,12 @@ if (parallel > 1) {
         child.on('close', code => {
           active--; done++;
           const match = summary.exec(out);
-          outcomes.push({ suite, code, passed: match ? Number(match[1]) : 0, failed: match ? Number(match[2]) : (code === 0 ? 0 : 1), skipped: match ? Number(match[3]) : 0 });
-          if (timing) console.log('  done ' + suite + ' (exit ' + String(code) + ')');
+          const ms = Date.now() - childAt;
+          outcomes.push({ suite, code, ms, passed: match ? Number(match[1]) : 0, failed: match ? Number(match[2]) : (code === 0 ? 0 : 1), skipped: match ? Number(match[3]) : 0 });
+          // Per-suite wall clock in parallel mode too: K2-3 asks what the heavy suites
+          // actually cost, and until this existed the only way to find out was to run them
+          // one at a time, which is the cost being measured.
+          console.log('  ' + suite + ': ' + (ms / 1000).toFixed(1) + 's (exit ' + String(code) + ')');
           if (done === selected.length) resolve(); else pump();
         });
       }
@@ -135,6 +140,8 @@ if (parallel > 1) {
   const skippedParallel = outcomes.reduce((sum, row) => sum + row.skipped, 0);
   const broken = outcomes.filter(row => row.code !== 0);
   if (broken.length > 0) console.error(broken.map(row => 'FAILED ' + row.suite + ': ' + row.passed + ' passed / ' + row.failed + ' failed (exit ' + String(row.code) + ')').join(String.fromCharCode(10)));
+  const slowest = [...outcomes].sort((a, b) => b.ms - a.ms).slice(0, 10);
+  console.log('slowest: ' + slowest.map(row => row.suite + ' ' + (row.ms / 1000).toFixed(1) + 's').join(' · '));
   console.log(String.fromCharCode(10) + passed + ' passed, ' + failed + ' failed, ' + skippedParallel + ' skipped across ' + selected.length + ' suites (parallel ' + parallel + ')');
   if (skippedParallel > 0 && !allowSkips) console.error('a skipped check is not a verified one; re-run with --allow-skips only when the environment genuinely cannot exercise it');
   process.exit(broken.length === 0 && failed === 0 && (skippedParallel === 0 || allowSkips) ? 0 : 1);
