@@ -150,6 +150,42 @@ export async function run(check) {
     check(st3?.blocking_cause === null && Array.isArray(st3?.yielded_obligations) && st3.yielded_obligations.length === 0,
       'C3: on a terminal board nothing is owed, so blocking_cause is an explicit null rather than an absent key');
     check(st3 !== undefined && st3.phase === 'ABORTED' && st3.summary.includes('Team "lo-a" ('), `state A3: after stopping lo-a2, pair_status falls back to the first terminal archive (lo-a, ABORTED phase — tool-level audit face)${st3Error ? ` — got: ${st3Error.message}` : ''}`);
+    // ---- U2: the board is a surface, and the acceptance author must not read the
+    // candidate through it. The seat keeps its four tools; pair_status was the one that
+    // still answered with the raw board (proposal files, RED test files, GREEN evidence,
+    // the Driver's tuned-to-the-instrument declaration, and every other card's seal).
+    const solo = startHarness(root, 'out-expose');
+    await solo.start({ goal: 'exposure probe', mode: 'solo', name: 'expose', use_cases: USE_CASES }, { agent: solo.captain });
+    const exposeBoard = await readTeam(join(root, 'out-expose'), 'expose');
+    const specSeat = exposeBoard.members.find(m => m.role === 'spec');
+    check(specSeat !== undefined && specSeat.id !== '', 'U2 the solo run has a SPEC seat to ask as');
+    exposeBoard.tasks.push({
+      id: 't-1', subject: 'the contract stays visible', status: 'in_progress', assignee: 'driver', attemptId: 'a-1',
+      dependencies: [], createdAt: 1, updatedAt: 2, acceptanceRefs: [],
+      oracle: { sha: 'a'.repeat(64), files: ['.pair-oracles/ns/t-1/accept.mjs'], cmd: 'node .pair-oracles/ns/t-1/accept.mjs', caseRefs: [], divergences: [] },
+    });
+    exposeBoard.tasks.push({ id: 't-2', subject: 'another card', status: 'pending', dependencies: [], createdAt: 1, updatedAt: 2,
+      oracle: { sha: 'b'.repeat(64), files: ['.pair-oracles/ns/t-2/accept.mjs'], cmd: 'node .pair-oracles/ns/t-2/accept.mjs', caseRefs: [], divergences: [] } });
+    exposeBoard.protocol.cycles.push({ id: 'c-1', taskId: 't-1', step: 'GREEN', openedAt: 1,
+      proposal: { files: ['src/secret-approach.mjs'] }, red: { testFiles: ['t.mjs'] },
+      green: { evidence: ['suite green'], tunedForOracle: 'the counter was fitted to the acceptance run' },
+      report: { diffSummary: 'src/secret-approach.mjs +40/-2' } });
+    await writeTeam(join(root, 'out-expose'), exposeBoard);
+    const asSpec = await solo.status({}, { agent: { id: specSeat.id, session: { header: { cwd: root }, append() {} } } });
+    const specCycle = asSpec.cycles.find(c => c.id === 'c-1');
+    const specOther = asSpec.tasks.find(t => t.id === 't-2');
+    check(specCycle.proposal === undefined && specCycle.green === undefined && specCycle.report === undefined && specCycle.red === undefined,
+      'U2 the acceptance author does not read the candidate through the board: no proposal, RED, GREEN or report on any cycle');
+    check(specCycle.step === 'GREEN' && specCycle.taskId === 't-1', 'U2 while the cycle still says where the work stands (step and task survive the projection)');
+    check(specOther.oracle !== undefined && specOther.oracle.frozen === true && specOther.oracle.cmd === undefined,
+      'U2 another card\'s sealed standard is reduced to the fact that it exists, not its command or files');
+    check(asSpec.tasks.some(t => t.id === 't-1' && t.subject === 'the contract stays visible'), 'U2 the card contract itself is still visible to this seat');
+    check(!asSpec.summary.includes('Tuned to the instrument:'), 'U2 and the summary stops describing the candidate (the tuned-to-the-instrument declaration)');
+    check(asSpec.summary.includes('Goal coverage:') && asSpec.use_cases.length > 0, 'U2 the public contract it works from — goal coverage and the frozen use cases — is untouched');
+    const asCaptain = await solo.status({}, { agent: solo.captain });
+    check(asCaptain.cycles.find(c => c.id === 'c-1').green !== undefined && asCaptain.summary.includes('Tuned to the instrument:'),
+      'U2 and the projection is seat-scoped: the captain still sees the candidate and that declaration');
+    check(isJsonValue(asSpec), 'U2 the projected status still passes the lossless-JSON gate');
     // State B: lessons.json present — same gate, and only the keep/try projection is carried.
     const b = startHarness(root, 'out-b');
     await mkdir(join(root, 'out-b'), { recursive: true });
