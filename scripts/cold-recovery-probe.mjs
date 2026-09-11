@@ -85,16 +85,26 @@ export function compareRecovery(before, after) {
     const liveIds = new Set((team.members ?? []).map(m => m.id));
     const moved = [];
     const stragglers = [];
+    const unowned = [];
     for (const [id, owner] of afterOpen) {
       const wasOwner = beforeOpen.get(id);
       const wasId = wasOwner?.memberId;
-      if (wasId === undefined || wasId === owner?.memberId) { stragglers.push(id); continue; }
-      (liveIds.has(owner?.memberId) ? moved : stragglers).push(id);
+      // A cycle nobody owns is not a hand-over that failed: measured on a real board
+      // (#19), the single open cycle was owner-less on a FAILED task with no attemptId,
+      // so the resume path's re-stamp conditions could not apply. Reporting that as NOT
+      // HELD would have been an instrument failure dressed as a product red — the
+      // distinction this whole effort keeps paying for. Unowned cycles are named, not
+      // counted against the claim.
+      if (owner?.memberId === undefined || owner?.memberId === null) { unowned.push(id); continue; }
+      if (wasId === undefined) { unowned.push(id); continue; }
+      if (wasId === owner.memberId) { stragglers.push(id); continue; }
+      (liveIds.has(owner.memberId) ? moved : stragglers).push(id);
     }
     claims.push({ team: team.id, claim: 'an unfinished cycle moved onto the new generation',
       held: stragglers.length === 0,
       detail: (moved.length === 0 ? 'no unfinished cycle changed owner' : 'moved: ' + moved.join(','))
         + (stragglers.length === 0 ? '' : ' | still on an old or unknown seat: ' + stragglers.join(','))
+        + (unowned.length === 0 ? '' : ' | carried no owner, so a hand-over had nothing to migrate: ' + unowned.join(','))
         + (changedGenerations.length === 0 ? ' | no seat was replaced in this restart' : ' | replaced seats: ' + changedGenerations.map(m => m.name).join(',')) });
   }
   return claims;
@@ -120,6 +130,9 @@ async function selfTest() {
   const migrationClaim = snapshot => (compareRecovery(beforeSnap, snapshot).find(c => c.claim.startsWith('an unfinished cycle')) ?? {}).held;
   results.push(['a migrated open cycle holds the claim', migrationClaim(withSeat('new')) === true]);
   results.push(['an open cycle still on the old seat FAILS the claim', migrationClaim(withSeat('old')) === false]);
+  const unownedSnap = { teams: [{ ...beforeSnap.teams[0], members: [{ name: 'driver', id: 'new', role: 'driver' }],
+    open: [{ id: 'c-1', owner: null }] }] };
+  results.push(['a cycle nobody owns does NOT fail the migration claim', migrationClaim(unownedSnap) === true]);
   for (const [name, ok] of results) console.log((ok ? 'ok   ' : 'FAIL ') + name);
   return results.every(([, ok]) => ok);
 }
