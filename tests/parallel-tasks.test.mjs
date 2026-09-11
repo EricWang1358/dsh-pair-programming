@@ -18,7 +18,10 @@ import { registerFlowTools } from '../lib/tools/flow.js';
 import { registerOracleTools } from '../lib/tools/oracle.js';
 import { gateStateFingerprint } from '../lib/protocol/gate.js';
 const exec = promisify(execFile);
-const git = async (cwd, ...args) => (await exec('git', args, { cwd, encoding: 'utf8' })).stdout.trim();
+// K2-4: pinned against the developer's git config, and bounded so a stuck git fails the
+// case rather than the run.
+const GIT_PINS = ['-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=', '-c', 'core.pager=cat', '-c', 'advice.detachedHead=false'];
+const git = async (cwd, ...args) => (await exec('git', [...GIT_PINS, ...args], { cwd, encoding: 'utf8', timeout: 60_000 })).stdout.trim();
 
 export async function run(report) {
   const check = async (name, fn) => { try { await fn(); report(true, name); } catch (error) { report(false, `${name}: ${error.stack}`); } };

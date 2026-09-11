@@ -10,7 +10,11 @@ import { resolveStartComposition } from '../lib/tools/lifecycle.js';
 import { createDriverWorktrees, snapshotCandidate, integrateCandidate, removeDriverWorktrees, scopeConflicts } from '../lib/runtime/worktrees.js';
 
 const exec = promisify(execFile);
-const git = async (cwd, ...args) => (await exec('git', args, { cwd, encoding: 'utf8' })).stdout.trim();
+// K2-4: a fixture must not inherit the developer's git identity, signing key, hooks or
+// pager, and it must not be able to hang the suite: -c pins the behaviour that matters and
+// the timeout turns a stuck git into a failed case instead of a stuck run.
+const GIT_PINS = ['-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=', '-c', 'core.pager=cat', '-c', 'advice.detachedHead=false'];
+const git = async (cwd, ...args) => (await exec('git', [...GIT_PINS, ...args], { cwd, encoding: 'utf8', timeout: 60_000 })).stdout.trim();
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'pair-worktrees-'));
   await git(root, 'init');

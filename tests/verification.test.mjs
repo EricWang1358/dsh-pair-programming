@@ -228,7 +228,9 @@ export async function run(check) {
     check((await h.board()).tasks[0].oracle === undefined, 'U3 rejected freeze creates no seal');
   });
   await scenario('git HEAD fingerprint', async h => {
-    const git = args => execFileP('git', args, { cwd: h.root });
+    // K2-4: pinned against the developer's git config, and bounded.
+  const GIT_PINS = ['-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=', '-c', 'core.pager=cat', '-c', 'advice.detachedHead=false'];
+  const git = args => execFileP('git', [...GIT_PINS, ...args], { cwd: h.root, timeout: 60_000 });
     await git(['init']); await git(['config', 'user.name', 'Verification Fixture']); await git(['config', 'user.email', 'fixture@example.invalid']);
     await writeFile(join(h.root, '.gitignore'), '.state/\n');
     await git(['add', '.']); await git(['commit', '-m', 'first candidate']);
@@ -315,7 +317,9 @@ export async function runFollowups(check) {
     check((await h.board()).tasks[0].status === 'in_progress', 'U3 stale gate ownership cannot complete the new attempt');
   });
   await scenario('self-mutating DoD cache', async h => {
-    const git = args => execFileP('git', args, { cwd: h.root });
+    // K2-4: pinned against the developer's git config, and bounded.
+  const GIT_PINS = ['-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=', '-c', 'core.pager=cat', '-c', 'advice.detachedHead=false'];
+  const git = args => execFileP('git', [...GIT_PINS, ...args], { cwd: h.root, timeout: 60_000 });
     await git(['init']); await git(['config', 'user.name', 'Verification Fixture']); await git(['config', 'user.email', 'fixture@example.invalid']);
     await writeFile(join(h.root, '.gitignore'), '.state/\n');
     await git(['add', '.']); await git(['commit', '-m', 'cache candidate']);
