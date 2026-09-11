@@ -107,6 +107,15 @@ export async function run(check) {
       assert.equal(existsSync(join(dirs.worktree, 'link.json')), false);
     });
 
+    // P2 (reviewer, HEAD 9a0ca54): a declared file AT the checkout root has the root as
+    // its parent directory, and the strict containment reading refused it - seeded [] plus
+    // a misleading 'resolves outside the disposable checkout'.
+    scenario('P2 a declared file at the checkout root is seeded, not refused', dirs => {
+      writeFileSync(join(dirs.workspace, 'runtime.json'), '{"pool":"canonical"}\n');
+      const report = seedRuntimeInputs(dirs.workspace, dirs.worktree, ['runtime.json']);
+      assert.deepEqual(report.seeded, ['runtime.json']);
+      assert.equal(readFileSync(join(dirs.worktree, 'runtime.json'), 'utf8'), '{"pool":"canonical"}\n');
+    });
     // ---- 5. the ordinary path still works -------------------------------------
     scenario('J1 a normal declared path is still seeded, as a copy', dirs => {
       mkdirSync(join(dirs.workspace, 'data'), { recursive: true });

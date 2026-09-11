@@ -72,6 +72,25 @@ function stalledHarness(root, kicks, { followupOk = false, captainLive = true, s
 }
 
 export async function run(check) {
+  /* ---- the pause survives, and background compensation cannot undo it ------- */
+  // P1 (reviewer, HEAD 9a0ca54): untrackTeam removed the run, but the heartbeat pass
+  // already in flight called kickTeam, which tracked it again - so the pause lasted only
+  // until the end of that pass, and later sweeps kept scanning.
+  {
+    const pauseRoot = await mkdtemp(join(tmpdir(), 'pair-pause-'));
+    const pauseScheduler = installPairScheduler({ logger: { warn() {} }, on: () => {}, agents: { get: () => undefined }, subagents: {} }, { stateDir: 'pause-state', heartbeatMs: 0 });
+    try {
+    pauseScheduler.trackTeam(pauseRoot, 'p1');
+    check(pauseScheduler.trackedTeams().length === 1, 'P1 baseline: the run is on the sweep');
+    pauseScheduler.untrackTeam(pauseRoot, 'p1');
+    check(pauseScheduler.trackedTeams().length === 0, 'P1 a pause removes the run from the sweep');
+    pauseScheduler.trackTeam(pauseRoot, 'p1', { background: true });
+    check(pauseScheduler.trackedTeams().length === 0, 'P1 and a heartbeat pass already in flight cannot undo it');
+    pauseScheduler.trackTeam(pauseRoot, 'p1');
+    check(pauseScheduler.trackedTeams().length === 1, 'P1 while a deliberate re-engagement (a delivery) does resume it');
+    } finally { await rm(pauseRoot, { recursive: true, force: true }).catch(() => {}); }
+  }
+
   /* ---- process-local state is released with the seats that own it ------- */
   // lastNudge / memberActivity / parkedAttempts are keyed by CHILD SESSION ID,
   // and memberLifetime:'cycle' mints a fresh id on every accepted cycle — so

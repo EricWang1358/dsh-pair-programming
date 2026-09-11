@@ -107,9 +107,13 @@ export async function run(check) {
       // the corrupt boards are still ignored, exactly as before.
       assert.deepEqual(scheduler.trackedTeams().map(t => t.teamId), []);
       handlers.get('dispose')();
-      // Once that owner is released, the same conversation is rediscovered — releasing
-      // is a normal closure/abort of the other board, never a deletion or a bypass.
+      // Once that owner is released AND the unreadable board is repaired, the same
+      // conversation is rediscovered — releasing is a normal closure/abort of the other
+      // board, never a deletion or a bypass. The repair is part of the sequence on purpose:
+      // a partial scan (see the P1 case above) counts as occupancy UNKNOWN, so a corrupt
+      // board must keep the checkout closed until someone fixes or closes it.
       await createTeamDir(stateRoot, { ...fixture('other'), captainSessionId: 'other', protocol: { ...initialProtocolState(), phase: 'ABORTED' } });
+      await createTeamDir(stateRoot, { ...fixture('broken'), protocol: { ...initialProtocolState(), phase: 'ABORTED' } });
       const handlers2 = new Map();
       const ctx2 = { on: (n, f) => handlers2.set(n, f), logger: { warn() {} }, agents: { get() {} }, subagents: {} };
       const scheduler2 = installPairScheduler(ctx2, { stateDir: 'resume', heartbeatMs: 0 });

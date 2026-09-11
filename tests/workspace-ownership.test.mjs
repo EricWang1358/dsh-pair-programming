@@ -47,6 +47,19 @@ export async function run(check) {
     try { await requireWorkspaceAvailable(coldCtx(), state, 'someone-else'); } catch (error) { refusal = String(error.message); }
     check(refusal.includes('PAIR_WORKSPACE_BUSY') && refusal.includes('pair_stop') && refusal.includes('resume_team'), 'J2 the refusal names the occupant AND both ways to hand the checkout over');
 
+    // P1 (reviewer, HEAD 9a0ca54): inspectTeams reports a PARTIAL scan through
+    // { errors, complete } instead of throwing, and that used to be read as 'nobody owns
+    // this checkout' - the same fail-open the unreadable case below refuses.
+    const corruptDir = join(root, 'corrupt');
+    await createTeamDir(corruptDir, board('healthy', 'cap-h'));
+    await mkdir(join(corruptDir, 'broken'), { recursive: true });
+    await writeFile(join(corruptDir, 'broken', 'team.json'), '{');
+    const corruptOwner = await workspaceOwner(corruptDir);
+    check(corruptOwner !== undefined && String(corruptOwner.teamId).includes('broken'),
+      'J2 a partial scan is unknown occupancy, not an empty checkout: it refuses and names the unreadable board');
+    await assert.rejects(() => requireWorkspaceAvailable(coldCtx(), corruptDir), /PAIR_WORKSPACE_BUSY: .*broken/,
+      'J2 and starting a team there is refused for that reason rather than allowed');
+
     // ---- an unreadable state tree must not license a second team ------------
     const broken = join(root, 'not-a-directory');
     await writeFile(broken, 'this path is a file, so the state tree cannot be listed');
