@@ -39,6 +39,18 @@ async function waitFor(predicate, label, timeoutMs = 5000) {
   }
 }
 
+/**
+ * A bounded wait that reports its own failure as such.
+ *
+ * `waitFor` throws on timeout, and swallowing that into `undefined` made "we gave up waiting"
+ * read exactly like "the value was wrong" — the same shape as reporting a broken instrument as a
+ * broken product (M10'). The two waits below race a locked board write, so they get a wider
+ * bound; it stays bounded, because a real hang must still be loud.
+ */
+async function waited(promise, label) {
+  try { return { value: await promise }; } catch (error) { return { error: `${label} — ${error.message}` }; }
+}
+
 function memberOf(id, role) {
   return { id, name: role, role, status: 'idle', joinedAt: 1 };
 }
@@ -377,8 +389,8 @@ export async function run(check) {
     check(Number.isFinite(workedOnce) && workedOnce >= 0, 'H the working-to-idle edge adds the finished turn to the member work time');
     await new Promise(resolve => setTimeout(resolve, 5));
     handlers.get('agent/status')({ agent: child, status: 'idle' });
-    const repeated = await waitFor(async () => { const t = await readTeam(teleRoot, 'tele'); return t?.members[0]?.lastTurn?.endedAt > firstEnd ? t : undefined; }, 'the repeated idle edge to land').catch(() => undefined);
-    check(repeated !== undefined && repeated.members[0].workMs === workedOnce, 'H a repeated idle edge does not count the same turn twice');
+    const repeated = await waited(waitFor(async () => { const t = await readTeam(teleRoot, 'tele'); return t?.members[0]?.lastTurn?.endedAt > firstEnd ? t : undefined; }, 'the repeated idle edge to land', 15000), 'the repeated idle edge');
+    check(repeated.error === undefined && repeated.value.members[0].workMs === workedOnce, repeated.error ?? 'H a repeated idle edge does not count the same turn twice');
     handlers.get('agent/error')({ agent: child, error: new Error('oracle crashed') });
     await settle();
     tele = await readTeam(teleRoot, 'tele');
@@ -389,8 +401,8 @@ export async function run(check) {
     stale.members[0].activity = { startedAt: Date.now() - 4 * 3600_000, lastActivityAt: Date.now() - 4 * 3600_000 };
     await writeTeam(teleRoot, stale);
     handlers.get('agent/status')({ agent: child, status: 'idle' });
-    const capped = await waitFor(async () => { const t = await readTeam(teleRoot, 'tele'); return t?.members[0]?.status === 'idle' ? t : undefined; }, 'the stale-start idle edge to land').catch(() => undefined);
-    check(capped?.members[0].workMs === 600_000, 'H a start left stale by a restart counts at most one working lease past its last activity');
+    const capped = await waited(waitFor(async () => { const t = await readTeam(teleRoot, 'tele'); return t?.members[0]?.status === 'idle' ? t : undefined; }, 'the stale-start idle edge to land', 15000), 'the stale-start idle edge');
+    check(capped.error === undefined && capped.value.members[0].workMs === 600_000, capped.error ?? 'H a start left stale by a restart counts at most one working lease past its last activity');
 
     // K: M16' — the LOST wake edge.
     //
