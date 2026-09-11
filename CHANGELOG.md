@@ -5,6 +5,57 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [0.15.11] — 2026-09-11
+
+**The skill integration is connected to the protocol (#93).** `lib/integrations/ce-moments.js`
+maps an owed call to the CE skill whose **own description** covers it — `pair_review` →
+`ce-code-review`, `pair_arbitrate` → `ce-pov`, `pair_retro` → `ce-compound`, `pair_red` →
+`ce-debug`, `pair_refactor` → `ce-simplify-code`, `pair_propose` → `ce-ideate`, `pair_backlog`
+→ `ce-brainstorm` — and `pair_status` surfaces it. Two rules are enforced rather than
+documented: a skill is named **only when the lane serves it to the model** (in the captain
+lane those skills are user gestures, so naming one would be an instruction a seat cannot
+follow), and **a moment with no honest match says nothing at all**. An assertion refuses any
+invented skill name.
+
+**The per-step prompt has a budget now (#91, #92).** The usage section is injected into the
+global system prompt and paid by every session on every step: **13,257 chars / ~3.3K tokens**
+at `solo`, **17,970 / ~4.5K tokens** at `light` or `full`, plus `ceLanes` when armed. Issue
+**#90** records that this plugin demands an A/B before its CE integration may cost 7.5K per
+step while paying 13–18K of its own with no gate. `tests/prompt-budget.test.mjs` now pins
+each mode separately (the first version pinned `{}`, which resolves to the cheap `solo`
+variant — my own measurement error, corrected in the issue), pins that the protocol text
+appears exactly once, and pins that the non-protocol 7,604 chars are mode-independent.
+
+**Code quality: a swallowed failure must say why (#88).** `lib/` measured 79 files / 16,490
+lines, and the real signal was **36 swallowed-failure sites across 23 files** — the idiom
+that twice hid a defect in this codebase (a `ReferenceError` eaten by a caller's
+`.catch(() => undefined)` silently disabled captain mail draining). Every swallow must now
+carry a `// SAFE:` reason or be baselined at its exact count; a new swallow in a baselined
+file fails, and so does a stale entry.
+
+**The board line carries the load ledger (#89).** A shipping-lane skill loaded during a task
+blocks the gate credential, and the board never said so. `pair_status` now reports the ledger
+the gate acts on (not read / unreadable ≠ empty / count with names / LANE VIOLATION), read
+with the same reader and window rule as the gate, with a wiring assertion so a correct
+renderer that is never called fails.
+
+### Reviewed and found clean (with the method recorded)
+
+- **every kick site passes a workspace** — 9 call sites, the class that once silently disabled
+  wake-ups (F4). The audit needed an optional-chain-aware pattern: `kickTeam\\(` misses
+  `kickTeam?.(…)`, which nearly produced an issue against working code;
+- **every `writeTeam` in `lib/` is under a lock** — 38 sites (37 textually inside `withLock`,
+  one behind `commitMemberReplacement`), the class that produced a lost update (M14').
+
+### Still open
+
+- **#90 item 2**: split the section (short global trigger + the full protocol delivered at
+  activation) — needs the A/B this plugin demands of CE, or an explicit decision to change it;
+- **#90 item 3**: `captainProtocol`/`soloProtocol` naming;
+- the **produced / processed** half of the skill distinction needs a result contract (where a
+  skill records its output and who rules on it) — a workflow decision, not a rendering gap.
+
+Verified as one batch: `npm run verify` on the tagged tree.
 ## [0.15.10] — 2026-09-11
 
 **The Compound Engineering catalog now describes what the skills DO (L1, #81/#82).** The
