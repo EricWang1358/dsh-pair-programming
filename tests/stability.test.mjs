@@ -25,7 +25,11 @@ export async function run(check) {
   try {
     await test('typecheck distinguishes unavailable execution from invalid syntax', async () => {
       for (const code of ['EPERM', 'ENOENT', 'SYNTAX']) {
-        const preload = `import cp from 'node:child_process'; import {syncBuiltinESMExports} from 'node:module'; cp.execFileSync=()=>{throw Object.assign(new Error('injected'),{code:${JSON.stringify(code)},stderr:Buffer.from('injected syntax')})};syncBuiltinESMExports();`;
+        // Inject at BOTH seams: the check used to be execFileSync and now runs the same
+        // per-file check through promisified execFile. Pinning the behaviour (an unavailable
+        // execution is not a syntax failure) needs the injection to follow the seam, or the
+        // stub silently stops matching and the contract passes by not being exercised.
+        const preload = `import cp from 'node:child_process'; import {syncBuiltinESMExports} from 'node:module'; const boom=()=>{throw Object.assign(new Error('injected'),{code:${JSON.stringify(code)},stderr:Buffer.from('injected syntax')})}; cp.execFileSync=boom; cp.execFile=(...args)=>{const cb=args[args.length-1]; if(typeof cb==='function'){cb(boom()); return {};} throw boom();};syncBuiltinESMExports();`;
         const result = spawnSync(process.execPath, ['--import', `data:text/javascript,${encodeURIComponent(preload)}`, 'scripts/typecheck.mjs'], {
           cwd: fileURLToPath(new URL('../', import.meta.url)), encoding: 'utf8',
         });
