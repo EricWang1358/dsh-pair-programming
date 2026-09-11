@@ -11,7 +11,7 @@ import { wakeCaptain } from '../lib/tools/shared.js';
 import { installPairScheduler } from '../lib/runtime/scheduler.js';
 import { registerFlowTools } from '../lib/tools/flow.js';
 import { registerTaskTools } from '../lib/tools/task.js';
-import { createTeamDir, readTeam } from '../lib/state/store.js';
+import { createTeamDir, readTeam, writeTeam } from '../lib/state/store.js';
 import { appendMailbox, createMessage, readMailbox, readUnreadMailbox } from '../lib/state/mailbox.js';
 import { gateStateFingerprint } from '../lib/protocol/gate.js';
 import { initialProtocolState, openCycle } from '../lib/protocol/machine.js';
@@ -373,11 +373,24 @@ export async function run(check) {
     await settle();
     tele = await readTeam(teleRoot, 'tele');
     check(tele.members[0].lastTurn?.endReason === 'completed' && tele.members[0].lastTurn.toolCalls === 2 && tele.members[0].lastTurn.boardMutations === 1, 'H idle records end reason, total tools, and protocol mutations instead of flattening every outcome to idle');
+    const firstEnd = tele.members[0].lastTurn.endedAt, workedOnce = tele.members[0].workMs;
+    check(Number.isFinite(workedOnce) && workedOnce >= 0, 'H the working-to-idle edge adds the finished turn to the member work time');
+    await new Promise(resolve => setTimeout(resolve, 5));
+    handlers.get('agent/status')({ agent: child, status: 'idle' });
+    const repeated = await waitFor(async () => { const t = await readTeam(teleRoot, 'tele'); return t?.members[0]?.lastTurn?.endedAt > firstEnd ? t : undefined; }, 'the repeated idle edge to land').catch(() => undefined);
+    check(repeated !== undefined && repeated.members[0].workMs === workedOnce, 'H a repeated idle edge does not count the same turn twice');
     handlers.get('agent/error')({ agent: child, error: new Error('oracle crashed') });
     await settle();
     tele = await readTeam(teleRoot, 'tele');
     check(tele.members[0].lastTurn?.endReason === 'error' && tele.members[0].lastTurn.lastError.includes('oracle crashed'), 'H member errors persist a captain-visible last-error summary');
     check(captainWakes.length === 1, 'H a member error re-enters an idle captain once');
+    const stale = await readTeam(teleRoot, 'tele');
+    stale.members[0].status = 'working'; stale.members[0].workMs = 0;
+    stale.members[0].activity = { startedAt: Date.now() - 4 * 3600_000, lastActivityAt: Date.now() - 4 * 3600_000 };
+    await writeTeam(teleRoot, stale);
+    handlers.get('agent/status')({ agent: child, status: 'idle' });
+    const capped = await waitFor(async () => { const t = await readTeam(teleRoot, 'tele'); return t?.members[0]?.status === 'idle' ? t : undefined; }, 'the stale-start idle edge to land').catch(() => undefined);
+    check(capped?.members[0].workMs === 600_000, 'H a start left stale by a restart counts at most one working lease past its last activity');
 
     // K: M16' — the LOST wake edge.
     //

@@ -17,6 +17,8 @@ export interface Config {
   dodCommand?: string;
   defaultMode?: 'solo' | 'light' | 'full';
   experimentalDualDrivers?: boolean;
+  /** Experimental: a short per-step section with the full protocol delivered at pair_start. */
+  experimentalLeanPrompt?: boolean;
   dualDriverIntegrationCommand?: string;
   tddMode?: 'enforce' | 'coach' | 'off';
   pairStyle?: 'traditional' | 'strong' | 'ping-pong';

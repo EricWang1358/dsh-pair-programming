@@ -9,7 +9,7 @@ const page = `<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="v
 .demo-top{display:flex;align-items:center;gap:12px;padding:14px 24px;background:#152b2c;color:#dbede9;font-size:12px;flex-wrap:wrap}.demo-top strong{margin-right:auto;letter-spacing:.06em}.demo-top button{background:#284243;color:inherit;border:1px solid #4c6564;padding:7px 12px;border-radius:6px;cursor:pointer}
 #frame{width:min(1120px,calc(100% - 48px));height:calc(100vh - 100px);margin:22px auto;background:var(--dsw-alias-bg-layer-1,#fff);border:1px solid #d9e1e5;border-radius:14px;overflow:hidden;box-shadow:0 12px 40px #1933300b}
 #frame.narrow{width:min(380px,calc(100% - 24px))}#app{height:100%}
-body.dark{background:#101619;--dsw-alias-bg-layer-1:#192125;--dsw-alias-bg-layer-2:#222d32;--dsw-alias-label-primary:#e1e9eb;--dsw-alias-label-secondary:#9aadb5;--dsw-alias-border-l2:#334149;--dsw-alias-brand-primary:#53c9b6;--dsw-alias-state-success-primary:#6ec8a3;--dsw-alias-state-warning-primary:#e0ac68}
+body.dark{background:#101619;--dsw-alias-bg-layer-1:#192125;--dsw-alias-bg-layer-2:#222d32;--dsw-alias-label-primary:#e1e9eb;--dsw-alias-label-secondary:#9aadb5;--dsw-alias-border-l2:#334149;--dsw-alias-brand-primary:#53c9b6;--dsw-alias-state-success-primary:#6ec8a3;--dsw-alias-state-warn-primary:#e0ac68;--dsw-alias-label-tertiary:#71848c}
 </style><div class="demo-top"><strong>PAIR / 示例预览 · 非真实团队</strong><span>真实 DSH 数据桥 · 零模型调用</span><button id="advance">推进示例任务</button><button id="width">切换窄侧栏</button><button id="theme">切换深浅色</button></div><main id="frame"><div id="app"></div></main>
 <script src="/react.js"></script><script src="/react-dom.js"></script><script src="/panel.js"></script><script>
 var token=__TOKEN__,Seat,cleanups=[],translations,requests=0;

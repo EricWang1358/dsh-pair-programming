@@ -1,0 +1,37 @@
+sequenceDiagram
+autonumber
+actor C as 新 Captain 会话
+participant T as pair_start / resumeTeam
+participant B as 持久看板
+participant H as DSH 宿主
+participant S as Scheduler
+C->>T: pair_status(list_runs=true)
+T->>B: 查找已有团队
+T-->>C: team_id、旧 Captain、阶段与进度
+C->>T: pair_start(resume_team, resume_from_captain)
+T->>T: 锁定工作区启动与目标团队
+T->>B: 严格读取目标团队
+T->>H: 检查旧 Captain / 成员是否仍加载
+T->>B: 检查其他团队占用
+alt 团队终态、旧席位仍加载或其他前置条件不满足
+  T-->>C: 拒绝接管，说明原因
+else 满足冷接管条件
+  Note over T,B: 双 Driver 还检查原工作区、slots 和待处理集成
+  T->>T: 克隆原看板并设置新 Captain
+  loop 每个未移除的成员
+    T->>H: 解析路由并创建新席位
+    H-->>T: 新成员身份
+    T->>T: 迁移匹配的未结周期 owner
+  end
+  alt 创建失败或身份无效
+    T->>H: 清理本次已创建成员
+    T-->>C: 接管失败，原看板不被替换
+  else 创建成功且再次检查通过
+    T->>B: 写入新成员与 handoff 记录
+    T->>H: 退休原成员
+    T->>S: trackTeam(workspace, teamId)
+    T-->>C: 返回原进度，要求读取当前状态
+    S->>B: 读取当前义务
+    Note over C,S: 从已有状态继续；不重建任务和 oracle
+  end
+end

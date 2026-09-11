@@ -1,0 +1,57 @@
+sequenceDiagram
+autonumber
+actor C as Captain
+participant T as Pair 工具
+participant B as 看板与信箱
+participant D as Driver
+participant N as Navigator
+participant X as 验证命令执行器
+C->>T: pair_start(use_cases)
+T->>B: 保存团队与初始协议
+C->>T: pair_task_create(AC、依赖、范围)
+T->>B: 保存任务
+D->>T: pair_task_claim(task_id)
+T->>B: 记录 assignee 与 attempt
+N->>T: pair_oracle_write / pair_oracle
+T->>X: 执行基线验收命令
+X-->>T: 基线失败及输出
+T->>B: 冻结 oracle 文件摘要与契约
+loop 一个或多个实现增量
+  D->>T: pair_propose(files, verify_plan)
+  alt 满足小步 auto-GO 条件
+    T->>B: 记录自动 GO
+  else 需要显式审查
+    N->>T: pair_review
+    Note over N,T: 只有 GO 才进入后续实现；NO_GO 留待处理
+  end
+  D->>D: 修改代码并执行相关检查
+  D->>T: pair_green(证据, diff_summary)
+  T->>B: 保存 GREEN 与折叠报告
+  N->>N: 独立检查实际改动与原有行为
+  N->>T: pair_verify(stage)
+  T->>X: checkpoint 命令或 final 冻结 oracle
+  X-->>T: 执行结果
+  alt 有效产品结果为 REJECT 或存在反例
+    T->>B: 记录拒绝及证据
+    Note over D,N: 同一周期修复，再提交 GREEN 和验证
+  else checkpoint 通过
+    T->>B: 记录增量验证
+    Note over D,N: 可进入下一增量，但不能代替 final
+  else final ACCEPT
+    T->>B: 保存候选绑定的最终接受
+  end
+end
+D->>T: pair_gate_check(task_id)
+T->>X: 重放验收及配置的 DoD 检查
+T->>B: 满足条件后签发 gate_pass_id
+D->>T: pair_task_update(completed, gate_pass_id)
+T->>B: 保存任务完成
+C->>T: 处理披露、必要的重新认证、pair_retro
+C->>T: pair_stop(complete, green_build_command)
+T->>X: 实际执行团队完成命令
+alt 全部终局条件满足且命令成功
+  T->>B: 保存 DONE 和 completion_receipt
+  T-->>C: 完成回执
+else 仍有缺口或命令失败
+  T-->>C: 拒绝签发成功回执
+end

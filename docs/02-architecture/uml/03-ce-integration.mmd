@@ -1,0 +1,49 @@
+classDiagram
+direction LR
+class CeProvider {
+  <<runtime>>
+  +list(options)
+  +get(candidate, options)
+}
+class CeCatalog {
+  <<module>>
+  CE_SKILLS
+  +entriesFor(options)
+}
+class CeCheckout {
+  <<external>>
+  skills
+  version
+  commitSha
+}
+class CeLedger {
+  <<module>>
+  +appendCeLoad(root, entry)
+  +readCeLoads(root, since)
+}
+class CeWatch {
+  <<module>>
+  +installCeLoadWatch(ctx)
+}
+class CePush {
+  <<module>>
+  +pushPhaseOf(team)
+  +cePushAppendix(deps)
+}
+class MemberRecycle {
+  <<module>>
+  +recycleMember()
+}
+class GateCheck {
+  <<module>>
+  ceLoads
+}
+CeProvider ..> CeCatalog : 能力白名单
+CeProvider ..> CeCheckout : 读取正文
+CeProvider ..> CeLedger : onLoad 接线记账
+CeWatch ..> CeLedger : 观察宿主 skill 加载
+MemberRecycle ..> CePush : 组合 persona
+CePush ..> CeProvider : 经 runtime.ce.load
+GateCheck ..> CeLedger : 读取加载与违规信息
+note for CePush "只在 full 档、Driver、post-green 等条件下推送；不是每个角色的阶段审查接口。"
+note for GateCheck "加载记录不等于完成审查。新 Skill 结果契约尚待实现。"

@@ -4,6 +4,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { demoBoard, mountPanelFixture, installFixtureApi } from '../scripts/panel-fixture.mjs';
 import { projectPairPanel } from '../lib/runtime/panel-model.js';
+import { activeSpan } from '../lib/runtime/panel-progress.js';
 import { createPanelHandler, readPanelSnapshot, installPairPanel } from '../lib/runtime/panel-rpc.js';
 import { Context } from '@deepseek-ai/cordis';
 import { SessionStore } from '@deepseek-ai/dsh-session';
@@ -66,10 +67,8 @@ export async function run(report) {
     const score=first.progress.percent;
     board.protocol.cycles.push({...board.protocol.cycles[0],id:'duplicate-accepted'});
     assert.equal(projectPairPanel(board).progress.percent,score);
-    assert.equal(first.progress.eta.reason,'samples');
     board.protocol.cycles.push({id:'rework',taskId:board.tasks[0].id,step:'GREEN',verify:{verdict:'reject'}});
     assert.ok(projectPairPanel(board).progress.percent<score);
-    assert.equal(projectPairPanel(board).progress.eta.reason,'blocked');
   });
   await check('ETA uses observed team throughput without a dual Driver speed multiplier',()=>{
     const board=demoBoard();
@@ -77,7 +76,26 @@ export async function run(report) {
     const dual=projectPairPanel(board).progress.eta;
     delete board.parallel;
     const single=projectPairPanel(board).progress.eta;
-    assert.equal(dual.reason,'rough');assert.deepEqual(dual,single);assert.ok(dual.maxMinutes>=dual.minMinutes);
+    assert.equal(dual.reason,'rough');assert.deepEqual(dual,single);
+    assert.ok(dual.minutes>=1 && dual.rounds>0 && dual.paceMs>=60000);
+  });
+  await check('ETA starts at the first passed check, refreshes with each one and stops with the team',()=>{
+    const board=demoBoard();board.protocol.cycles.forEach(c=>{delete c.verify;});
+    assert.equal(projectPairPanel(board).progress.eta.reason,'samples','no settled round means no pace to read');
+    const [a,b]=board.protocol.cycles;
+    a.verify={verdict:'checkpoint',at:a.openedAt+3*60000};
+    const first=projectPairPanel(board).progress.eta;
+    assert.equal(first.reason,'rough','one passed checkpoint is enough for a first estimate');
+    b.verify={verdict:'checkpoint',at:first.at+2*60000};
+    assert.ok(projectPairPanel(board).progress.eta.at>first.at,'the estimate is stamped with the latest passed check');
+    board.protocol.phase='ABORTED';
+    assert.equal(projectPairPanel(board).progress.eta.reason,'stopped');
+  });
+  await check('active time leaves out idle stretches and the progress projection reads no clock',()=>{
+    const m=60000,span=activeSpan([0,5*m,10*m,100*m,103*m]);
+    assert.equal(span.activeMs,13*m);assert.equal(span.lastAt,103*m);assert.equal(activeSpan([]).activeMs,0);
+    const board=demoBoard();
+    assert.equal(JSON.stringify(projectPairPanel(board).progress),JSON.stringify(projectPairPanel(board).progress));
   });
   const fixture = await mountPanelFixture();
   try {
@@ -274,6 +292,96 @@ export async function run(report) {
     function visit(node){if(Array.isArray(node)){node.forEach(visit);return;}if(!node||typeof node!=='object')return;if(node.props?.className==='pair-contract pair-seat-history')found.push(node);visit(node.children);}
     visit(tree);assert.equal(found.length,1);assert.equal(found[0].type,'details');assert.equal(found[0].props.open,undefined);
     const text=JSON.stringify(found[0]);assert.ok(text.includes('driver'));assert.ok(text.includes('driver-2'));assert.ok(text.includes('unknown'));
+  });
+  await check('activity rhythm cuts idle gaps, groups events by pipeline stage and folds tasks past six', () => {
+    const at = 1_000_000_000_000, m = 60000;
+    const events = [
+      { at, kind: 'created', ref: 't-1', text: '' }, { at: at + 2 * m, kind: 'created', ref: 't-2', text: '' },
+      { at: at + 300 * m, kind: 'cycle', ref: 't-1', text: '' }, { at: at + 310 * m, kind: 'reject', ref: 't-1', text: '' },
+      { at: at + 320 * m, kind: 'accept', ref: 't-1', text: '' }, { at: at + 321 * m, kind: 'completed', ref: 't-1', text: '' },
+      ...Array.from({ length: 7 }, (_, i) => ({ at: at + 330 * m + i, kind: 'created', ref: 'x-' + i, text: '' })),
+    ];
+    const rhythm = sandbox.pairRhythm(events.slice().reverse());
+    assert.equal(rhythm.segments.length, 2, 'a 298-minute pause splits planning from building');
+    assert.deepEqual({ ...rhythm.counts }, { plan: 9, build: 1, pass: 2, fail: 1 });
+    assert.equal(rhythm.cycles, 1); assert.equal(rhythm.passRate, 0.5);
+    assert.equal(rhythm.tasks.length, 6); assert.equal(rhythm.tasks[0].ref, 't-1'); assert.equal(rhythm.other.count, 3);
+    const spread = Array.from({ length: 12 }, (_, i) => ({ at: at + i * 100 * m, kind: 'cycle', ref: 't', text: '' }));
+    assert.ok(sandbox.pairRhythm(spread).segments.length <= 6, 'many idle gaps widen until the chart has at most six bursts');
+    assert.equal(sandbox.pairRhythm([]).passRate, null);
+  });
+  await check('work time mirrors the scheduler accumulator and caps a stalled turn at one lease', () => {
+    const t = key => ({ minutes: '分钟', 'duration.lt1': '<1', 'duration.h': '小时', 'duration.m': '分' })[key] ?? key;
+    assert.equal(sandbox.pairDuration(30000, t), '<1'); assert.equal(sandbox.pairDuration(12 * 60000, t), '12 分钟');
+    assert.equal(sandbox.pairDuration(72 * 60000, t), '1 小时 12 分'); assert.equal(sandbox.pairDuration(120 * 60000, t), '2 小时');
+    const lease = 600000, now = 50_000_000;
+    assert.equal(sandbox.pairWorkMs({}, lease, now).ms, null, 'no record stays unknown rather than zero');
+    assert.equal(sandbox.pairWorkMs({ workMs: 1000 }, lease, now).ms, 1000);
+    const live = sandbox.pairWorkMs({ workMs: 1000, workingSince: now - 5000, lastActivityAt: now - 100 }, lease, now);
+    assert.equal(live.ms, 6000); assert.equal(live.live, true);
+    const stalled = sandbox.pairWorkMs({ workingSince: now - 4_000_000, lastActivityAt: now - 3_000_000 }, lease, now);
+    assert.equal(stalled.ms, 1_000_000 + lease); assert.equal(stalled.live, false);
+  });
+  await check('team to-dos merge the same seat and kind of work and keep every reference', () => {
+    const groups = sandbox.pairAttentionGroups([
+      { who: 'captain', kind: 'blocking-risk', tool: 'pair_risk', ref: 'r-1', why: 'close r-1' },
+      { who: 'navigator', kind: undefined, tool: 'pair_verify', ref: 'c-1', why: 'verify' },
+      { who: 'captain', kind: 'blocking-risk', tool: 'pair_risk', ref: 'r-2', why: 'close r-2' },
+    ]);
+    assert.equal(groups.length, 2); assert.equal(groups[0].refs.join(','), 'r-1,r-2'); assert.equal(groups[1].tool, 'pair_verify');
+  });
+  await check('member projection carries route, effort and clock-free work fields', () => {
+    const board = demoBoard(), panel = projectPairPanel(board, { workingLeaseMs: 600000 });
+    const [driver, , navigator] = panel.members;
+    assert.equal(driver.model, 'deepseek-v4.1-flash'); assert.equal(driver.effort, 'high'); assert.equal(driver.provider, 'deepseek');
+    assert.equal(typeof driver.workingSince, 'number'); assert.equal(typeof driver.lastActivityAt, 'number');
+    assert.equal(navigator.workingSince, null); assert.equal(navigator.workMs, 17 * 60000); assert.equal(panel.workingLeaseMs, 600000);
+    assert.equal(JSON.stringify(projectPairPanel(board, { workingLeaseMs: 600000 })), JSON.stringify(panel), 'no clock input, so an unchanged board keeps one revision');
+    delete board.members[2].model; delete board.members[2].reasoningEffort; delete board.members[2].workMs;
+    const legacy = projectPairPanel(board).members[2];
+    assert.equal(legacy.model, null); assert.equal(legacy.effort, null); assert.equal(legacy.workMs, null);
+  });
+  await check('review impact counts recorded pushback, fixes and risks without inferring intent', () => {
+    const board = demoBoard(), value = projectPairPanel(board).value;
+    assert.deepEqual([value.noGo, value.rejects, value.fixedAfterPushback, value.repairs, value.scope, value.preexisting], [1, 2, 1, 1, 1, 0]);
+    assert.deepEqual([value.settled, value.firstTry], [3, 2]);
+    assert.deepEqual({ ...value.oracles }, { tasks: 6, cases: 6 });
+    assert.equal(value.roles.navigator, true); assert.equal(value.roles.challenger, true);
+    assert.equal(value.risks.challenger.total, 2);
+    assert.deepEqual({ ...value.risks.challenger.bySeverity[1] }, { severity: 'P1', handled: 1, open: 0, dismissed: 0 });
+    assert.deepEqual(value.notes.map(n => n.kind).sort(), ['fixed', 'reject', 'repair', 'risk', 'risk', 'scope']);
+    assert.ok(value.notes.every((n, i, all) => i === 0 || all[i - 1].at >= n.at), 'newest first');
+    assert.equal(value.reasons.length, 2);
+    delete board.protocol.stats; board.members = board.members.filter(m => m.role !== 'challenger');
+    const legacy = projectPairPanel(board).value;
+    assert.equal(legacy.noGo, 0); assert.equal(legacy.rejects, 0); assert.equal(legacy.reasons.length, 0); assert.equal(legacy.roles.challenger, false);
+  });
+  await check('ETA recalculates at every step and its countdown never passes rounds not yet opened', () => {
+    const board = demoBoard(), before = projectPairPanel(board).progress.eta;
+    const live = board.protocol.cycles.find(c => c.id === 'c-t-4-1');
+    live.step = 'GREEN'; live.green = { at: before.at + 60000 };
+    const after = projectPairPanel(board).progress.eta;
+    assert.ok(after.at > before.at, 'a step event stamps the estimate');
+    assert.ok(after.rounds < before.rounds, 'progress inside the open round lowers the rounds still owed');
+    assert.ok(after.floorMinutes >= 1 && after.floorMinutes <= after.minutes);
+    const gap = 45 * 60000, total = after.minutes * 60000;
+    const counted = sandbox.pairEtaMs(after, gap, after.at + 30 * 60000, true);
+    assert.ok(counted.ticking && counted.ms >= after.floorMinutes * 60000 && counted.ms <= total);
+    assert.equal(sandbox.pairEtaMs(after, gap, after.at + 60 * 60000, true).ms, total, 'past the idle gap nothing counts down');
+    assert.equal(sandbox.pairEtaMs(after, gap, after.at + 60000, false).ms, total, 'a paused panel does not count down');
+    assert.equal(sandbox.pairEtaMs({ minutes: 5, floorMinutes: 5, at: 0 }, gap, 60000, true).held, false, 'with nothing in flight there is no slow round to report');
+  });
+  await check('feature list rolls each goal criterion up from task cards and frozen acceptance tests', () => {
+    const board = demoBoard(), features = projectPairPanel(board).features;
+    assert.equal(features.length, 1); assert.equal(features[0].criteria.length, 8);
+    const stages = features[0].criteria.map(c => sandbox.pairFeatureStage(c));
+    assert.deepEqual(stages, ['done', 'done', 'done', 'oracle', 'oracle', 'oracle', 'allocated', 'allocated']);
+    assert.deepEqual([...features[0].criteria[0].tasks], ['t-1']);
+    assert.equal(features[0].criteria[0].integrated, true);
+    board.tasks[7].acceptanceRefs = [];
+    assert.equal(sandbox.pairFeatureStage(projectPairPanel(board).features[0].criteria[7]), 'unallocated');
+    delete board.useCases;
+    assert.equal(projectPairPanel(board).features.length, 0, 'a team without registered use cases shows no invented list');
   });
   await check('panel registers a conversation view plus optional sidebar and disposes both',()=>{
     const views=[],removed=[],dictionary={};

@@ -5,6 +5,60 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [0.15.12] — 2026-09-11
+
+**The console/panel work landing together with the protocol batch.** This release is the first to
+carry the pair console UI developed in parallel in this workspace (panel styles, the panel view,
+its model/progress/RPC plumbing, the preview fixture and the panel tests — 13 files, ~1,350 added
+lines). It is included here because it was finished for this release; the protocol work below is
+this session's.
+
+**Space reclamation, as a tool with a fallback (#102 → #104/#105/#106).** `pair_cleanup` replaces
+deleting folders by hand: `action="plan"` lists every path that would go (size, category, why it is
+regenerable) **and** every record that stays, and changes nothing; `action="execute"` needs the plan's
+token and **refuses when the tree moved**. Levels are **strategies** (data with `extends` + `adds`,
+composed recursively) and the operation is a guarded state transition, per the shape review. A live
+team refuses both phases. Boards, arbitration logs, retrospectives, lessons, the retired-member
+deny-list, mailbox records and the **frozen oracles** are kept at both levels.
+
+**Per-step prompt cost (#90 → #91/#92/#97/#100, closed with a decision).** The usage section is
+injected globally and paid on every step: 12,098 chars at `solo`, 16,811 at `light`/`full`, now with
+**per-mode budgets** that also pin the protocol text appearing once and the non-protocol 7,604 chars
+being mode-independent. The two-contributor paragraph is charged **only when that workflow is
+reachable** (−1,161 chars/step by default). `experimentalLeanPrompt` (default **off**, behaviour
+byte-identical) trades procedure for tokens: a 1,256-char trigger that **keeps the standing invariants**
+while `pair_start` delivers the full protocol at activation — **10,842 chars (~2.7K tokens) per step**
+saved at solo, **15,555** at light/full for a session that never pairs. The decision recorded on #90:
+keep it opt-in; enabling it needs the A/B this plugin demands of its own CE integration.
+
+**Skill integration wired to the protocol (#93/#101, and the catalog audited).** `ce-moments.js` maps
+an owed call to the skill whose **own description** covers it (`pair_review → ce-code-review`,
+`pair_arbitrate → ce-pov`, `pair_retro → ce-compound`, …), surfaced on the board **and** in the delivery
+a member reads. A skill is named only when the lane serves it **to the model**, and a moment with no
+honest match says nothing. Four catalog descriptions that had been **guessed from names** were
+corrected against the skills' real bodies (`ce-proof` is Proof document collaboration, not evidence
+review). The load ledger the gate acts on is now on the board. The user ruled the boundary: the states
+stop at **loaded**; `produced`/`processed` are deliberately not built, and no gate may depend on them.
+
+**Quality and test trust.** A swallowed failure must now carry a `// SAFE:` reason or be baselined at
+an exact count (#88); stale fixture directories are swept by prefix **and** age (#103 → #108, measured
+361 → 35 in TEMP); the per-step prompt has budgets; K2-5, the credential-staleness projection the
+captain reads, is asserted against a **real** gate credential (#115).
+
+### Reviewed and found clean, with the method recorded
+
+- every kick site passes a workspace (9 call sites — the class that once silently disabled wake-ups);
+- every `writeTeam` in `lib/` is under a lock (38 sites — the class that produced a lost update);
+- 80 lib modules, **none** unreferenced by a test except one console-UI file.
+
+### Still open, named rather than implied
+
+- **`experimentalLeanPrompt` stays off** until an A/B on a frozen oracle shows compliance parity;
+- **L1's workflow semantics** (whether `ceLanes` becomes Captain auto-adoption) remains a user decision;
+- the shared test-run-root suggestion in #103 (a new interruption still leaves debris until the next
+  run sweeps it).
+
+Verified as one batch on the tagged tree: `npm run verify`.
 ## [0.15.11] — 2026-09-11
 
 **The skill integration is connected to the protocol (#93).** `lib/integrations/ce-moments.js`

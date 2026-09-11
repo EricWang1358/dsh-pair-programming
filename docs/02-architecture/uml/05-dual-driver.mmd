@@ -1,0 +1,49 @@
+sequenceDiagram
+autonumber
+actor C as Captain
+participant T as Pair 工具
+participant A as Driver A / worktree A
+participant D as Driver B / worktree B
+participant N as 共享 Navigator
+participant W as Git worktree 运行模块
+participant B as 持久看板
+C->>T: pair_start(drivers=2, integration_command)
+T->>W: 从干净 Git checkpoint 创建两个工作区
+T->>B: 保存 slots、baseHead 与任务范围
+A->>T: 领取独立任务 A
+D->>T: 领取独立任务 B
+N->>T: 在 A 的工作区冻结 oracle A
+N->>T: 在 B 的工作区冻结 oracle B
+Note over A,N: 各提案先获得 GO；共享审阅席位可排队
+par 独立实现 A
+  A->>A: 修改 A 工作区并检查
+  A->>T: pair_green(A)
+and 独立实现 B
+  D->>D: 修改 B 工作区并检查
+  D->>T: pair_green(B)
+end
+N->>T: pair_verify(A, final)
+A->>T: pair_gate_check(A)
+T-->>C: A 已有有效 gate，可以集成
+C->>T: pair_integrate(A)
+T->>T: 获取团队集成锁，检查候选绑定
+T->>W: snapshotCandidate / integrateCandidate
+W->>W: 在临时工作区合并候选
+W->>T: verify(临时组合树)
+T->>T: 重放相关 oracle 与 integration_command
+alt 冲突、漂移或检查失败
+  T-->>C: 拒绝集成，不返回成功回执
+  Note over W,B: 冲突或验证失败不推进 canonical；保留可诊断记录
+else 组合验证成功
+  T-->>W: 验证完成
+  W->>W: 检查条件并推进 canonical
+  W-->>T: 合并结果
+  T->>B: 保存 integration record
+  T-->>A: 集成回执，可完成任务 A
+  A->>T: pair_task_update(A, completed)
+end
+N->>T: pair_verify(B, final)
+D->>T: pair_gate_check(B)
+C->>T: pair_integrate(B)
+Note over T,W: 同一集成锁串行执行；组合检查包含先前已集成验收
+Note over C,B: 两项分别完成后，再做最终树认证、复盘和团队 stop

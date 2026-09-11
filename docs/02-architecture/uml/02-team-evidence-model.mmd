@@ -1,0 +1,90 @@
+classDiagram
+direction TB
+class Team {
+  <<record>>
+  id
+  captainSessionId
+  mode
+  artifactNamespace
+}
+class Member {
+  <<record>>
+  id
+  name
+  role
+  status
+}
+class Task {
+  <<record>>
+  id
+  status
+  assignee
+  attemptId
+  workspace
+  acceptanceRefs
+  gatePassId
+}
+class Oracle {
+  <<record>>
+  files
+  cmd
+  sha
+  frozenAt
+}
+class ProtocolState {
+  <<record>>
+  phase
+  risks
+  decisions
+}
+class Cycle {
+  <<record>>
+  id
+  taskId
+  step
+  owner
+  proposal
+  green
+  report
+  verify
+}
+class GatePass {
+  <<record>>
+  id
+  taskId
+  binding
+}
+class ParallelState {
+  <<record>>
+  baseHead
+  verificationCommand
+  runtimePaths
+  pending
+}
+class WorktreeSlot {
+  <<record>>
+  path
+}
+class IntegrationRecord {
+  <<record>>
+  candidate
+  head
+  checks
+  at
+}
+Team "1" *-- "0..*" Member : members
+Team "1" *-- "0..*" Task : tasks
+Team "1" *-- "1" ProtocolState : protocol
+Task "1" *-- "0..1" Oracle : oracle
+ProtocolState "1" *-- "0..*" Cycle : cycles
+ProtocolState "1" *-- "0..*" GatePass : gatePasses
+Cycle "0..*" --> "1" Task : taskId
+Task "0..*" --> "0..1" Member : assignee 指向 name
+Task "0..1" --> "0..1" GatePass : 当前 gatePassId
+Team "1" *-- "0..1" ParallelState : parallel
+ParallelState "1" *-- "2" WorktreeSlot : 双 Driver slots
+ParallelState "1" *-- "0..*" IntegrationRecord : integrations
+IntegrationRecord "0..1" --> "1" Task : 按 taskId 存储
+note for Task "Solo 情况可由 Captain 担任执行者；并非所有 assignee 都对应 members 中的一席。"
+note for GatePass "binding 关联候选及任务上下文；历史凭证存在，不代表当前仍有效。"
+note for ParallelState "仅双 Driver 团队存在。物理隔离不代替组合行为验收。"

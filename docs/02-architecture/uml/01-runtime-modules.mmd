@@ -1,0 +1,59 @@
+classDiagram
+direction LR
+class Plugin {
+  <<module>>
+  +apply(ctx, config)
+}
+class PairTools {
+  <<module>>
+  +registerLifecycleTools()
+  +registerFlowTools()
+  +registerTaskTools()
+  +registerIntegrationTools()
+}
+class Protocol {
+  <<module>>
+  +obligationFrontier(team)
+  +gateStateFingerprint(team, taskId)
+  +advancePhase(protocol, phase)
+}
+class Scheduler {
+  <<runtime>>
+  +trackTeam(workspace, teamId)
+  +kickTeam(workspace, teamId)
+  +kickMember(workspace, teamId, member)
+  +heartbeat()
+}
+class TeamStore {
+  <<module>>
+  +readTeam(root, id)
+  +writeTeam(root, team)
+  +inspectTeams(root)
+}
+class MailDelivery {
+  <<module>>
+  +prepareMailboxDelivery()
+  +finishMailboxDelivery()
+  +coalesceWake()
+}
+class DshHost {
+  <<external>>
+  tools
+  agents
+  subagents
+  skills
+}
+Plugin ..> PairTools : 注册工具
+Plugin ..> Scheduler : 安装调度
+Plugin ..> DshHost : 注入服务
+PairTools ..> Protocol : 校验与推导
+PairTools ..> TeamStore : 读取和提交状态
+PairTools ..> Scheduler : 请求推进
+PairTools ..> MailDelivery : 协议消息
+Scheduler ..> Protocol : 推导下一步义务
+Scheduler ..> TeamStore : 读取最新看板
+Scheduler ..> MailDelivery : 选取并确认投递
+Scheduler ..> DshHost : 唤醒运行席位
+MailDelivery ..> DshHost : 实际消息交付
+note for Protocol "规则推导和宿主操作分开；组合视图包含多个 protocol 模块。"
+note for TeamStore "看板与信箱是持久记录；内存中没有成员不等于没有未结束团队。"
