@@ -31,14 +31,18 @@ async function harness(root, parallel = false) {
   const ctx = { tools: { register: tool => defs.set(tool.name, tool) }, logger: { warn() {}, debug() {}, error() {} }, agents: { get() {} }, subagents: { sendMessage: async () => 'message' } };
   const config = { stateDir: 'state', tddMode: 'enforce', oracleFirst: true, greenBuildOnStop: false, maxCyclesPerTask: 12 };
   const wakes = [];
-  const runtime = { scheduler: { kickTeam: async () => wakes.push(obligationFrontier(await readTeam(stateRoot, team.id))) }, selections: {} };
+  const kickFlags = [];
+  const runtime = { scheduler: { kickTeam: async (workspace, teamId, supplied, signal, options) => {
+    kickFlags.push(options);
+    wakes.push(obligationFrontier(await readTeam(stateRoot, team.id)));
+  } }, selections: {} };
   registerBacklogTools(ctx, config, runtime);
   registerTaskTools(ctx, config, runtime);
   registerFlowTools(ctx, config, runtime);
   registerOracleTools(ctx, config);
   registerLifecycleTools(ctx, config, runtime);
   const agent = id => ({ id, session: { header: { cwd: root }, append() {} } });
-  return { stateRoot, wakes, captain: agent('cap'), driver: agent('driver-id'), navigator: agent('nav-id'),
+  return { stateRoot, wakes, kickFlags, captain: agent('cap'), driver: agent('driver-id'), navigator: agent('nav-id'),
     call: (name, args, actor) => defs.get(name).execute(args, { agent: actor }),
     board: () => readTeam(stateRoot, team.id), save: board => writeTeam(stateRoot, board),
   };
@@ -164,6 +168,18 @@ export async function run(report) {
       assert.deepEqual(completionReadiness(board, { greenRequired: false }).failures, baseline);
       assert.equal(obligationFrontier(board).some(item => item.tool === 'pair_task_claim'), false);
     });
+  await check('the kick a tool sends reflects WHO called it (#75)', async () => {
+    const flagRoot = await mkdtemp(join(tmpdir(), 'pair-kick-flag-'));
+    const h = await harness(flagRoot);
+    try {
+      await h.call('pair_task_create', cardArgs({ subject: 'Member-proposed card' }), h.driver);
+      assert.equal(h.kickFlags.at(-1)?.background, true,
+        'a member tool call must kick as background, so it cannot lift a pause the captain set');
+      await h.call('pair_task_create', cardArgs({ subject: 'Captain card' }), h.captain);
+      assert.equal(h.kickFlags.at(-1)?.background, false,
+        'the captain own action kicks deliberately, so it may lift a pause');
+    } finally { await rm(flagRoot, { recursive: true, force: true }); }
+  });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
