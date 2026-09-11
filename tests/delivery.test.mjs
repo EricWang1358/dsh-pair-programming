@@ -222,6 +222,27 @@ export async function run(check) {
     const updated = await readTeam(state, independentWork.id); updated.members[0].activity = { lastActivityAt: Date.now() }; await writeTeam(state, updated);
     await hi.scheduler.kickTeam(root, independentWork.id);
     check(hi.calls.length === 2 && (await readTeam(state, independentWork.id)).tasks[1].assignee === undefined, 'metadata-only writes do not repeat a future draft nudge or claim another canonical task');
+    // U4: the wake dedupe is per (obligation, BOARD REVISION, seat generation). The
+    // repeat half is pinned just above; the other two are what make it a contract rather
+    // than a silence — a board that MOVED must wake the seat again, and a REPLACED seat
+    // must not inherit the entry its predecessor left behind.
+    await hi.scheduler.kickTeam(root, independentWork.id);
+    check(hi.calls.length === 2, 'U4 a third sweep on an unchanged board still does not repeat the wake');
+    const moved = await readTeam(state, independentWork.id);
+    moved.protocol.cycles[0].step = 'RED';
+    await writeTeam(state, moved);
+    await hi.scheduler.kickTeam(root, independentWork.id);
+    check(hi.calls.length > 2, 'U4 a board REVISION wakes the seat again: the debt changed, so the dedupe must not swallow it');
+    const beforeReplace = hi.calls.length;
+    const replaced = await readTeam(state, independentWork.id);
+    replaced.members[0].id = 'driver-generation-2';
+    replaced.members[0].activity = { lastActivityAt: Date.now() };
+    await writeTeam(state, replaced);
+    hi.statuses.set('driver-generation-2', { id: 'driver-generation-2', status: 'idle' });
+    await hi.scheduler.kickTeam(root, independentWork.id);
+    check(hi.calls.length > beforeReplace && hi.calls[hi.calls.length - 1].childId === 'driver-generation-2',
+      'U4 a REPLACED seat is woken for the debt its predecessor was already told about — a new generation does not inherit the dedupe entry');
+    check(hi.calls.length === 4, 'U4 and the whole scenario produced exactly one wake per (debt, revision, generation): two recipients, then one revision, then one new generation — not a wake per event');
     const disabledOracle = fixture('disabled-oracle'); disabledOracle.tasks = [{ id: 'ready', subject: 'legacy', status: 'pending', dependencies: [], createdAt: 1, updatedAt: 1 }];
     await createTeamDir(state, disabledOracle); const hd = harness(root); await hd.scheduler.kickTeam(root, disabledOracle.id);
     check(hd.calls.length === 1 && hd.calls[0].childId === 'driver' && hd.calls[0].text.includes('pair_task_claim'), 'scheduler honors config.oracleFirst=false instead of waking an oracle author');
