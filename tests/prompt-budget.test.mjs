@@ -13,7 +13,9 @@
  * The first version of this test pinned only `{}`, which resolves to the cheap solo variant -
  * it guarded the wrong one while a light/full deployment paid 4,700 more per step unwatched.
  */
-import { usageSectionText } from '../lib/prompt.js';
+import { readFileSync } from 'node:fs';
+import { usageSectionText, fullUsageSectionText } from '../lib/prompt.js';
+import { resolveConfig } from '../lib/defaults.js';
 import { captainProtocol, soloProtocol } from '../lib/protocol/personas.js';
 
 const BUDGET = { solo: 12300, light: 17100, full: 17100 };
@@ -48,4 +50,23 @@ export async function run(check) {
   const ceOn = usageSectionText({ ceLanes: 'advisory' }).length;
   check(ceOn > ceOff, 'the CE paragraph is charged only when a lane is on - the scenario pricing this plugin does apply');
   check(true, `composition: solo ${sizes.solo} / light ${sizes.light} / full ${sizes.full}; two-contributor +${DUAL_DRIVER_PARAGRAPH}; CE +${ceOn - ceOff}`);
+  /* ---- issue #90 item 2: the lean prompt, behind its flag ------------------ */
+  // The risk of hiding the protocol is that nothing delivers it. These four checks are the
+  // guard against that, and against the flag quietly becoming a no-op.
+  const lean = usageSectionText({ experimentalLeanPrompt: true });
+  const full = fullUsageSectionText({});
+  check(lean.length < 1200,
+    `the lean section is short (${lean.length} chars) - that is the whole point: a session that never pairs stops paying for the protocol`);
+  check(!lean.includes(captainProtocol({})) && !lean.includes('Operating procedure'),
+    'the lean section carries no protocol text and no operating procedure');
+  check(lean.includes('pair_start'),
+    'the lean section still tells the model HOW to activate - a trigger that does not name the call is not a trigger');
+  check(full.length > 12000 && full.includes(captainProtocol({})),
+    'the full text still exists and is what gets delivered at activation');
+  check(resolveConfig({ experimentalLeanPrompt: true }).experimentalLeanPrompt === true,
+    'a host can actually set the flag through the config path (declared in config.js and picked up by resolveConfig)');
+  check(resolveConfig({}).experimentalLeanPrompt === false, 'and it defaults to off, so the shipped behaviour is byte-for-byte what it was');
+  const lifecycleSrc = readFileSync(new URL('../lib/tools/lifecycle.js', import.meta.url), 'utf8');
+  check(lifecycleSrc.includes('fullUsageSectionText') && lifecycleSrc.includes('config.experimentalLeanPrompt === true'),
+    'the wiring exists: pair_start delivers the full protocol when the lean flag is on, so hiding it cannot lose it (this is a source check because the render is not reachable from a unit test, and a missing render would be invisible otherwise)');
 }
