@@ -182,9 +182,16 @@ export async function run(check) {
     check(asSpec.tasks.some(t => t.id === 't-1' && t.subject === 'the contract stays visible'), 'U2 the card contract itself is still visible to this seat');
     check(!asSpec.summary.includes('Tuned to the instrument:'), 'U2 and the summary stops describing the candidate (the tuned-to-the-instrument declaration)');
     check(asSpec.summary.includes('Goal coverage:') && asSpec.use_cases.length > 0, 'U2 the public contract it works from — goal coverage and the frozen use cases — is untouched');
+    // U1 lifecycle projection: the board itself says which route each seat resolves to,
+    // instead of leaving that to the settings card. A run on the captain fallback is
+    // otherwise indistinguishable from a run with no override at all.
+    check(asSpec.summary.includes('Seat routes: navigator=') && asSpec.summary.includes('driver=composed default') && asSpec.summary.includes('spec='),
+      'U1 the board projects every acceptance seat route and the driver default');
     const asCaptain = await solo.status({}, { agent: solo.captain });
     check(asCaptain.cycles.find(c => c.id === 'c-1').green !== undefined && asCaptain.summary.includes('Tuned to the instrument:'),
       'U2 and the projection is seat-scoped: the captain still sees the candidate and that declaration');
+    check(asCaptain.summary.includes('Seat routes:') && asCaptain.summary.includes('composed default'),
+      'U1 and an undegraded run says so in the same line');
     check(isJsonValue(asSpec), 'U2 the projected status still passes the lossless-JSON gate');
     // State B: lessons.json present — same gate, and only the keep/try projection is carried.
     const b = startHarness(root, 'out-b');

@@ -31,7 +31,7 @@ import { registerLifecycleTools } from '../lib/tools/lifecycle.js';
 import { recycleMember } from '../lib/runtime/recycle.js';
 import { spawnIsolatedMember } from '../lib/runtime/isolated-members.js';
 import { createTeamDir } from '../lib/state/store.js';
-import { seatModelRequest, setNavRouteFallback, clearNavRouteFallback } from '../lib/runtime/members.js';
+import { seatModelRequest, setNavRouteFallback, clearNavRouteFallback, navRouteFallbackFor } from '../lib/runtime/members.js';
 import { readFile } from 'node:fs/promises';
 import { initialProtocolState } from '../lib/protocol/machine.js';
 import { installNavModelStatus } from '../lib/integrations/nav-model.js';
@@ -205,6 +205,16 @@ export async function run(check) {
     await navApi.validateNow('probe');
     const aCleared = seatRoute(await pathRecycle(aRoot, 'st-a', 'team-a', { existingBoard: true }), 'navigator');
     check(aCleared === PREMIUM_JSON, 'AC-1d: a successful route test clears the fallback and restores the seat to its configured route');
+
+    // U1 lifecycle projection: the board must be able to say WHICH route a run resolves
+    // to. seatModelRequest cannot answer it ({} means both "on the fallback" and "no
+    // override"), so the question is asked per run.
+    const projection = board('projection', 'cap-p');
+    check(navRouteFallbackFor(projection) === null, 'U1 a run with no degradation reports no fallback for itself');
+    setNavRouteFallback('premium route died', projection);
+    check(navRouteFallbackFor(projection) === 'premium route died' && navRouteFallbackFor(board('other', 'cap-o')) === null,
+      'U1 and a degraded run reports its own reason while another run still reports none');
+    clearNavRouteFallback();
 
     // U1, the LEGACY key. config.memberModel is declared, defaulted and typed, and the
     // plan's rule for it is explicit: "do not treat a config field existing as routing
