@@ -2,14 +2,14 @@
  * v3 oracle-first protocol: SPEC-FORK validation, the frozen digest, computed
  * verdicts, the board digest, and the end-to-end cycle the redesign specifies.
  */
-import { mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, mkdir, readFile, unlink, utimes } from 'node:fs/promises';
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { forkProblems, redProblem, computeVerdict, freezeRecord, oracleSummary, resolveCycleOracle, boundedRedTail } from '../lib/protocol/oracle.js';
 import { readMailbox } from '../lib/state/mailbox.js';
-import { digestOracleFiles, runOracleCommand, resolveInside } from '../lib/tools/oracle-exec.js';
+import { digestOracleFiles, runOracleCommand, resolveInside, workspaceFingerprint } from '../lib/tools/oracle-exec.js';
 import { boardDigest, DIGEST_BUDGET_CHARS } from '../lib/protocol/digest.js';
 import { memberIsStale } from '../lib/runtime/recycle.js';
 import { registerFlowTools } from '../lib/tools/flow.js';
@@ -80,6 +80,28 @@ export async function run(check) {
   }
   check(assertTaskOracleFiles('t-1',['.pair-oracles/t-1/legacy.cjs'],{})==='.pair-oracles/t-1','legacy frozen paths stay valid without migration');
 
+  /* ---- the candidate-binding primitive (review path 2: modify/fail/re-certify) ---- */
+  // Every re-certification decision rests on this digest, and both error directions are
+  // expensive: a false move forces a needless re-gate, a missed move certifies a tree
+  // nobody reviewed. Five cells, measured before they were written down.
+  {
+    const fpRoot = await mkdtemp(join(tmpdir(), 'pair-fp-'));
+    try {
+      await writeFile(join(fpRoot, 'a.txt'), 'A'); await writeFile(join(fpRoot, 'b.txt'), 'B');
+      const fp = async () => JSON.stringify(await workspaceFingerprint(fpRoot, []));
+      const base = await fp();
+      const old = new Date(Date.now() - 86400000); await utimes(join(fpRoot, 'a.txt'), old, old);
+      check(await fp() === base, 'binding: touching a file does NOT move the digest (a false move would force a needless re-gate)');
+      await writeFile(join(fpRoot, 'new.txt'), 'N');
+      check(await fp() !== base, 'binding: a NEW file moves it');
+      await unlink(join(fpRoot, 'new.txt'));
+      check(await fp() === base, 'binding: adding then removing a file returns the digest (it is not sticky)');
+      await writeFile(join(fpRoot, 'a.txt'), 'AA'); await writeFile(join(fpRoot, 'a.txt'), 'A');
+      check(await fp() === base, 'binding: rewriting the same bytes leaves it alone');
+      await unlink(join(fpRoot, 'b.txt'));
+      check(await fp() !== base, 'binding: a DELETION moves it');
+    } finally { await rm(fpRoot, { recursive: true, force: true }).catch(() => {}); }
+  }
   // #15: the red tail in a freeze letter, bounded. Measured on an archived board:
   // ORACLE letters are 391K across 68 freezes and red_tail is HALF of it - a diagnostic
   // the frozen command reproduces on demand, not a decision that must be preserved whole.
