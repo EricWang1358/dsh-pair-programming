@@ -36,7 +36,10 @@ export async function run(check) {
     } catch { /* not installed here; see the skip below */ }
   }
   if (installed.size === 0) {
-    check(true, 'no SDK installed beside the package — the cohort check is a no-op outside a prepared checkout');
+    // A real skip, not a placeholder pass: outside a prepared checkout this suite cannot
+    // verify the cohort claim at all, and saying so is the difference between "verified"
+    // and "did not look" (review K item).
+    check.skip('the cohort names the installed SDK versions', 'no @deepseek-ai package is installed beside this checkout');
   } else {
     const versions = new Set(installed.values());
     check(versions.size === 1,
