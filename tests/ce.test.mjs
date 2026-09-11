@@ -108,6 +108,12 @@ export async function run(check) {
   const longest = CE_ALLOWLIST.reduce((max, e) => Math.max(max, e.description.length), 0);
   check(longest <= 110, 'every authored routing line stays short enough to be cheap in a per-step catalog');
   check(CE_ALLOWLIST.every(e => e.description.trim() !== ''), 'no skill is exposed without a routing line');
+  // L1, measured (2026-09-11): this line claimed "Check each claim against the evidence…"
+  // for a skill whose own frontmatter reads "Publish, read, comment on, or edit markdown in
+  // Proof". A name is not a capability; the pin below fails if the guess comes back.
+  const proofLine = CE_ALLOWLIST.find(e => e.name === 'ce-proof');
+  check(proofLine.description.includes('Proof') && !/each claim/i.test(proofLine.description),
+    'the ce-proof routing line describes what the skill DOES (Proof documents), not the claim-review sentence its name suggested');
 
   /* ---- candidate roots, most authoritative first ----------------------- */
   const roots = candidateRoots({ cePath: '/explicit/ce', home: HOME, installed: { plugins: { 'compound-engineering@market': [{ installPath: '/claude/ce' }] } } });
