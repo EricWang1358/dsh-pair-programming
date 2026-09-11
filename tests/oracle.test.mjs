@@ -15,6 +15,7 @@ import { memberIsStale } from '../lib/runtime/recycle.js';
 import { registerFlowTools } from '../lib/tools/flow.js';
 import { registerOracleTools } from '../lib/tools/oracle.js';
 import { registerArbitrateTools } from '../lib/tools/arbitrate.js';
+import { registerLifecycleTools } from '../lib/tools/lifecycle.js';
 import { createTeamDir, readTeam, writeTeam } from '../lib/state/store.js';
 import { withLock } from '../lib/state/lock.js';
 import { teamLockKey } from '../lib/state/layout.js';
@@ -61,6 +62,10 @@ function harness(root, stateDir, cfg = {}) {
   const config = { stateDir, tddMode: 'enforce', maxCyclesPerTask: 12, oracleFirst: true, evidenceCache: false, ...cfg };
   registerFlowTools(ctx, config, { scheduler: {} });
   registerOracleTools(ctx, config);
+  // K2-5: pair_status on a board whose credential came from a real gate run. The move is
+  // out-of-band and SHAPE-VALID (a clone of a real cycle), because the protocol refuses to move
+  // a board carrying a valid credential (GATE_STALE) and the store rejects fabricated shapes.
+  registerLifecycleTools(ctx, config, { selections: {}, scheduler: {} });
   registerArbitrateTools(ctx, config, { scheduler: {} });
   const sess = (id) => ({ id, session: { header: { cwd: root }, append: () => {} } });
   return {
@@ -429,6 +434,23 @@ export async function run(check) {
     check(completed.status === 'completed' && stagedBoard.tasks[0].gatePassId === stagedPass.gate_pass_id
       && gateStateFingerprint(stagedBoard, 't-1') === storedPass.binding.gateStateSha,
     'I the board-bound gate credential remains authoritative across the legitimate completion transition');
+    /* ---- K2-5: the credential-staleness PROJECTION ---- */
+    const projection = await h3.tool('pair_status')({}, { agent: h3.captain });
+    check(typeof projection?.summary === 'string',
+      'self-check: pair_status runs on a board whose credential came from a real gate run');
+    const credentialRow = report => (report.gate_credentials ?? []).find(entry => entry.task_id === 't-1');
+    check(credentialRow(projection)?.board_state_current === true,
+      'projection: the field a captain reads says current while the board has not moved');
+    // Out-of-band AND shape-valid: clone a real cycle rather than fabricate one. The protocol refuses
+    // to move a board that carries a valid credential (GATE_STALE) and the store rejects invented
+    // shapes, so a clone is the only way to observe staleness from outside the protocol.
+    const movedBoard = await readTeam(h3.stateRoot, 'ot3');
+    const lastCycle = movedBoard.protocol.cycles.at(-1);
+    movedBoard.protocol.cycles.push({ ...structuredClone(lastCycle), id: lastCycle.id + '-clone' });
+    await writeTeam(h3.stateRoot, movedBoard);
+    const afterMove = await h3.tool('pair_status')({}, { agent: h3.captain });
+    check(credentialRow(afterMove)?.board_state_current === false,
+      'projection: after the board moves outside the protocol, the field says NOT current - the captain is sent back to re-gate');
     // G1: an artifact that does not parse cannot become the standard. Measured by the
     // r4 session: two seats read a 796-line oracle line by line, BOTH cited the broken
     // line, and the freeze still sealed it — because a parse error exits 1, which is
