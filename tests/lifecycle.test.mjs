@@ -294,6 +294,10 @@ export async function run(check) {
     const blocked=startHarness(root,{failOnCall:-1,captainId:'other-cap',childPrefix:'other-'});
     blocked.ctx.agents.get=id=>id==='new-cap'?{}:undefined;
     check(await rejects(()=>blocked.defs.find(t=>t.name==='pair_start').execute({goal:'unrelated',name:'other',use_cases:USE_CASES},{agent:blocked.captain}),'PAIR_WORKSPACE_BUSY')&&blocked.spawns.length===0,'unrelated live teams cannot share a production checkout');
+    const selfResume=startHarness(root,{failOnCall:-1,captainId:'new-cap',childPrefix:'self-'});
+    const selfStart=()=>selfResume.defs.find(t=>t.name==='pair_start').execute({resume_team:'a2-ok',resume_from_captain:'cap1'},{agent:selfResume.captain});
+    check(await rejects(selfStart,'already leads')&&await rejects(selfStart,'a2-ok')&&await rejects(selfStart,'pair_stop'),
+      '#19 a captain that already leads a non-terminal team is told WHICH team blocks the hand-over and which call clears it');
     const duplicate=startHarness(root,{failOnCall:-1,captainId:'duplicate-cap',childPrefix:'next-'});
     check(await rejects(()=>duplicate.defs.find(t=>t.name==='pair_start').execute({resume_team:'a2-ok',resume_from_captain:'new-cap'},{agent:duplicate.captain}),'reused')&&duplicate.interrupts.length===0,'invalid reused child identity never retires an existing seat');
     const dual=startHarness(root,{failOnCall:-1,captainId:'dual-next',stateDir:'dual-resume'});
