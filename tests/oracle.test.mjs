@@ -80,6 +80,25 @@ export async function run(check) {
   }
   check(assertTaskOracleFiles('t-1',['.pair-oracles/t-1/legacy.cjs'],{})==='.pair-oracles/t-1','legacy frozen paths stay valid without migration');
 
+  /* ---- path 2's VISIBILITY rule: a stale credential must read as stale ---- */
+  // pair_status.gate_credentials.board_state_current is the field a captain actually reads,
+  // and it is this comparison. Positive-only coverage would let it latch true forever, so
+  // the cells below check both directions and the return trip.
+  {
+    const visTeam = () => ({ id: 'vis', mode: 'light', captainSessionId: 'cap', members: [],
+      tasks: [{ id: 't-1', subject: 's', status: 'completed', attemptId: 'a', gatePassId: 'p-1' }],
+      protocol: { ...initialProtocolState(), phase: 'CYCLING' } });
+    const pass = { id: 'p-1', taskId: 't-1', binding: { gateStateSha: gateStateFingerprint(visTeam(), 't-1') } };
+    const readsCurrent = (team) => team.tasks[0].gatePassId === pass.id && pass.binding.gateStateSha === gateStateFingerprint(team, 't-1');
+    const unchanged = visTeam();
+    check(readsCurrent(unchanged) === true, 'visibility: the credential reads current while the board is unchanged');
+    const moved = visTeam(); moved.protocol.cycles.push({ id: 'c-9', taskId: 't-1', step: 'GO' });
+    check(readsCurrent(moved) === false, 'visibility: a board move flips it to STALE - the field a captain reads must not keep saying current');
+    moved.protocol.cycles.pop();
+    check(readsCurrent(moved) === true, 'visibility: and restoring the board makes it current again (a comparison, not a latch)');
+    const rebound = visTeam(); rebound.tasks[0].gatePassId = 'p-2';
+    check(readsCurrent(rebound) === false, 'visibility: a credential the board no longer carries is not current either');
+  }
   /* ---- the candidate-binding primitive (review path 2: modify/fail/re-certify) ---- */
   // Every re-certification decision rests on this digest, and both error directions are
   // expensive: a false move forces a needless re-gate, a missed move certifies a tree
