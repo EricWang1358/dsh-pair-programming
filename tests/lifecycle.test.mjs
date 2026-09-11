@@ -61,6 +61,7 @@ function riskHarness(root, { maxOpenRisks = 15, stateDir = 'risk-state' } = {}) 
 /** Register the real lifecycle tools against a mock ctx and grab pair_stop. */
 function stopHarness(root, { greenBuildOnStop = false, stateDir = 'stop-state' } = {}) {
   const interrupts = [];
+  const untracked = [];
   const defs = [];
   const ctx = {
     logger: { warn: () => {}, debug: () => {}, error: () => {} },
@@ -68,9 +69,9 @@ function stopHarness(root, { greenBuildOnStop = false, stateDir = 'stop-state' }
     subagents: { interrupt: (id) => { interrupts.push(id); } },
     agents: { get: () => undefined },
   };
-  registerLifecycleTools(ctx, { stateDir, greenBuildOnStop }, { selections: {}, scheduler: {} });
+  registerLifecycleTools(ctx, { stateDir, greenBuildOnStop }, { selections: {}, scheduler: { untrackTeam: (_workspace, id) => { untracked.push(id); } } });
   const captain = { id: 'cap1', session: { header: { cwd: root }, append: () => {} } };
-  return { interrupts, defs, captain, ctx, stateRoot: join(root, stateDir) };
+  return { interrupts, untracked, defs, captain, ctx, stateRoot: join(root, stateDir) };
 }
 
 /** pair_start against a mock ctx; the failOnCall-th role refuses to spawn. */
@@ -189,6 +190,8 @@ export async function run(check) {
     const ir = await hammer.execute({ member: 'driver', reason: 'cycle stuck' }, { agent: hi.captain });
     check(JSON.stringify(hi.interrupts) === '["child-1"]' && ir.interrupted === 'driver' && ir.reason === 'cycle stuck' && ir.delivered === true, 'pair_interrupt reports the session it cancelled and that delivery worked');
     check(cleared && ir.discarded === 1 && (await readUnreadMailbox(hi.stateRoot, 't1', 'driver')).length === 0, 'pair_interrupt atomically clears the host inbox and durable pair backlog by default');
+    check(JSON.stringify(hi.untracked) === '["t1"]',
+      'and it stops the sweep from re-waking the seat it just cancelled: a cancelled turn is not a pause while something keeps nudging it');
     check(await rejects(() => hammer.execute({ member: 'driver', reason: 'x' }, { agent: member }), 'only the captain'), 'a non-captain cannot pull the hammer');
     check(await rejects(() => hammer.execute({ member: 'ghost', reason: 'x' }, { agent: hi.captain }), 'member named "ghost"'), 'an unknown member is named in the refusal');
     check(await rejects(() => hammer.execute({ member: 'navigator', reason: 'x' }, { agent: hi.captain }), 'no live session'), 'a member without a session id is refused by name');
