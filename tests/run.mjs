@@ -1,4 +1,4 @@
-import { realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 // This runner exits its process and loads suites that patch process-local APIs.
 // Refuse in-host import BEFORE any suite or exit call can affect DSH.
@@ -13,6 +13,7 @@ if (!process.argv[1] || realpathSync(process.argv[1]) !== realpathSync(fileURLTo
 let pass = 0, fail = 0, skipped = 0;
 const results = [];
 const skippedReasons = [];
+const skippedNames = [];
 function check(cond, name) {
   if (cond) { pass += 1; }
   else { fail += 1; results.push(`FAIL: ${name}`); }
@@ -21,7 +22,7 @@ function check(cond, name) {
 // omission as a pass is the false-green the review named: the count hides it, and a
 // 'no-op outside a prepared checkout' reads exactly like a verified claim. Recorded,
 // printed, and fatal unless --allow-skips says the omission is expected here.
-check.skip = (name, reason) => { skipped += 1; skippedReasons.push(`SKIP: ${name} — ${reason}`); };
+check.skip = (name, reason) => { skipped += 1; skippedNames.push(name); skippedReasons.push(`SKIP: ${name} — ${reason}`); };
 
 // Running ONE suite is the normal case while iterating, and paying for all 49 is
 // how a five-line change costs eight minutes: the expensive suites are expensive
@@ -46,6 +47,14 @@ const timing = argv.includes('--timing');
 // parent aggregates the counts and the exit codes and never runs a suite itself.
 // Skips are fatal by default: an environment that cannot run a check has not verified it.
 const allowSkips = argv.includes('--allow-skips');
+// The baseline names the skips THIS environment is allowed to have. Loud-and-counted is
+// not enough on its own: with the gate acknowledging the old gap, a suite that quietly
+// stops checking something new would pass. Compared by suite + name; an entry that no
+// longer skips is reported as stale, because that means the check runs again.
+let skipBaseline = {};
+try { skipBaseline = JSON.parse(readFileSync(new URL('./skip-baseline.json', import.meta.url), 'utf8')); } catch { skipBaseline = {}; }
+const unexpectedSkips = [];
+const staleBaseline = [];
 const parallelAt = argv.indexOf('--parallel');
 const parallel = parallelAt === -1 ? 1 : Math.max(1, Math.min(16, Number(argv[parallelAt + 1] ?? 2) || 2));
 if (onlyAt !== -1 && (only === undefined || only.length === 0)) {
@@ -120,11 +129,15 @@ for (const s of selected) {
   const startedAt = Date.now();
   if (timing) console.log(`START ${s} (${timings.length + 1}/${selected.length})`);
   const mod = await import(new URL(`./${s}`, import.meta.url).href);
-  const before = { pass, fail, skipped };
+  const before = { pass, fail, skipped, names: skippedNames.length };
   await mod.run(check);
   // Per-suite counts, always: a suite that silently omits half its assertions is visible
   // here as a number that fell, years before anyone notices the claim it stopped checking.
   console.log(`  ${s}: ${pass - before.pass} passed, ${fail - before.fail} failed, ${skipped - before.skipped} skipped`);
+  const suiteSkips = skippedNames.slice(before.names);
+  const expectedSkips = Array.isArray(skipBaseline[s]) ? skipBaseline[s] : [];
+  for (const name of suiteSkips) if (!expectedSkips.includes(name)) unexpectedSkips.push(s + ' :: ' + name);
+  for (const name of expectedSkips) if (!suiteSkips.includes(name)) staleBaseline.push(s + ' :: ' + name);
   if (typeof mod.runBaton === 'function') await mod.runBaton(check);
   const ms = Date.now() - startedAt;
   timings.push({ suite: s, ms });
@@ -144,5 +157,14 @@ if (skippedReasons.length > 0) {
   console.error(skippedReasons.join('\n'));
   if (!allowSkips) console.error('a skipped check is not a verified one; re-run with --allow-skips only when the environment genuinely cannot exercise it');
 }
+if (unexpectedSkips.length > 0) {
+  console.error('UNEXPECTED SKIPS — not in tests/skip-baseline.json:');
+  for (const row of unexpectedSkips) console.error('  ' + row);
+  console.error('a new skip is a check that stopped being verified: fix it, or add it to the baseline in the SAME commit with its reason');
+}
+if (staleBaseline.length > 0) {
+  console.error('stale baseline entries — these run again now, so remove them from tests/skip-baseline.json:');
+  for (const row of staleBaseline) console.error('  ' + row);
+}
 console.log(`\n${pass} passed, ${fail} failed, ${skipped} skipped across ${(only === undefined ? suites : selected).length} suites${only === undefined ? '' : ' (filtered by --only: ' + selected.join(',') + ')'}.`);
-process.exit(fail === 0 && (skipped === 0 || allowSkips) ? 0 : 1);
+process.exit(fail === 0 && unexpectedSkips.length === 0 && (skipped === 0 || allowSkips) ? 0 : 1);
