@@ -5,6 +5,41 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [0.15.3] — 2026-09-11
+
+Two increments: one bounds the last envelope-like bulk the mail volume had, the other pins
+that a superseded seat generation cannot land its result.
+
+**The red tail a freeze letter carries is bounded (#15, closed).** A dissector added to
+`scripts/mail-volume-report.mjs` answers what a volume number cannot — what the bulk is
+made of. On the archived board: 690 ARBITRATE letters, 1313K, whose bulk is their own
+decision text (decision 54%, evidence 24%, rationale 16%, median 2K) — content, nothing to
+strip; and 68 ORACLE letters, 391K, of which **half is `red_tail`** — the failing run's own
+output, kept as the last 40 lines with **no byte limit** (`oracle-exec.js:373`) and
+delivered whole into a durable letter, including to the Driver who can re-run the frozen
+command at any time. `boundedRedTail` caps the delivered tail at 2KB, cuts on a line
+boundary where one exists, states the elision with the recorded signature, and returns a
+tail inside the budget **byte-identical**. The issue closes on the measurement: the
+transport was never the problem, arbitration letters are the record, and the one
+envelope-like bulk is now bounded.
+
+**A superseded seat generation cannot land its result (U4).** `commitMemberReplacement`
+mints a new child-session id for the same seat, and a verification command can be in flight
+across that moment. Two shapes are now pinned: a seat replaced **while** its evidence runs
+(a row in the existing race family), and a superseded generation acting **afterwards** —
+refused, with no verdict written, while the generation that does hold the seat is not
+refused. Test-only: the property held and nothing guarded it.
+
+### Still open, named rather than implied
+
+- **#19**: the cold-recovery probe is an instrument; the restart that produces the report
+  is still owed, and it decides whether a `pair_resume_check`-style diagnostic is wanted.
+- **#26**: its second bullet — each side run once in a real `drivers: 2` environment —
+  needs a workspace that is a clean committed Git repository root.
+- **U4's escalation half** still needs a specialist seat, and **late-result rejection by a
+  superseded public-contract revision** still needs a revision concept.
+
+Verified as one batch in a single pass: `npm run verify` on the tagged tree.
 ## [0.15.2] — 2026-09-11
 
 Four increments, batched into one version and one full verification pass.
