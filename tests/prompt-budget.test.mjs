@@ -1,35 +1,43 @@
 /**
  * The usage section is paid on EVERY step of EVERY session that has this plugin installed,
- * whether or not it ever pairs. That makes its size a budget rather than a detail - and
- * until this suite existed nothing measured it (issue #90).
+ * whether or not it ever pairs. Its size is therefore a budget, not a detail (issue #90).
  *
- * The precedent is the CE catalog: it enforces a 110-character per-line budget and that
- * budget caught a 168-character line the same afternoon it was written. The plugin asked CE
- * for an A/B before paying 7.5K chars per step while paying 13.3K of its own unconditionally.
+ * Measured 2026-09-11, per defaultMode - the section carries a different protocol text per
+ * mode, so a single number hides the expensive one:
  *
- * Raising BUDGET is allowed; doing it without noticing is not. If you raise it, say what the
- * extra text buys and update the number here.
+ *   solo   13,257  (protocol  5,653 + rest 7,604)   <- DEFAULTS.defaultMode
+ *   light  17,970  (protocol 10,366 + rest 7,604)
+ *   full   17,970  (protocol 10,366 + rest 7,604)
+ *
+ * The first version of this test pinned only `{}`, which resolves to solo - it guarded the
+ * cheap variant while a deployment configured to light or full paid 4,700 more chars per step
+ * with nothing watching. Per-mode budgets are what that mistake taught.
+ *
+ * Raising a budget is allowed; doing it without noticing is not.
  */
 import { usageSectionText } from '../lib/prompt.js';
 import { captainProtocol, soloProtocol } from '../lib/protocol/personas.js';
 
-/** Measured 2026-09-11: usageSectionText({}) = 13,257 chars. */
-const BUDGET = 13600;
+const BUDGET = { solo: 13600, light: 18400, full: 18400 };
+const REST = 7604;
 
 export async function run(check) {
-  const base = usageSectionText({});
-  const protocol = captainProtocol({});
-  check(base.length <= BUDGET,
-    `the usage section stays inside its per-step budget (${base.length} <= ${BUDGET}); it is paid by every session on every step (issue #90)`);
-  check(protocol.length > 0 && base.includes(protocol), 'the captain protocol is what the section is for');
-  check(base.split(protocol).length - 1 === 1,
-    'the protocol text appears exactly once - a second copy would be paid on every step');
+  const sizes = {};
+  for (const mode of ['solo', 'light', 'full']) {
+    const text = usageSectionText({ defaultMode: mode });
+    sizes[mode] = text.length;
+    check(text.length <= BUDGET[mode],
+      `the ${mode} usage section stays inside its budget (${text.length} <= ${BUDGET[mode]}); every session pays it on every step (issue #90)`);
+    const protocol = captainProtocol({ defaultMode: mode });
+    check(text.split(protocol).length - 1 === 1, `the ${mode} section carries the protocol text exactly once`);
+    check(sizes[mode] - protocol.length === REST,
+      `the ${mode} non-protocol text is mode-independent (${sizes[mode] - protocol.length} chars: trigger line, operating procedure, mode notes, tool list)`);
+  }
   check(soloProtocol({}) === captainProtocol({}),
-    'captainProtocol and soloProtocol are byte-identical today; if they ever diverge, revisit the section composition (issue #90)');
+    'captainProtocol with no mode falls back to soloProtocol; if that changes, revisit the composition');
+  check(sizes.light >= sizes.solo, 'the light/full section is the expensive one, and it is the mode most deployments configure');
   const off = usageSectionText({ ceLanes: 'off', ceSoloLane: 'off' }).length;
   const on = usageSectionText({ ceLanes: 'advisory' }).length;
-  check(on > off,
-    'the CE paragraph is paid only when a lane is on - the one place this plugin already charges by scenario');
-  check(true,
-    `composition: total ${base.length} = protocol ${protocol.length} + rest ${base.length - protocol.length}; CE off=${off} on=${on}`);
+  check(on > off, 'the CE paragraph is paid only when a lane is on - the one place this plugin already charges by scenario');
+  check(true, `composition: solo ${sizes.solo} / light ${sizes.light} / full ${sizes.full}; CE adds ${on - off}`);
 }
