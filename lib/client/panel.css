@@ -391,6 +391,7 @@
 .pair-rhythm-bar{display:flex;gap:2px;height:12px;min-width:4px;transform-origin:left;animation:pair-scale-x .9s var(--pair-ease) .2s backwards;transition:width .6s var(--pair-ease)}
 .pair-rhythm-bar i{flex:1 1 0;min-width:3px;background:var(--pair-g)}
 .pair-rhythm-bar i:last-child{border-radius:0 4px 4px 0}
+.pair-rhythm-note{margin:8px 0 0;font-size:12px}
 @container pair-panel (max-width:860px){.pair-activity{grid-template-columns:1fr}.pair-activity-log{min-height:0}.pair-activity-log>.pair-section{position:static}.pair-activity-log .pair-timeline{max-height:420px}}
 @container pair-panel (max-width:410px){.pair-rhythm-stats{gap:6px}.pair-rhythm-stats>div{padding:8px}.pair-rhythm-stats strong{font-size:15px}.pair-rhythm-row{grid-template-columns:56px minmax(0,1fr) 22px}}
 

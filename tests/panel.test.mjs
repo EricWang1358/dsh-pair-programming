@@ -238,6 +238,17 @@ export async function run(report) {
   }finally{await fresh.close();}
   const sourceText=await readFile(new URL('../lib/client/panel.js',import.meta.url),'utf8');
   const sandbox={AbortController,setTimeout,clearTimeout};vm.createContext(sandbox);vm.runInContext(sourceText,sandbox);
+  // A stub that EXPANDS function components (with inert hooks), so an assertion reads rendered
+  // output rather than the element a parent handed over — the plain element stub cannot see
+  // inside Features, Value, Eta or Rhythm at all.
+  const inertHooks = { useState: init => [typeof init === 'function' ? init() : init, () => {}], useEffect: () => {}, useLayoutEffect: () => {},
+    useRef: value => ({ current: value }), useMemo: fn => fn(), useCallback: fn => fn, useDeferredValue: value => value,
+    useSyncExternalStore: (subscribe, get) => get() };
+  const expandingReact = new Proxy(inertHooks, { get: (target, key) => key === 'createElement'
+    ? ((type, props, ...children) => typeof type === 'function' ? type({ ...(props || {}), children }) : { type, props, children })
+    : target[key] });
+  const renderDashboard = (view, team) => { const Dashboard = sandbox.createPairDashboard(expandingReact);
+    return JSON.stringify(Dashboard({ t: key => key, data: { team, warnings: [], teams: [], observedAt: 1 }, view, density: 'compact', status: 'live' })); };
   await check('client uses the shared API, falls back only for missing routes and retries modern transport on reconnect',async()=>{
     const calls=[],timers=new Map();let seq=0;
     const source=sandbox.createPairPanelSource(async(channel,endpoint)=>{
@@ -391,16 +402,7 @@ export async function run(report) {
     assert.equal(sandbox.pairRhythmGroup('accept'), 'pass');
   });
   await check('a projection from an older host reads as "restart DSH", not as an empty feature list', () => {
-    // This stub expands function components (with inert hooks), so the assertion reads rendered output,
-    // not just the element a parent handed over.
-    const hooks = { useState: init => [typeof init === 'function' ? init() : init, () => {}], useEffect: () => {}, useLayoutEffect: () => {},
-      useRef: value => ({ current: value }), useMemo: fn => fn(), useCallback: fn => fn, useDeferredValue: value => value,
-      useSyncExternalStore: (subscribe, get) => get() };
-    const react = new Proxy(hooks, { get: (target, key) => key === 'createElement'
-      ? ((type, props, ...children) => typeof type === 'function' ? type({ ...(props || {}), children }) : { type, props, children })
-      : target[key] });
-    const Dashboard = sandbox.createPairDashboard(react);
-    const render = (view, team) => JSON.stringify(Dashboard({ t: key => key, data: { team, warnings: [], teams: [], observedAt: 1 }, view, density: 'compact', status: 'live' }));
+    const render = renderDashboard;
     const current = projectPairPanel(demoBoard());
     assert.equal(sandbox.pairLegacyServer(current), false);
     assert.ok(!render('overview', current).includes('legacyHint'), 'a complete projection shows no restart notice');
@@ -419,6 +421,38 @@ export async function run(report) {
     unknown.progress.eta = { reason: 'invented-later' };
     const tree = render('overview', unknown);
     assert.ok(tree.includes('eta.unknown') && !tree.includes('eta.invented-later'), 'an unknown reason falls back to readable copy, not to a raw key');
+  });
+  await check('a rejection a later verdict overwrote stays visible, and is never counted twice', () => {
+    const board = demoBoard();
+    const settled = board.protocol.cycles[1];
+    assert.equal(settled.rejections, 1);
+    assert.equal(projectPairPanel(board).value.undatedPushbacks, 1, 'a board written before the record existed says the time is unknown');
+    settled.pushbacks = [{ kind: 'reject', stage: 'final', category: 'quality', observation: '答案没有保留，返工后通过', at: board.updatedAt - 5 * 60000 }];
+    const panel = projectPairPanel(board);
+    assert.equal(panel.value.undatedPushbacks, 0, 'the dated record replaces the unknown one');
+    assert.equal(panel.value.notes.filter(n => n.kind === 'reject').length, 2, 'the appended reject joins the one still on the board');
+    assert.ok(panel.history.some(e => e.kind === 'reject' && e.text === '答案没有保留，返工后通过'), 'the activity log shows it');
+    const current = board.protocol.cycles.find(c => c.verify?.verdict === 'reject');
+    current.pushbacks = [{ kind: 'reject', stage: 'final', observation: '这一轮拒绝', at: current.verify.at }];
+    const deduped = projectPairPanel(board);
+    assert.equal(deduped.history.filter(e => e.kind === 'reject' && e.at === current.verify.at).length, 1, 'the current verdict and its appended record are one event');
+    assert.equal(deduped.value.notes.filter(n => n.text === '这一轮拒绝').length, 0, 'the review log already shows that rejection');
+    assert.equal(projectPairPanel(board).value.undatedPushbacks, 0);
+  });
+  await check('the failed lane counts a returned proposal while the pass rate stays a verification rate', () => {
+    assert.equal(sandbox.pairRhythmGroup('noGo'), 'fail');
+    assert.equal(sandbox.pairRhythmGroup('green'), 'build');
+    const at = 1_000_000_000_000;
+    const rhythm = sandbox.pairRhythm([{ at, kind: 'accept', ref: 't-1' }, { at: at + 60000, kind: 'accept', ref: 't-2' }, { at: at + 120000, kind: 'noGo', ref: 't-1' }]);
+    assert.deepEqual({ ...rhythm.counts }, { plan: 0, build: 0, pass: 2, fail: 1 });
+    assert.equal(rhythm.passRate, 1, 'a proposal sent back is not a failed verification');
+  });
+  await check('an older board reports the pushbacks it cannot date instead of an empty failed lane', () => {
+    const legacy = renderDashboard('activity', projectPairPanel(demoBoard()));
+    assert.ok(legacy.includes('rhythm.undatedPre'), 'the count with no recorded time is named under the chart');
+    const board = demoBoard();
+    board.protocol.cycles[1].pushbacks = [{ kind: 'reject', stage: 'final', observation: 'dated', at: board.updatedAt - 5 * 60000 }];
+    assert.ok(!renderDashboard('activity', projectPairPanel(board)).includes('rhythm.undatedPre'), 'a board that dates its pushbacks shows no such note');
   });
   await check('panel registers a conversation view plus optional sidebar and disposes both',()=>{
     const views=[],removed=[],dictionary={};

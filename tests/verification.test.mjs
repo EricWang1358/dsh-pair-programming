@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { registerFlowTools } from '../lib/tools/flow.js';
+import { registerFlowTools, logPushback } from '../lib/tools/flow.js';
 import { registerOracleTools } from '../lib/tools/oracle.js';
 import { registerArbitrateTools } from '../lib/tools/arbitrate.js';
 import { createTeamDir, readTeam, writeTeam } from '../lib/state/store.js';
@@ -92,10 +92,27 @@ export async function run(check) {
     check((await resultOf(h.verify())).error?.includes('GREEN'), 'U3 rejected cycle needs fresh GREEN before another verification');
     await h.green();
     check((await h.verify()).verdict === 'accept', 'U3 a real repair report permits final acceptance after rejection');
+    const settled = (await h.board()).protocol.cycles[0];
+    check(settled.pushbacks?.length === 1 && settled.pushbacks[0].kind === 'reject' && settled.pushbacks[0].observation === veto.observation && settled.pushbacks[0].stage === 'final',
+      'U3 the appended record keeps the rejection that the accepting verdict overwrote, in its own words');
+    check(settled.pushbacks[0].at < settled.verify.at, 'U3 and it is dated when the rejection happened, not when it was accepted');
     const prior = JSON.stringify((await h.board()).protocol.cycles[0]);
     check((await resultOf(h.verify())).error?.includes('already'), 'U3 duplicate final acceptance is refused');
     check((await resultOf(h.call('pair_review', { cycle_id: h.cycleId, ...veto, verdict: 'no_go' }, 'nav'))).error !== undefined, 'U3 NO_GO cannot rewind a completed cycle');
     check(JSON.stringify((await h.board()).protocol.cycles[0]) === prior, 'U3 duplicate calls preserve completed verdict history');
+  });
+  await scenario('pushback log', async h => {
+    await h.edit(t => { const c = t.protocol.cycles[0]; c.step = 'PROPOSED'; delete c.review; });
+    const noGo = { verdict: 'no_go', evidence: ['the proposal rewrites an undeclared file'], observation: 'The proposal rewrites product.txt.', impact: 'The declared scope no longer matches the change.', way_forward: 'Split the rewrite out of this cycle.' };
+    check((await h.call('pair_review', { cycle_id: h.cycleId, ...noGo }, 'nav')).verdict === 'no_go', 'U3 a NO_GO is recorded on the cycle');
+    check((await h.call('pair_review', { cycle_id: h.cycleId, verdict: 'go', evidence: ['scope now matches the change'] }, 'nav')).verdict === 'go', 'U3 the same cycle can be granted after the NO_GO');
+    const granted = (await h.board()).protocol.cycles[0];
+    check(granted.review.verdict === 'go' && granted.pushbacks?.length === 1 && granted.pushbacks[0].observation === noGo.observation && granted.pushbacks[0].stage === 'review',
+      'U3 the GO that overwrote the NO_GO left the pushback in its own words on the board');
+    const cycle = {};
+    for (let i = 0; i < 25; i++) logPushback(cycle, { kind: 'reject', stage: 'final', observation: 'x'.repeat(500), at: i });
+    check(cycle.pushbacks.length === 20 && cycle.pushbacks[0].at === 5 && cycle.pushbacks[19].at === 24, 'U3 the appended record is bounded, oldest entry first out');
+    check(cycle.pushbacks[19].observation.length === 400, 'U3 one long quote cannot grow the board');
   });
   await scenario('checkpoint veto and promotion', async h => {
     check((await h.verify({ ...veto, stage: 'checkpoint' })).verdict === 'reject', 'U3 green checkpoint preserves reviewer veto');

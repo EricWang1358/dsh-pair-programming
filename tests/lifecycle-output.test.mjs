@@ -170,7 +170,8 @@ export async function run(check) {
     exposeBoard.protocol.cycles.push({ id: 'c-1', taskId: 't-1', step: 'GREEN', openedAt: 1,
       proposal: { files: ['src/secret-approach.mjs'] }, red: { testFiles: ['t.mjs'] },
       green: { evidence: ['suite green'], tunedForOracle: 'the counter was fitted to the acceptance run' },
-      report: { diffSummary: 'src/secret-approach.mjs +40/-2' } });
+      report: { diffSummary: 'src/secret-approach.mjs +40/-2' },
+      pushbacks: [{ kind: 'reject', stage: 'final', category: 'quality', observation: 'the counter is fitted to the acceptance run, not to the contract', at: 3 }] });
     await writeTeam(join(root, 'out-expose'), exposeBoard);
     const asSpec = await solo.status({}, { agent: { id: specSeat.id, session: { header: { cwd: root }, append() {} } } });
     const specCycle = asSpec.cycles.find(c => c.id === 'c-1');
@@ -178,6 +179,7 @@ export async function run(check) {
     check(specCycle.proposal === undefined && specCycle.green === undefined && specCycle.report === undefined && specCycle.red === undefined,
       'U2 the acceptance author does not read the candidate through the board: no proposal, RED, GREEN or report on any cycle');
     check(specCycle.step === 'GREEN' && specCycle.taskId === 't-1', 'U2 while the cycle still says where the work stands (step and task survive the projection)');
+    check(specCycle.pushbacks === undefined, 'U2 the appended pushback record quotes the candidate too, so it stays off the acceptance seat');
     check(specOther.oracle !== undefined && specOther.oracle.frozen === true && specOther.oracle.cmd === undefined,
       'U2 another card\'s sealed standard is reduced to the fact that it exists, not its command or files');
     check(asSpec.tasks.some(t => t.id === 't-1' && t.subject === 'the contract stays visible'), 'U2 the card contract itself is still visible to this seat');
@@ -189,6 +191,7 @@ export async function run(check) {
     check(asSpec.summary.includes('Seat routes: navigator=') && asSpec.summary.includes('driver=composed default') && asSpec.summary.includes('spec='),
       'U1 the board projects every acceptance seat route and the driver default');
     const asCaptain = await solo.status({}, { agent: solo.captain });
+    check(asCaptain.cycles.find(c => c.id === 'c-1').pushbacks?.length === 1, 'U2 and the captain still reads why the candidate was sent back');
     check(asCaptain.cycles.find(c => c.id === 'c-1').green !== undefined && asCaptain.summary.includes('Tuned to the instrument:'),
       'U2 and the projection is seat-scoped: the captain still sees the candidate and that declaration');
     check(asCaptain.summary.includes('Seat routes:') && asCaptain.summary.includes('composed default'),
