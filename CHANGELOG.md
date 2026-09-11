@@ -5,6 +5,41 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [0.15.4] — 2026-09-11
+
+Three follow-throughs on U1, all of them seams the design named and the code had not
+closed. One of them is a board that can finally say which route each seat resolves to.
+
+**The board projects the seat routes (U1, lifecycle projection).** `pair_status` had no
+route line at all, so a run **on the captain fallback** was indistinguishable from a run
+with no override — `seatModelRequest` returns `{}` for both, deliberately. A per-run query
+(`navRouteFallbackFor`) answers what neither the process-wide readout nor the seat request
+can, and the board now prints `Seat routes: navigator=<configured | CAPTAIN FALLBACK
+(reason)> · spec=<same> · driver=composed default`.
+
+**The process-wide readout stops reporting one run as all of them.** `navRouteFallbackReason`
+returned the first marker, which was harmless only while the map could hold one entry. One
+degraded run reports its reason verbatim; more than one says how many, with the first
+attached and labelled as the first; none stays `null`.
+
+**The legacy `memberModel` key routes nobody, and that is now enforced.** It is declared in
+the schema, defaulted and typed, and no routing path consumes it. The plan's rule for it is
+explicit — do not treat a config field existing as routing taking effect, and a field that
+never took effect must not suddenly start charging — so its status is pinned: setting it
+changes no seat request, it cannot displace the documented role route, and no routing module
+reads it. The day someone wires it up, the suite says so and the migration has to be shown
+deliberately rather than shipping as a side effect.
+
+### Still open, named rather than implied
+
+- **#19**: the cold-recovery probe is an instrument; the restart that produces the report
+  is still owed, and it decides whether a `pair_resume_check`-style diagnostic is wanted.
+- **#26**: its second bullet — each side run once in a real `drivers: 2` environment —
+  needs a workspace that is a clean committed Git repository root.
+- **U4's escalation half** still needs a specialist seat; **late-result rejection by a
+  superseded public-contract revision** still needs a revision concept.
+
+Verified as one batch in a single pass: `npm run verify` on the tagged tree.
 ## [0.15.3] — 2026-09-11
 
 Two increments: one bounds the last envelope-like bulk the mail volume had, the other pins
