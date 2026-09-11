@@ -164,7 +164,20 @@ export async function run(check) {
   /* ---- rendering ------------------------------------------------------- */
   const lines = attentionLines(attentionSet(risky));
   check(lines.startsWith('[PAIR:ATTENTION]'), 'the block carries one stable marker consumers can grep');
-  check(lines.includes('blocking-risk') && lines.includes('pair_risk_close'), 'each row names the kind and the exact call');
+  check(lines.includes('blocking-risk') && lines.includes('pair_risk(action="mitigate")'),
+    'each row names the kind and a call the tool actually accepts — the next one from this risk\'s status, not a tool name that does not exist');
+  // G6: a risk closes only from MITIGATED, so a board that names 'close' for an OPEN
+  // risk sends the reader at a wall the tool will refuse. The row must name the step
+  // that is reachable now, and say what follows it.
+  const mitigatedRow = attentionLines(attentionSet(teamFixture({
+    tasks: [task({ oracle: frozen })],
+    protocol: { ...initialProtocolState(), risks: [{ id: 'r-9', severity: 'P1', status: 'MITIGATED', scenario: 's', trigger: 't', suggestion: 'x', raisedBy: 'navigator', at: 1 }] },
+  })));
+  check(mitigatedRow.includes('pair_risk(action="close")') && !mitigatedRow.includes('pair_risk(action="mitigate")'),
+    'and once the risk IS mitigated the same row names the close, with the artifact it needs');
+  const openRow = lines;
+  check(openRow.includes('pair_risk(action="mitigate")') && openRow.includes('closing_cmd'),
+    'while an OPEN risk points at mitigation first and shows the close that follows');
   check(attentionLines({ items: [] }).includes('empty'), 'an empty set says so rather than printing nothing');
   const many = attentionLines({ items: Array.from({ length: 12 }, (_, i) => ({ kind: 'disclosure', who: 'captain', tool: 'pair_arbitrate', ref: `d-${i}`, why: 'w' })) }, { limit: 3 });
   check(many.includes('and 9 more'), 'a long set is capped with an explicit remainder instead of a silent truncation');
