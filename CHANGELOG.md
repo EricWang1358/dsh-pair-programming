@@ -5,6 +5,36 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [0.15.6] — 2026-09-11
+
+**A cancelled turn is not a pause.** Reported live: the captain's pause did not hold —
+the Driver would not stop, and once it came back it ran again by itself.
+
+`pair_interrupt` cancelled the current turn and cleared the queued work, and did nothing
+about the thing that starts the next one. The SDK states the behaviour plainly — *"Once the
+interrupted driver is idle, a waking send resumes the parked FIFO"*
+(`dsh-subagent/lib/types/index.d.ts:152`) — and the heartbeat sweep exists to nudge *whoever
+owes a call*, so the next sweep revived the seat the captain had just stopped.
+
+It now also **untracks the run** from the sweep: nothing auto-wakes it until the captain
+speaks again, and any delivery re-tracks it. A pause, not a new state — no board field, no
+schema change, no new tool.
+
+**Limit, named**: `ctx.subagents.interrupt(id, authority)` is a **cooperative request**, so a
+member inside a long tool call may finish that call before stopping. That half is the SDK's
+contract; this release fixes the half where the stopped member was immediately revived.
+
+### Still open, named rather than implied
+
+- **#19**: claim 4 (the old session not returning with authority) is asserted at unit level,
+  not measured live; the D1 write-back is written and left uncommitted because that file
+  also carries the user's own uncommitted edits.
+- **#26**: its second bullet — a real `drivers: 2` run for non-self-authored evidence — needs
+  a workspace whose root is a clean committed Git repository.
+- **U4's escalation half** still needs a specialist seat, and **late-result rejection by a
+  superseded public-contract revision** still needs a revision concept.
+
+Verified as one batch in a single pass: `npm run verify` on the tagged tree.
 ## [0.15.5] — 2026-09-11
 
 The cold-recovery measurement was finally run on a real board. It confirmed the hand-over,
