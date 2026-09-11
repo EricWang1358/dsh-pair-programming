@@ -10,12 +10,18 @@ if (!process.argv[1] || realpathSync(process.argv[1]) !== realpathSync(fileURLTo
  * Test runner: aggregates the pure-logic unit suites. Offline, no deps.
  * Exits nonzero on any failure so `pnpm test` gates the pipeline.
  */
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skipped = 0;
 const results = [];
+const skippedReasons = [];
 function check(cond, name) {
   if (cond) { pass += 1; }
   else { fail += 1; results.push(`FAIL: ${name}`); }
 }
+// A suite that cannot exercise what it asserts must SAY so. Reporting a deliberate
+// omission as a pass is the false-green the review named: the count hides it, and a
+// 'no-op outside a prepared checkout' reads exactly like a verified claim. Recorded,
+// printed, and fatal unless --allow-skips says the omission is expected here.
+check.skip = (name, reason) => { skipped += 1; skippedReasons.push(`SKIP: ${name} — ${reason}`); };
 
 // Running ONE suite is the normal case while iterating, and paying for all 49 is
 // how a five-line change costs eight minutes: the expensive suites are expensive
@@ -38,6 +44,8 @@ const timing = argv.includes('--timing');
 // single-process and sequential by construction, so the long ones (worktrees ~4min,
 // verification ~2min) used to be pure wall-clock. Each child prints its own summary; this
 // parent aggregates the counts and the exit codes and never runs a suite itself.
+// Skips are fatal by default: an environment that cannot run a check has not verified it.
+const allowSkips = argv.includes('--allow-skips');
 const parallelAt = argv.indexOf('--parallel');
 const parallel = parallelAt === -1 ? 1 : Math.max(1, Math.min(16, Number(argv[parallelAt + 1] ?? 2) || 2));
 if (onlyAt !== -1 && (only === undefined || only.length === 0)) {
@@ -74,7 +82,7 @@ if (only !== undefined && selected.length === 0) {
 if (parallel > 1) {
   const { spawn } = await import('node:child_process');
   const self = fileURLToPath(import.meta.url);
-  const summary = /(\d+) passed, (\d+) failed/;
+  const summary = /(\d+) passed, (\d+) failed, (\d+) skipped/;
   const outcomes = [];
   const queue = [...selected];
   await new Promise(resolve => {
@@ -90,7 +98,7 @@ if (parallel > 1) {
         child.on('close', code => {
           active--; done++;
           const match = summary.exec(out);
-          outcomes.push({ suite, code, passed: match ? Number(match[1]) : 0, failed: match ? Number(match[2]) : (code === 0 ? 0 : 1) });
+          outcomes.push({ suite, code, passed: match ? Number(match[1]) : 0, failed: match ? Number(match[2]) : (code === 0 ? 0 : 1), skipped: match ? Number(match[3]) : 0 });
           if (timing) console.log('  done ' + suite + ' (exit ' + String(code) + ')');
           if (done === selected.length) resolve(); else pump();
         });
@@ -100,17 +108,23 @@ if (parallel > 1) {
   });
   const passed = outcomes.reduce((sum, row) => sum + row.passed, 0);
   const failed = outcomes.reduce((sum, row) => sum + row.failed, 0);
+  const skippedParallel = outcomes.reduce((sum, row) => sum + row.skipped, 0);
   const broken = outcomes.filter(row => row.code !== 0);
   if (broken.length > 0) console.error(broken.map(row => 'FAILED ' + row.suite + ': ' + row.passed + ' passed / ' + row.failed + ' failed (exit ' + String(row.code) + ')').join(String.fromCharCode(10)));
-  console.log(String.fromCharCode(10) + passed + ' passed, ' + failed + ' failed across ' + selected.length + ' suites (parallel ' + parallel + ')');
-  process.exit(broken.length === 0 && failed === 0 ? 0 : 1);
+  console.log(String.fromCharCode(10) + passed + ' passed, ' + failed + ' failed, ' + skippedParallel + ' skipped across ' + selected.length + ' suites (parallel ' + parallel + ')');
+  if (skippedParallel > 0 && !allowSkips) console.error('a skipped check is not a verified one; re-run with --allow-skips only when the environment genuinely cannot exercise it');
+  process.exit(broken.length === 0 && failed === 0 && (skippedParallel === 0 || allowSkips) ? 0 : 1);
 }
 const timings = [];
 for (const s of selected) {
   const startedAt = Date.now();
   if (timing) console.log(`START ${s} (${timings.length + 1}/${selected.length})`);
   const mod = await import(new URL(`./${s}`, import.meta.url).href);
+  const before = { pass, fail, skipped };
   await mod.run(check);
+  // Per-suite counts, always: a suite that silently omits half its assertions is visible
+  // here as a number that fell, years before anyone notices the claim it stopped checking.
+  console.log(`  ${s}: ${pass - before.pass} passed, ${fail - before.fail} failed, ${skipped - before.skipped} skipped`);
   if (typeof mod.runBaton === 'function') await mod.runBaton(check);
   const ms = Date.now() - startedAt;
   timings.push({ suite: s, ms });
@@ -126,5 +140,9 @@ if (timing) {
 if (results.length) {
   console.error(results.join('\n'));
 }
-console.log(`\n${pass} passed, ${fail} failed across ${(only === undefined ? suites : selected).length} suites${only === undefined ? '' : ' (filtered by --only)'}.`);
-process.exit(fail === 0 ? 0 : 1);
+if (skippedReasons.length > 0) {
+  console.error(skippedReasons.join('\n'));
+  if (!allowSkips) console.error('a skipped check is not a verified one; re-run with --allow-skips only when the environment genuinely cannot exercise it');
+}
+console.log(`\n${pass} passed, ${fail} failed, ${skipped} skipped across ${(only === undefined ? suites : selected).length} suites${only === undefined ? '' : ' (filtered by --only: ' + selected.join(',') + ')'}.`);
+process.exit(fail === 0 && (skipped === 0 || allowSkips) ? 0 : 1);
