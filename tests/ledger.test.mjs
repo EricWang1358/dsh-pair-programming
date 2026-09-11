@@ -32,7 +32,7 @@ export async function run(check) {
   try {
     ledger = read('../../AGENTS.md');
   } catch {
-    check(true, 'no project ledger beside the package — this suite is a no-op outside the workspace checkout');
+    check.skip('the ledger beside the package is read and checked', 'no project ledger is installed beside this package');
     return;
   }
 
