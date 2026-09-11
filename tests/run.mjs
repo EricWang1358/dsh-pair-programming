@@ -56,6 +56,9 @@ suites.push('route-isolation.test.mjs');
 // J1's directed filesystem regression: the runtime-input seed may not follow a link
 // on any ancestor of a declared path, in either direction.
 suites.push('runtime-input-boundary.test.mjs');
+// J2's directed scheduler regression: one board owns a checkout, and a loaded-session
+// test cannot see the board that a restart left on disk.
+suites.push('workspace-ownership.test.mjs');
 const selected = only === undefined ? suites
   : suites.filter(s => only.some(needle => s.includes(needle)));
 if (only !== undefined && selected.length === 0) {
