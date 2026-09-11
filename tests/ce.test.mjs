@@ -16,6 +16,7 @@ import {
   isCeSkill, CE_KNOWN_NAMES, entriesForSoloLane, entriesFor, soloCatalogCost,
 } from '../lib/integrations/ce-catalog.js';
 import { ceStatusLine } from '../lib/integrations/ce-status-line.js';
+import { ceMomentLine, ceMomentCoverage } from '../lib/integrations/ce-moments.js';
 import { usageSectionText } from '../lib/prompt.js';
 import {
   candidateRoots, inspectRoot, readCommitSha, probeCe, probeSummary, fingerprint, CE_MANIFEST,
@@ -281,6 +282,19 @@ export async function run(check) {
   check(laneLine.includes('not served at all'), 'and says the execution/shipping skills are absent inside a team, not merely discouraged');
   check(ceStatusLine({ ceLanes: 'advisory', ceSoloLane: 'full', ceProbe: found }).includes('widens'), 'the board line names what this workspace sees when no team is live');
   check(ceStatusLine({ ceLanes: 'off', ceSoloLane: 'gesture' }).includes('gesture'), 'and does so even when the pair lane itself is off');
+  /* ---- L2: the core owns the obligation, the adapter supplies the skill ---- */
+  // Four rules, each of which was learned: name the skill only when the moment has an
+  // honest match AND the lane serves it to the model, and never invent a skill name.
+  check(ceMomentLine('advisory', 'pair_review')?.includes('ce-code-review') === true,
+    'a Navigator owed a review is pointed at the code-review skill, not left to guess (L2)');
+  check(ceMomentLine('captain', 'pair_review') === undefined,
+    'in the captain lane those skills are user gestures, so the board does not tell a seat to invoke one');
+  check(ceMomentLine('off', 'pair_review') === undefined, 'an off lane names no skill at all');
+  check(ceMomentLine('advisory', 'pair_gate_check') === undefined,
+    'a moment with no honest match says NOTHING - a plausible-looking skill is worse than silence');
+  const mapped = ceMomentCoverage().map(row => row.split(' -> ')[1]);
+  check(mapped.every(name => CE_ALLOWED_NAMES.includes(name)),
+    'every skill named by the mapping exists in the catalog (no invented names): ' + mapped.join(', '));
   check(ceStatusLine({ ceLanes: 'advisory' }).includes('no probe has run'), 'an armed lane with no detection says so rather than implying skills exist');
   // The ledger is what the gate acts on, so the board line must be able to say it.
   const noLedger = ceStatusLine({ ceLanes: 'advisory', ceProbe: found });
