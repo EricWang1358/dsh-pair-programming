@@ -84,6 +84,7 @@ suites.push('panel.test.mjs', 'deliverables.test.mjs');
 suites.push('yield.test.mjs');
 suites.push('quality-guards.test.mjs');
 suites.push('prompt-budget.test.mjs');
+suites.push('cleanup.test.mjs');
 suites.push('gate-binding.test.mjs');
 // U1's acceptance suite: ported from the oracle frozen by the v15-u1-routing Navigator
 // before any implementation existed (see the file header for the two instrument repairs).
