@@ -362,6 +362,48 @@ export async function runClosureRegression(check) {
     const left = completionReadiness(await ruled.board(), { greenRequired: false, worktreeSha: tree }).failures;
     check(!left.some(text => text.includes('stale')), `closure no credential is left stale for pair_stop to refuse (${left.join(' | ')})`);
   } finally { await ruled.cleanup(); }
+
+  // The pointer can be gone while the pass it named is still on the board. That is
+  // the live state this was reported from: a failed gate erased task.gatePassId,
+  // after which pair_gate_check refused the task forever and pair_stop refused the
+  // closure — a completed, fully verified board that could not be recorded DONE for
+  // a missing convenience field.
+  const erased = await fixture();
+  try {
+    await erased.verify();
+    const live = await erased.call('pair_gate_check', { task_id: 't-1' }, 'cap');
+    await erased.edit(t => { t.tasks[0].status = 'completed'; t.tasks[0].attemptId = undefined; t.tasks[0].gatePassId = undefined; });
+    await writeFile(join(erased.root, 'later-task.txt'), 'a second task shipped its own file');
+    const erasedTree = await workspaceFingerprint(erased.root, { stateDir: '.state' });
+    const erasedFailures = completionReadiness(await erased.board(), { greenRequired: false, worktreeSha: erasedTree }).failures;
+    check(!erasedFailures.some(text => text.includes('lack their exact gate credential')),
+      `closure a completed task whose pass is live is not refused for a pointer that is not there (${erasedFailures.join(' | ')})`);
+    check(erasedFailures.some(text => text.includes('stale against the final worktree')),
+      'closure and it is still refused for the reason that matters: the credential is stale against the tree');
+    const reErased = await resultOf(erased.call('pair_gate_check', { task_id: 't-1' }, 'cap'));
+    check(reErased.value?.pass === true,
+      `closure the gate re-certifies a completed task whose pointer was erased (${reErased.error ?? 'ok'})`);
+    check(reErased.value?.gate_pass_id !== live.gate_pass_id,
+      'closure and it mints a fresh credential rather than reusing the one from before the tree moved');
+  } finally { await erased.cleanup(); }
+
+  // A failed gate erases the credential ONLY when the product is what failed. A
+  // blocking risk is a board condition the next gate re-derives, and it must not
+  // destroy the pointer the completed-task re-certification chain depends on.
+  const blocked = await fixture();
+  try {
+    await blocked.verify();
+    const held = await blocked.call('pair_gate_check', { task_id: 't-1' }, 'cap');
+    await blocked.edit(t => { t.tasks[0].status = 'completed'; t.tasks[0].attemptId = undefined; });
+    // A card whose tracked criteria and executable oracle cases no longer line up:
+    // a PROCESS failure, while the frozen oracle itself still replays green.
+    await blocked.edit(t => { t.tasks[0].acceptanceRefs = ['UC-9.AC-9']; });
+    const refused = await resultOf(blocked.call('pair_gate_check', { task_id: 't-1' }, 'cap'));
+    check(refused.value?.pass === false, 'closure a card whose criteria lose their executable oracle cases is refused by the gate');
+    const afterProcessFailure = await blocked.board();
+    check(afterProcessFailure.tasks[0].gatePassId === held.gate_pass_id,
+      'closure and that process refusal does not destroy the credential the task was holding');
+  } finally { await blocked.cleanup(); }
   // What re-certification must NOT buy. Each of these moves one dimension the
   // allowance deliberately does not cover.
   const denied = {
