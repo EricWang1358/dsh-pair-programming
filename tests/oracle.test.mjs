@@ -124,6 +124,13 @@ export async function run(check) {
       check(await fp() === base, 'binding: rewriting the same bytes leaves it alone');
       await unlink(join(fpRoot, 'b.txt'));
       check(await fp() !== base, 'binding: a DELETION moves it');
+      // #129: this is what the oracle-preparation pause protects. Nothing gitignores
+      // `.pair-oracles/`, so a FUTURE card's oracle file is part of the candidate's digest, and
+      // writing one during the current card's verification window would stale that candidate.
+      const beforeOracle = await fp();
+      await mkdir(join(fpRoot, '.pair-oracles', 't-2'), { recursive: true });
+      await writeFile(join(fpRoot, '.pair-oracles', 't-2', 'accept.mjs'), 'process.exit(0);');
+      check(await fp() !== beforeOracle, '#129 a future card\'s oracle file moves the candidate digest — the preparation pause is load-bearing, not a scheduling preference');
     } finally { await rm(fpRoot, { recursive: true, force: true }).catch(() => {}); }
   }
   // #15: the red tail in a freeze letter, bounded. Measured on an archived board:
