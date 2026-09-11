@@ -5,6 +5,62 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [0.15.2] — 2026-09-11
+
+Four increments, batched into one version and one full verification pass.
+
+**A correction to 0.15.1.** That release said the folded owed-call footer was "the
+shape behind the 446 KB". Measured against the real archived board (732 messages,
+1517 KB durable), the owed-call segment is **about zero**, one delivery per recipient
+costs **77 KB** because an oversized record becomes a durable reference, and the volume
+is the durable backlog — **ARBITRATE 813 KB (54%)** and **ORACLE 341 KB (22%)** at
+9–11 KB per letter. The fold is a real but small saving. It was never the answer to
+that issue, and the release notes should not have implied it was.
+
+**The mail volume is measured, not estimated (#15).** `scripts/mail-volume-report.mjs`
+reads any state directory read-only and reports the composition — durable mail, the
+wire cost of one delivery, the owed segment, and the backlog attributed by sender, by
+message type and by largest single letter. A 200 KB letter is not carried whole; the
+delivery stays inside its own byte cap and hands the seat a reference instead. The
+remaining question is letter size, and it is a product call, not a defect.
+
+**The acceptance author cannot read the candidate through the mailbox either (U2).**
+Files, state and summary were already closed; the mailbox leg held only because no
+sender happened to use it. `deliverProtocolMessage` now projects message bodies for
+that seat — implementation and evidence fields dropped, contract fields kept — and only
+when there is something to remove, so a letter with nothing to project stays
+byte-identical. The Reviewer is the control in the same test: the same letter reaches
+it in full. **U2's four surfaces are now closed and tested.**
+
+**The dual-Driver route arm is executable and gating (#26).** It was a printed
+non-gating blind spot because the probe never completed: the host's delegation path
+reads the **parent** agent's service registry to capture the child's sandbox and
+approval policy, and the harness's captain mock had no `ctx` — so every isolated spawn
+threw before reaching the host, and the arm measured the harness. With that answered
+the arm asserts the isolated seat reaches the host with a resolved route, that a
+fallback for its run leaves it byte-identical, that the rule is role-scoped, that a run
+without `artifactNamespace` never falls into the process scope, and that one degraded
+dual-Driver run leaves the other byte-identical.
+
+**The cold-recovery measurement is prepared (#19).** `scripts/cold-recovery-probe.mjs`
+captures a fingerprint that splits every board into the half that must **not** change
+across a restart (settled cycles and completed tasks, with owner, digest, verdict and
+gate credential) and the half that must move onto the new generation, then reports each
+acceptance claim as HELD or NOT HELD. `--self-test` guards the fingerprint itself,
+including that timestamp churn does not move it.
+
+### Still open, named rather than implied
+
+- **#15**: the measurement exonerated the transport, so what remains is whether 813 KB
+  of arbitration letters is intended. A product decision, not a silent fix.
+- **#19**: the probe is an instrument; the restart that produces the report is still
+  owed, and it is what decides whether a `pair_resume_check`-style diagnostic is wanted.
+- **#26**: its second bullet — each side run once in a real `drivers: 2` environment —
+  needs a workspace that is a clean committed Git repository root.
+- **U4's escalation half** still needs a specialist seat, and **late-result rejection by
+  superseded revision** still needs a public-contract revision concept.
+
+Verified as one batch in a single pass: `npm run verify` on the tagged tree.
 ## [0.15.1] — 2026-09-11
 
 Two post-release fixes, each with its own reverse-mutation probe.
