@@ -31,6 +31,7 @@ import { registerLifecycleTools } from '../lib/tools/lifecycle.js';
 import { recycleMember } from '../lib/runtime/recycle.js';
 import { spawnIsolatedMember } from '../lib/runtime/isolated-members.js';
 import { createTeamDir } from '../lib/state/store.js';
+import { seatModelRequest, setNavRouteFallback, clearNavRouteFallback } from '../lib/runtime/members.js';
 import { initialProtocolState } from '../lib/protocol/machine.js';
 import { installNavModelStatus } from '../lib/integrations/nav-model.js';
 
@@ -46,7 +47,15 @@ function seatRoutes(attempts, seat) { return attempts.filter(a => String(a.label
 function seatRoute(attempts, seat) { const all = seatRoutes(attempts, seat); return all.length === 0 ? null : all[all.length - 1]; }
 
 function captainFor(id) {
-  return { id, options: { ...CAP }, session: { header: { cwd: '' }, requestHeader: () => ({ config: { ...CAP } }) } };
+  // The host's delegation path reads the PARENT's service registry to capture the
+  // sandbox/approval policy for the child (`captureDelegatedPolicyOverrides`,
+  // dsh-subagent/lib/index.js:566). A mock without `ctx.get` made every isolated spawn
+  // throw "Cannot read properties of undefined (reading 'get')" before it reached the
+  // host — which is why the dual-Driver arm was classified an instrument failure and
+  // shipped as a printed non-gating blind spot (#26) instead of as a guard. Answering
+  // `undefined` is the documented legal case: no override to capture.
+  return { id, options: { ...CAP }, ctx: { get: () => undefined },
+    session: { header: { cwd: '' }, requestHeader: () => ({ config: { ...CAP } }) } };
 }
 
 /** Host boundary mock: records the route each seat is really spawned with. */
@@ -196,8 +205,37 @@ export async function run(check) {
     const aCleared = seatRoute(await pathRecycle(aRoot, 'st-a', 'team-a', { existingBoard: true }), 'navigator');
     check(aCleared === PREMIUM_JSON, 'AC-1d: a successful route test clears the fallback and restores the seat to its configured route');
 
-    // ---- non-gating blind spot, printed but never deciding (issue #26). ----
-    console.log('  info NON-GATING dual-driver-stored-selection: an isolated Driver seat with a stored route spawned with agentOptions ' + String(await isolatedProbe(root).catch(() => 'probe did not complete')));
+    // ---- #26: the non-gating blind spot, made executable. ------------------
+    // The line that used to live here printed the isolated seat's route and decided
+    // nothing ('probe did not complete'), so "the route an isolated (dual-Driver) seat
+    // reads agrees with the unified rule" had no guard at all. It is actionable without
+    // a host because the scope is a function of the TEAM OBJECT, never of a caller's
+    // working directory — which is exactly the property the isolated slot depends on.
+    const NAV = { navigatorModel: 'premium/premium-v1' };
+    const isoClean = await isolatedProbe(root);
+    check(isoClean !== null, '#26 the isolated (dual-Driver) seat spawn reaches the host with a resolved route, instead of no call at all');
+    const isoScope = { id: 'iso', artifactNamespace: 'ns-iso' };
+    setNavRouteFallback('the acceptance seat of this run died', isoScope);
+    check(await isolatedProbe(root) === isoClean,
+      '#26 and that run having degraded leaves the isolated Driver seat byte-identical: an isolated slot resolves through the run rule, not through a process-wide one');
+    check(JSON.stringify(seatModelRequest(NAV, 'driver', isoScope)) === '{}',
+      '#26 the unified rule is role-scoped: a Driver seat is never re-routed by an acceptance-seat fallback');
+    clearNavRouteFallback();
+    // A run minted before namespaces existed carries no artifactNamespace. Its scope must
+    // fall back to its OWN id and never to the process marker: keying on undefined is the
+    // exact shape that re-routed an unrelated seat.
+    const legacy = { ...board('legacy', 'cap-lg'), artifactNamespace: '' };
+    setNavRouteFallback('legacy run degraded', legacy);
+    check(JSON.stringify(seatModelRequest(NAV, 'navigator', legacy)) === '{}', '#26 a run with no artifactNamespace still blocks its own acceptance seat');
+    check(JSON.stringify(seatModelRequest(NAV, 'navigator')) === PREMIUM_JSON,
+      '#26 and it does NOT fall into the process scope: a team-less seat (the settings route test) is untouched');
+    clearNavRouteFallback();
+    const dualA = board('dual-a', 'cap-da'), dualB = board('dual-b', 'cap-db');
+    const cleanB = JSON.stringify(seatModelRequest(NAV, 'navigator', dualB));
+    setNavRouteFallback('run A degraded', dualA);
+    check(JSON.stringify(seatModelRequest(NAV, 'navigator', dualA)) === '{}', '#26 a dual-Driver run keeps its own fallback, read through the run object');
+    check(JSON.stringify(seatModelRequest(NAV, 'navigator', dualB)) === cleanB, '#26 and the other dual-Driver run is byte-identical: isolation holds across isolated slots');
+    clearNavRouteFallback();
   } finally {
     await rm(root, { recursive: true, force: true }).catch(() => {});
   }
