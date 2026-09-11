@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { registerCleanupTools } from '../lib/tools/cleanup.js';
+import { registerCleanupTools, resolveEntries, LEVELS, keptRecords } from '../lib/tools/cleanup.js';
 import { initialProtocolState } from '../lib/protocol/machine.js';
 import { createTeamDir } from '../lib/state/store.js';
 import { coordinationWorkspace } from '../lib/runtime/workspace-context.js';
@@ -48,6 +48,26 @@ async function harness(phase) {
 }
 
 export async function run(check) {
+  /* ---- shapes: levels are strategies, and the operation is a guarded transition ---- */
+  const stratCtx = { stateRoot: 'S', workspace: 'W' };
+  const strategyLevels = {
+    ...LEVELS,
+    // A level invented HERE, with the same resolver shape. If the executor had to know its name,
+    // this assertion could not be written - which is the property being pinned.
+    deep: { extends: 'full', adds: () => [{ path: 'S/extra', category: 'test strategy', why: 'invented for this assertion' }] },
+  };
+  const intermediate = resolveEntries(stratCtx, 'intermediate').map(entry => entry.path);
+  const full = resolveEntries(stratCtx, 'full').map(entry => entry.path);
+  const deep = resolveEntries(stratCtx, 'deep', strategyLevels).map(entry => entry.path);
+  check(full.length === intermediate.length + 1 && intermediate.every(p => full.includes(p)),
+    'a level composes over its base instead of restating it (full = intermediate + worktrees)');
+  check(deep.length === full.length + 1 && deep.includes('S/extra'),
+    'a NEW level resolves through the same table with no change to the executor - levels are strategies, not branches');
+  check(keptRecords([]).length === 4 && keptRecords(['t-1']).some(k => k.path === 't-1/team.json'),
+    'the kept-record list always carries the four workspace-wide records and derives the per-team ones');
+  let unknown = '';
+  try { resolveEntries(stratCtx, 'nonsense'); } catch (error) { unknown = String(error.message); }
+  check(unknown.includes('level must be one of'), 'an unknown level is refused by the table, not silently treated as intermediate');
   const h = await harness('DONE');
   try {
     const before = await fingerprint(h.stateRoot);
