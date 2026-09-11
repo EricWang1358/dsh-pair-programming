@@ -72,6 +72,20 @@ for (const token of argv) {
   }
 }
 
+// Interrupted runs skip their fixture's finally block, so our own temp debris accumulates
+// (measured: 361 directories). Sweep OUR stale ones once, in the parent only - a parallel
+// child always runs with --only and would race every other child. Best effort: a sweep
+// failure never fails a test run, and the numbers are printed rather than asserted.
+if (only === undefined) {
+  const { sweepStaleFixtures } = await import('./support/tmp-sweep.mjs');
+  try {
+    const swept = await sweepStaleFixtures();
+    if (swept.removed.length > 0 || swept.kept.length > 0) {
+      console.log(`temp fixtures: removed ${swept.removed.length} stale, kept ${swept.kept.length} (prefix + age scoped)`);
+    }
+  } catch (error) { console.log('temp fixture sweep skipped: ' + String(error.message)); }
+}
+
 // Each suite exports an async run(check) so state is isolated.
 const suites = ['peer-setup.test.mjs', 'protocol.test.mjs', 'state.test.mjs', 'lock.test.mjs', 'gate.test.mjs', 'story.test.mjs', 'coverage.test.mjs', 'settings.test.mjs', 'client.test.mjs', 'members.test.mjs', 'lifecycle.test.mjs', 'lifecycle-output.test.mjs', 'collapse.test.mjs', 'wake.test.mjs', 'oracle.test.mjs', 'obligation.test.mjs', 'scope.test.mjs', 'stall.test.mjs', 'solo.test.mjs', 'board-guard.test.mjs', 'task-amend.test.mjs', 'disclosure.test.mjs', 'attention.test.mjs', 'ce.test.mjs', 'lessons.test.mjs', 'command.test.mjs', 'ce-registry.test.mjs', 'events.test.mjs', 'host-contract.test.mjs', 'command-shape.test.mjs', 'nav-model.test.mjs', 'ledger.test.mjs', 'settings-host.test.mjs'];
 suites.push('stability.test.mjs');
@@ -85,6 +99,7 @@ suites.push('yield.test.mjs');
 suites.push('quality-guards.test.mjs');
 suites.push('prompt-budget.test.mjs');
 suites.push('cleanup.test.mjs');
+suites.push('tmp-sweep.test.mjs');
 suites.push('gate-binding.test.mjs');
 // U1's acceptance suite: ported from the oracle frozen by the v15-u1-routing Navigator
 // before any implementation existed (see the file header for the two instrument repairs).
