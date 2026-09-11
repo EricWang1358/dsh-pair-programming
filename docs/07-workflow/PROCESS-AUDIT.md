@@ -54,7 +54,7 @@ only at `parallel-tasks` and never searched for an existing assertion.
 
 | cell | what it would assert | why it is blocked |
 |---|---|---|
-| credential projection (K2-5) | `pair_status.gate_credentials[].board_state_current` flips stale after a board move and back after a re-gate | `pair_status` throws on the synthetic board the verification suite can build |
+| credential projection (K2-5) | `pair_status.gate_credentials[].board_state_current` flips stale after a board move and back after a re-gate | **the reason I first wrote here was wrong.** It is not that `pair_status` throws: a hand-built credential record is **rejected by the store's own state validation** (`readTeam` → "invalid pair-programming state"), so a pass that survives has to be **produced by a real gate run**. The projection therefore needs a fixture that reaches `pair_gate_check` through the protocol, not a seeded one — the rule itself is already pinned in `oracle.test.mjs` |
 
 ## Before writing "blocked", search for the assertion
 
