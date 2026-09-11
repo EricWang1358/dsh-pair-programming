@@ -5,6 +5,48 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [0.15.10] — 2026-09-11
+
+**The Compound Engineering catalog now describes what the skills DO (L1, #81/#82).** The
+catalog line for `ce-proof` read *"Check each claim against the evidence that is supposed to
+support it"* — a capability guessed from the name. Its real body is a **Proof document
+collaboration** skill: *"Publish, read, comment on, or edit markdown in Proof…"*, headed
+*"Proof - Collaborative Markdown Editor"*. Auditing **every** row against its `SKILL.md`
+frontmatter then found three more of the same kind:
+
+- `ce-doc-review` was described as checking documentation against code; it reviews **plans and
+  specs with role-specific lenses**;
+- `ce-explain` was described as explaining code; it produces a **durable visual teaching
+  artifact**;
+- `ce-pov` was described as re-reading a change; it gives a **decisive, project-grounded point
+  of view**.
+
+Six rows are realigned to their bodies, each inside the catalog's 110-character per-line
+budget, the measured frontmatter is quoted above the `ce-proof` row, and an assertion fails
+if that guessed sentence returns. The audit itself is repeatable:
+`.probe/ce-audit.mjs` prints every catalog line beside the skill's own description.
+
+**Documentation, verified against the code (#80).** Two plan entries contradicted delivered
+work: the dual-Driver row (the route-consistency arm is executable and gating, boundary
+regression 79/0, with the real `drivers: 2` run still owed) and K3's enforcement check, which
+now separates what the runner **enforces** — every `--only` word must match, unknown flags are
+refused, the selected set is echoed, `check.skip` has its own count and is fatal by default,
+and a new skip fails even when acknowledged — from what remains human judgement (impact
+analysis and splitting heavy suites, where K2-3 measured that `integration` has no light
+subset to extract).
+
+### Still open, named rather than implied
+
+- **L1's semantics** — `ceLanes` is a manual gesture rather than Captain auto-adoption, and
+  the configured/available/loaded/produced distinction needs a decision about workflow
+  semantics, not a description fix;
+- the **credential-staleness projection** through `pair_status` (the rule is pinned; the
+  projection needs a board the status walk can complete);
+- the **tool-level end-to-end** for the pause (#75);
+- **K2-4**'s cost items; **#19** claim 4; **#26**'s `drivers: 2` run; **U4**'s escalation half
+  and revision concept.
+
+Verified as one batch in a single pass: `npm run verify` on the tagged tree.
 ## [0.15.9] — 2026-09-11
 
 One product fix and four pieces of test evidence, batched.
