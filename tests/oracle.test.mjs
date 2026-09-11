@@ -309,6 +309,21 @@ export async function run(check) {
     const live = await h2.tool('pair_propose')({ task_id: 't-1', intent: 'i', files: ['src/a.js'], net_lines: 4, verify_plan: 'v' }, { agent: h2.driver });
     const refork = await fails(() => h2.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK }, { agent: h2.navigator }), 'in flight');
     check(refork.includes('is in flight') && refork.includes('never shown'), 'H2 the oracle cannot be re-forked under an in-flight cycle');
+    // G3: the seal itself being invalid is the one case that MUST cross an in-flight
+    // cycle. Otherwise the instrument can only be repaired by first driving a standard
+    // nobody can satisfy to a verdict, which is the lock this fixes.
+    const beforeRepair = await readTeam(h2.stateRoot, 'ot2');
+    const invalidSeal = beforeRepair.tasks[0].oracle.sha;
+    const stepBefore = beforeRepair.protocol.cycles.find(c => c.id === live.cycle_id).step;
+    await writeFile(oraclePath, 'const absent = globalThis.__neverImplemented;\nif (absent === undefined) { console.log("acceptance not met"); process.exit(1); }\nprocess.exit(0);\n');
+    const repaired = await h2.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK, fork_kind: 'defect', defect_evidence: 'the sealed artifact asserted a helper this repository has never had, so the run failed identically at every verdict and no implementation could satisfy it' }, { agent: h2.navigator });
+    check(repaired.oracle_sha?.length === 64 && repaired.oracle_sha !== invalidSeal, 'G3 a DEFECT fork re-freezes under an in-flight cycle instead of locking the instrument');
+    const afterRepair = await readTeam(h2.stateRoot, 'ot2');
+    const liveCycle = afterRepair.protocol.cycles.find(c => c.id === live.cycle_id);
+    check(liveCycle.oracleSha === afterRepair.tasks[0].oracle.sha, 'G3 and the open cycle is re-stamped onto the repaired seal, so the frontier does not strand it');
+    check(liveCycle.oracleRepair?.fromOracleSha === invalidSeal && String(liveCycle.oracleRepair.defectEvidence).length > 0, 'G3 with the replaced digest AND the defect evidence recorded on the cycle itself');
+    check(liveCycle.step === stepBefore && liveCycle.step !== 'CLOSED', 'G3 and the Driver keeps its cycle, at the same step: the repair changes the standard it is judged by, not the work it did');
+    check(resolveCycleOracle(liveCycle, afterRepair.tasks[0]).error === undefined, 'G3 and the repaired cycle resolves cleanly against the task record');
     // H3: the legacy step tools refuse an oracle cycle by naming the right move.
     const redAdvice = await fails(() => h2.tool('pair_red')({ cycle_id: live.cycle_id, test_files: ['t.mjs'], red_evidence: ['fails'] }, { agent: h2.driver }), 'oracle');
     check(redAdvice.includes('IS its RED') && redAdvice.includes('pair_green'), 'H3 pair_red on an oracle cycle names the oracle, not a chain error');
