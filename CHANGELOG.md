@@ -5,6 +5,32 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [0.15.7] — 2026-09-11
+
+**The pause, described accurately.** `pair_interrupt` returns after ISSUING a cancel signal;
+the host is fire-and-return — *"the target may keep running until it observes the signal"*
+(`dsh-subagent/lib/types/index.d.ts:146-152`) — so a member inside a long tool call can finish
+that call first. The tool reported *"Interrupted the current turn of driver"*, which reads as a
+completed stop and is not one. Its result and its description now say what actually happens,
+including that the run will not be woken again until the captain speaks.
+
+**The surviving window is named, not papered over.** `untrackTeam` removes the run from the
+sweep synchronously, but a heartbeat pass already in flight keeps the snapshot it took at its
+start, so at most **one** further nudge can slip through before the pause holds. A guard would
+have to distinguish that pass's nudges from the deliberate kicks tools make
+(`pair_task_create`), so the window is documented in the contract instead of forced.
+
+### Still open, named rather than implied
+
+- **#19**: claim 4 (the old session not returning with authority) is asserted at unit level,
+  not measured live; the D1 write-back is written and left uncommitted because that file also
+  carries the user's own uncommitted edits.
+- **#26**: its second bullet — a real `drivers: 2` run — needs a workspace whose root is a
+  clean committed Git repository.
+- **U4's escalation half** needs a specialist seat; **late-result rejection by a superseded
+  public-contract revision** needs a revision concept.
+
+Verified as one batch in a single pass: `npm run verify` on the tagged tree.
 ## [0.15.6] — 2026-09-11
 
 **A cancelled turn is not a pause.** Reported live: the captain's pause did not hold —
