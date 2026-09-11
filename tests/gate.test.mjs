@@ -27,6 +27,24 @@ export async function run(check) {
   const r2 = openRisk(p, { severity: 'P2', scenario: 's', trigger: 't', suggestion: 'x', raisedBy: 'challenger' });
   wontfixRisk(p, r2.id, 'cosmetic only');
   check(p.risks.find(x => x.id === r2.id).status === 'WONTFIX', 'wontfix recorded');
+  // #127: a MITIGATED blocker with no independent artifact left to close it on had no
+  // disposition path — it blocked completion, closeRisk demanded an artifact it could not
+  // have, and this ruling was OPEN-only. The captain governs what ships.
+  const r3 = openRisk(p, { severity: 'P1', scenario: 's', trigger: 't', suggestion: 'x', raisedBy: 'challenger' });
+  mitigateRisk(p, r3.id, 'the retry is idempotent now');
+  check(openBlockingRisks(p).length === 1, '#127 the mitigated P1 still blocks while it has no disposition');
+  let ruled = '';
+  try { wontfixRisk(p, r3.id, 'the mitigation is the whole remedy; no independent probe can be built for an offline-only path'); } catch (error) { ruled = String(error.message); }
+  check(ruled === '' && p.risks.find(x => x.id === r3.id).status === 'WONTFIX'
+    && p.risks.find(x => x.id === r3.id).wontfixRationale.includes('mitigation is the whole remedy'),
+    `#127 a MITIGATED ticket reaches WONTFIX with its rationale recorded, clearing the block (got: ${ruled || 'no ruling recorded'})`);
+  check(openBlockingRisks(p).length === 0, '#127 and the block is gone');
+  let settled = 'accepted';
+  try { wontfixRisk(p, r3.id, 'again'); } catch (error) { settled = String(error.message); }
+  check(settled.includes('already settled'), '#127 while a ticket that already carries a ruling stays settled (re-ruling is refused)');
+  let closedOnce = 're-ruled';
+  try { wontfixRisk(p, r.id, 'the closed P0 is a false alarm after all'); } catch (error) { closedOnce = String(error.message); }
+  check(closedOnce.includes('already settled'), '#127 and a CLOSED ticket is not re-ruled either');
   let threw = false;
   try { openRisk(p, { severity: 'P9', scenario: 's', trigger: 't', suggestion: 'x', raisedBy: 'challenger' }); } catch { threw = true; }
   check(threw, 'invalid severity rejected');
