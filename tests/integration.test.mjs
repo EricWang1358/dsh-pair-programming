@@ -15,7 +15,9 @@ import { readMailbox } from '../lib/state/mailbox.js';
 import { decodeMessage } from '../lib/protocol/messages.js';
 
 const execute = promisify(execFile);
-const git = async (cwd, ...args) => (await execute('git', args, { cwd, encoding: 'utf8' })).stdout.trim();
+// K2-4: pinned against the developer's git config, and bounded (see worktrees.test.mjs).
+const GIT_PINS = ['-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=', '-c', 'core.pager=cat', '-c', 'advice.detachedHead=false'];
+const git = async (cwd, ...args) => (await execute('git', [...GIT_PINS, ...args], { cwd, encoding: 'utf8', timeout: 60_000 })).stdout.trim();
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'pair-integrate-'));
   await git(root, 'init'); await git(root, 'config', 'user.name', 'Integration test');
