@@ -350,6 +350,26 @@ export async function run(check) {
     check(completed.status === 'completed' && stagedBoard.tasks[0].gatePassId === stagedPass.gate_pass_id
       && gateStateFingerprint(stagedBoard, 't-1') === storedPass.binding.gateStateSha,
     'I the board-bound gate credential remains authoritative across the legitimate completion transition');
+    // G1: an artifact that does not parse cannot become the standard. Measured by the
+    // r4 session: two seats read a 796-line oracle line by line, BOTH cited the broken
+    // line, and the freeze still sealed it — because a parse error exits 1, which is
+    // exactly what the freeze requires its RED to do.
+    const g1Root = join(root, 'g1'); await mkdir(g1Root, { recursive: true });
+    const g1 = harness(g1Root, 'state');
+    await createTeamDir(g1.stateRoot, teamFixture({ id: 'g1team' }));
+    const brokenPath = '.pair-oracles/t-1/broken.mjs';
+    const broken = 'const quote = "never closed\nprocess.exit(1);\n';
+    const refusedDraft = await fails(() => g1.tool('pair_oracle_write')({ task_id: 't-1', path: brokenPath, content: broken }, { agent: g1.navigator }), 'does not parse');
+    check(refusedDraft.includes('does not parse'), 'G1 the writer refuses a draft that does not parse');
+    check(fs.existsSync(join(g1Root, brokenPath)) === false, 'G1 and writes nothing, so a good artifact is never replaced by a broken one');
+    await mkdir(join(g1Root, '.pair-oracles', 't-1'), { recursive: true });
+    await writeFile(join(g1Root, brokenPath), broken);
+    const refusedFreeze = await fails(() => g1.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK, oracle_files: [brokenPath], oracle_cmd: 'node ' + brokenPath }, { agent: g1.navigator }), 'VERIFICATION_INFRASTRUCTURE');
+    check(refusedFreeze.includes('VERIFICATION_INFRASTRUCTURE') && refusedFreeze.includes('does not parse'), 'G1 an unparseable artifact reaches no seal: the freeze refuses it as an instrument problem');
+    check((await readTeam(g1.stateRoot, 'g1team')).tasks[0].oracle === undefined, 'G1 and the task carries no oracle after that refusal');
+    await writeFile(join(g1Root, brokenPath), 'const absent = globalThis.__nothingImplementedYet;\nif (absent === undefined) { console.log("acceptance not met"); process.exit(1); }\nprocess.exit(0);\n');
+    const healthy = await g1.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK, oracle_files: [brokenPath], oracle_cmd: 'node ' + brokenPath }, { agent: g1.navigator });
+    check(healthy.oracle_sha?.length === 64, 'G1 a valid acceptance artifact still freezes RED - the parse gate does not block real work');
   } finally {
     delete process.env.FIXED;
     await rm(root, { recursive: true, force: true });
