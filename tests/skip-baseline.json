@@ -1,5 +1,8 @@
 {
   "host-contract.test.mjs": [
     "the usage section reaches the rendered system prompt"
+  ],
+  "runtime-input-boundary.test.mjs": [
+    "J1 a direct file link is refused at the leaf"
   ]
 }
