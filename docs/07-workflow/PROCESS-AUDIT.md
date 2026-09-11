@@ -38,25 +38,40 @@ Re-run it after touching anything that wakes a seat, writes the board, or adds a
 
 ## Assertions: closed, and still blocked
 
-**Closed 2026-09-11 — L2 at the seat.** The delivery a member reads names the skill covering the
-call it owes, asserted against a fixture that **proves itself first**: `owed.tool === 'pair_review'`
-before anything downstream is measured. Two earlier attempts failed for reasons that were mine,
-not the fixture's — I passed the slot that owed nothing, and I expected `pair_propose → ce-ideate`
-when `ce-ideate` is a **user-surface** skill, so the lane correctly refused to name it (only skills
-the lane serves to the MODEL are named). The correction matters: **this cell was never blocked on a
-missing fixture**, and the previous version of this section said it was.
+Two cells have been closed since this section was written, and **both were declared blocked by me
+without checking first**. That is the lesson this section now leads with.
+
+**Closed — L2 at the seat.** `ce.test.mjs` asserts that the delivery a member reads names the skill
+covering the call it owes, against a fixture that **proves itself first** (`owed.tool === 'pair_review'`).
+Three attempts had measured nothing: I passed the slot that owed nothing, and I expected
+`pair_propose → ce-ideate` when `ce-ideate` is a **user-surface** skill, so the lane correctly refused
+to name it. Not a missing fixture — two wrong assumptions.
+
+**Closed — the tool-level pause path (#75).** `backlog.test.mjs:171` already asserted it, and had since
+an earlier round: a member's `pair_task_create` kicks with `background: true`, the captain's with
+`false`, observed on the real call path. The "blocked" row below claimed the opposite because I looked
+only at `parallel-tasks` and never searched for an existing assertion.
 
 | cell | what it would assert | why it is blocked |
 |---|---|---|
 | credential projection (K2-5) | `pair_status.gate_credentials[].board_state_current` flips stale after a board move and back after a re-gate | `pair_status` throws on the synthetic board the verification suite can build |
-| tool-level pause path (K2-6, #75) | a member's kick carries `background: true`, the captain's `false`, observed on the real call path | every `pair_task_update` call in `parallel-tasks` is **rejected**, so no successful path exists |
 
-The lesson the closed one taught, now applied by default: **a fixture must prove it produces the
-condition it exists for**, as its own assertion, before any assertion that depends on it. Three
-attempts measured nothing because the board owed nothing, and the failure looked like a product bug.
+## Before writing "blocked", search for the assertion
+
+Twice in one session a cell was written down as blocked when it was not: once it was already asserted,
+and once it needed a fixture that existed in a suite I had not looked at. The cheap rule that would
+have caught both: **grep the tests for the thing you are about to call unasserted.** A record that
+overstates the gaps is not conservative, it is wrong — and it teaches the next reader to avoid a cell
+that is covered.
+
+## The discipline that closed one of them
+
+A fixture must **prove it produces the condition it exists for**, as its own assertion, before any
+assertion that depends on it. Three attempts failed because the board owed nothing and the failure
+looked like a product bug.
 
 Shapes worth not re-deriving: `boundedMailboxPrompt(messages, team, recipient, config, pending)` takes
 the recipient as a member **name**, `messages[].content` is a **string**, and it returns an object whose
 **`.text`** is the prompt. `obligation.js:239` decides *who* owes: with `oracleFirst` an oracle-less task
-owes `pair_oracle` to the **Navigator**, and the Driver only owes `pair_propose` when the task does not
+owes `pair_oracle` to the **Navigator**, and the Driver owes `pair_propose` only when the task does not
 need an oracle.
