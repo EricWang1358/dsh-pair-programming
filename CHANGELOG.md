@@ -5,6 +5,50 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [0.15.9] — 2026-09-11
+
+One product fix and four pieces of test evidence, batched.
+
+**Only the captain's action lifts a pause (#76, closes #75).** `kickTeam`/`kickMember`
+re-track the run they kick, so **any** tool that kicks re-engaged it — and two of the four
+kick sites are reachable by a **member** (`flow.js`, `task.js`). A Navigator still mid-turn
+could therefore lift the pause the captain had just placed on the Driver, contradicting the
+tool's own promise that the run will not be woken again until the captain speaks. Kicks now
+carry a `background` flag derived from `isCaptain`, and only deliberate (captain) kicks clear
+a pause.
+
+Recorded in the fix: `kickCaptain` was missed on the first pass, so its re-track referenced an
+out-of-scope variable and the resulting ReferenceError was swallowed by the callers'
+`.catch(() => undefined)` — silently disabling captain mail draining. `delivery.test.mjs`
+caught it before anything shipped, which is the same shape as the defect the issue describes:
+a swallowed error hiding a control that had stopped working.
+
+**Test evidence in the same batch**:
+
+- the **pause/resume/takeover matrix** (#74) — seven interleavings pinned, including that a
+  heartbeat pass already in flight cannot revive a paused run, and that a host restart is
+  deliberate re-engagement rather than a background track;
+- the **candidate-binding primitive** (#77) in both error directions — a touch is stable, an
+  added file moves the digest, removing it again returns it, rewriting the same bytes leaves
+  it alone, a deletion moves it;
+- the **credential-visibility rule** (#78) — an unchanged board reads current, a board move
+  flips it to stale, restoring the board returns it, and a credential the board no longer
+  carries is not current;
+- **K2-3's cost evidence** (#73): the `integration` fixture is ~5.5s per scenario
+  (worktrees 3.23s of it, sixteen git spawns building isolated candidate commits), ~37% of
+  that suite — and there is **no light subset to extract**, because all six scenarios test
+  the integration tools against real repositories.
+
+### Still open, named rather than implied
+
+- the **projection** of credential staleness through `pair_status`, and the return to current
+  after a fresh `pair_gate_check` — the rule is pinned, the projection is not;
+- the **tool-level end-to-end** for the pause (#75): pause → a real member calls a kicking
+  tool → still paused;
+- **K2-4**'s cost items (the `worktrees` suite and `integration`'s per-scenario repositories);
+- **#19** claim 4, **#26**'s `drivers: 2` run, **U4**'s escalation half and revision concept.
+
+Verified as one batch in a single pass: `npm run verify` on the tagged tree.
 ## [0.15.8] — 2026-09-11
 
 A batch of nine merges: three product fixes from the round-40 review, and the test
