@@ -383,6 +383,43 @@ export async function run(report) {
     delete board.useCases;
     assert.equal(projectPairPanel(board).features.length, 0, 'a team without registered use cases shows no invented list');
   });
+  await check('the green step reads as the Driver self-test, never as a passed check', () => {
+    for (const dict of [sandbox.PAIR_PANEL_ZH, sandbox.PAIR_PANEL_EN]) {
+      assert.ok(!/通过|passed|passing/i.test(dict['event.green']), 'the GREEN step is the Driver reporting its own test run');
+    }
+    assert.equal(sandbox.pairRhythmGroup('green'), 'build', 'a self-test stays on the building lane');
+    assert.equal(sandbox.pairRhythmGroup('accept'), 'pass');
+  });
+  await check('a projection from an older host reads as "restart DSH", not as an empty feature list', () => {
+    // This stub expands function components (with inert hooks), so the assertion reads rendered output,
+    // not just the element a parent handed over.
+    const hooks = { useState: init => [typeof init === 'function' ? init() : init, () => {}], useEffect: () => {}, useLayoutEffect: () => {},
+      useRef: value => ({ current: value }), useMemo: fn => fn(), useCallback: fn => fn, useDeferredValue: value => value,
+      useSyncExternalStore: (subscribe, get) => get() };
+    const react = new Proxy(hooks, { get: (target, key) => key === 'createElement'
+      ? ((type, props, ...children) => typeof type === 'function' ? type({ ...(props || {}), children }) : { type, props, children })
+      : target[key] });
+    const Dashboard = sandbox.createPairDashboard(react);
+    const render = (view, team) => JSON.stringify(Dashboard({ t: key => key, data: { team, warnings: [], teams: [], observedAt: 1 }, view, density: 'compact', status: 'live' }));
+    const current = projectPairPanel(demoBoard());
+    assert.equal(sandbox.pairLegacyServer(current), false);
+    assert.ok(!render('overview', current).includes('legacyHint'), 'a complete projection shows no restart notice');
+    const older = structuredClone(current);
+    delete older.features; delete older.value;
+    older.progress.eta = { reason: 'rough', samples: 1, minMinutes: 3, maxMinutes: 11 };
+    assert.equal(sandbox.pairLegacyServer(older), true);
+    const overview = render('overview', older);
+    assert.ok(overview.includes('legacyHint'), 'a host that has not restarted is named as such');
+    assert.ok(overview.includes('3–11'), 'the older range projection renders the range it measured');
+    const features = render('features', older), value = render('value', older);
+    assert.ok(features.includes('legacyHint') && !features.includes('features.empty'));
+    assert.ok(value.includes('legacyHint') && !value.includes('value.empty'));
+    for (const dict of [sandbox.PAIR_PANEL_ZH, sandbox.PAIR_PANEL_EN]) assert.ok(dict['eta.blocked'], 'the pre-0.15.12 "blocked" reason has copy in both languages');
+    const unknown = structuredClone(current);
+    unknown.progress.eta = { reason: 'invented-later' };
+    const tree = render('overview', unknown);
+    assert.ok(tree.includes('eta.unknown') && !tree.includes('eta.invented-later'), 'an unknown reason falls back to readable copy, not to a raw key');
+  });
   await check('panel registers a conversation view plus optional sidebar and disposes both',()=>{
     const views=[],removed=[],dictionary={};
     const ctx={effect:fn=>fn(),locale:{register:(ns,d)=>{Object.assign(dictionary,d);return ()=>{};},bind:()=>key=>key},
