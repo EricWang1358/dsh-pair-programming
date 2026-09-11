@@ -92,7 +92,7 @@ export async function run(check) {
       handlers.get('dispose')(); finish.resolve(); await new Promise(r => setImmediate(r));
       assert.equal(escalatedSlow, 0);
     });
-    await test('resumed captain rediscovers only its valid live teams', async () => {
+    await test('resumed captain rediscovers only its valid live teams, and never wakes one into a checkout another team owns', async () => {
       const stateRoot = join(root, 'resume');
       await createTeamDir(stateRoot, fixture('active'));
       await createTeamDir(stateRoot, { ...fixture('other'), captainSessionId: 'other' });
@@ -102,8 +102,20 @@ export async function run(check) {
       const ctx = { on: (n, f) => handlers.set(n, f), logger: { warn() {} }, agents: { get() {} }, subagents: {} };
       const scheduler = installPairScheduler(ctx, { stateDir: 'resume', heartbeatMs: 0 });
       await handlers.get('agent/session-start')({ agent: { id: 'cap', session: { header: { cwd: root } } } });
-      assert.deepEqual(scheduler.trackedTeams().map(t => t.teamId), ['active']);
+      // J2: 'other' is a live board ON DISK, so this checkout already has an owner and
+      // the reopened conversation must not wake its members into it. The archived and
+      // the corrupt boards are still ignored, exactly as before.
+      assert.deepEqual(scheduler.trackedTeams().map(t => t.teamId), []);
       handlers.get('dispose')();
+      // Once that owner is released, the same conversation is rediscovered — releasing
+      // is a normal closure/abort of the other board, never a deletion or a bypass.
+      await createTeamDir(stateRoot, { ...fixture('other'), captainSessionId: 'other', protocol: { ...initialProtocolState(), phase: 'ABORTED' } });
+      const handlers2 = new Map();
+      const ctx2 = { on: (n, f) => handlers2.set(n, f), logger: { warn() {} }, agents: { get() {} }, subagents: {} };
+      const scheduler2 = installPairScheduler(ctx2, { stateDir: 'resume', heartbeatMs: 0 });
+      await handlers2.get('agent/session-start')({ agent: { id: 'cap', session: { header: { cwd: root } } } });
+      assert.deepEqual(scheduler2.trackedTeams().map(t => t.teamId), ['active']);
+      handlers2.get('dispose')();
     });
     await test('repository commit write failure preserves original valid board', async () => {
       const stateRoot = join(root, 'commit'); const original = fixture('one'); await createTeamDir(stateRoot, original);
