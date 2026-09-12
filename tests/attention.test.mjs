@@ -15,7 +15,7 @@ import {
   debtKey, turnEndKind, wasTruncated, MAX_TOKEN_RESUMES, ATTENTION_KINDS,
 } from '../lib/protocol/attention.js';
 import { initialProtocolState } from '../lib/protocol/machine.js';
-import { gateStateFingerprint } from '../lib/protocol/gate.js';
+import { gateStateFingerprint, gateStateBreakdown } from '../lib/protocol/gate.js';
 
 const member = (name, over = {}) => ({ id: `child-${name}`, name, role: name, status: 'idle', joinedAt: 1, ...over });
 const task = (over = {}) => ({
@@ -86,6 +86,17 @@ export async function run(check) {
   check(staleCredentials(completed, { worktreeSha: 'w2' })[0]?.why.includes('worktree'), 'a moved worktree invalidates the credential and says which binding broke');
   completed.protocol.gatePasses[0].binding.gateStateSha = 'stale';
   check(staleCredentials(completed)[0]?.why.includes('board'), 'a moved board invalidates the credential');
+  const upgraded = teamFixture({ tasks: [task({ status: 'completed', gatePassId: 'gp-2' })] });
+  upgraded.protocol.risks = [{ id: 'r-1', severity: 'P1', status: 'OPEN', scenario: 'as recorded when the gate ran', openedAt: 1 }];
+  upgraded.protocol.gatePasses = [{ id: 'gp-2', taskId: 't-1', at: 2,
+    binding: { gateStateSha: gateStateFingerprint(upgraded, 't-1'), breakdown: gateStateBreakdown(upgraded, 't-1'),
+      // The per-ticket index is what lets the gate say "no ticket was added or removed", which is the
+      // condition for naming the digest-definition alternative rather than a board write.
+      breakdownIndex: { risks: { 'r-1': 'a'.repeat(64) } } } }];
+  upgraded.protocol.risks[0].scenario = 'reworded by its owner, same ticket';
+  const movedWhy = staleCredentials(upgraded)[0]?.why ?? '';
+  check(movedWhy.includes('risks changed') && movedWhy.includes('re-running the gate'),
+    '#167 a stale credential names the input that moved and the digest-definition alternative, the same pair the gate refusal gives');
   const missing = teamFixture({ tasks: [task({ status: 'completed', gatePassId: 'gp-9' })] });
   check(staleCredentials(missing)[0]?.why.includes('no matching gate credential'), 'a completed card with no matching pass is flagged, not skipped');
 
