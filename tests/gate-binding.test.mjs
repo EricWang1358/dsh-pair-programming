@@ -286,5 +286,29 @@ export async function run(check) {
     const blockedOwn = await attempt(() => h.tool('pair_gate_check')({ task_id: 't-1' }, { agent: fifth }));
     check(blockedOwn.error.includes('open P0') && blockedOwn.error.includes('r-elsewhere'),
       `#126 while the same P0 attributed to THIS card still refuses it (got: ${blockedOwn.error})`);
+
+    /* -------------------------------------------------------------------- */
+    /* D3: the digest's own definition is off-board, so the refusal must      */
+    /* name it rather than sending the reader after a phantom board write.    */
+    /* -------------------------------------------------------------------- */
+    const sixth = { id: 'cap6', session: { header: { cwd: root }, append() {} } };
+    const upgraded = credentialBoard({ id: 'upgraded', name: 'Upgraded', captainSessionId: 'cap6' });
+    upgraded.protocol.risks = [{ id: 'r-old', severity: 'P1', status: 'WONTFIX', scenario: 'the retry is not idempotent', trigger: 't', suggestion: 'x', raisedBy: 'navigator', scope: 'product', openedAt: 6, closedAt: 7, wontfixRationale: 'the mitigation in hand is the whole remedy' }];
+    await arm(upgraded, sixth);
+    const armed = await attempt(() => h.tool('pair_gate_check')({ task_id: 't-1' }, { agent: sixth }));
+    // What a digest-definition change looks like from the credential's side: the SAME
+    // ticket ids, carrying the per-id digests the PREVIOUS definition produced. No
+    // board write happened, and the credential cannot tell the two apart.
+    const held = await readTeam(h.stateRoot, 'upgraded');
+    const heldPass = held.protocol.gatePasses.filter(item => item.taskId === 't-1').at(-1);
+    heldPass.binding.breakdownIndex.risks = Object.fromEntries(Object.keys(heldPass.binding.breakdownIndex.risks).map(key => [key, 'e'.repeat(64)]));
+    heldPass.binding.breakdown.risks = 'f'.repeat(64);
+    held.protocol.cycles[0].verify.binding.gateStateSha = 'minted-before-the-definition-changed';
+    await writeTeam(h.stateRoot, held);
+    const upgradedRefusal = (await attempt(() => h.tool('pair_gate_check')({ task_id: 't-1' }, { agent: sixth }))).error;
+    check(armed.error === '' && upgradedRefusal.includes('GATE_STALE')
+      && upgradedRefusal.includes('risks: changed r-old(P1)')
+      && upgradedRefusal.includes("digest's own definition") && upgradedRefusal.includes('re-running the gate is the recovery'),
+      `D3 the refusal for a moved risk register with no ticket added or removed names the digest-definition change as the alternative cause instead of a phantom board write (got: ${upgradedRefusal})`);
   } finally { await rm(root, { recursive: true, force: true }); }
 }

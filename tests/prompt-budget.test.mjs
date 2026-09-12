@@ -6,9 +6,14 @@
  * would hide the expensive one, and the two-contributor paragraph is charged only when that
  * experimental workflow is actually reachable:
  *
- *   solo   off 12,098 / on 13,259     (protocol  5,653 + rest 6,445)
- *   light  off 16,811 / on 17,972     (protocol 10,366 + rest 6,445)
- *   full   off 16,811 / on 17,972
+ *   solo   off 12,141 / on 13,302     (protocol  5,653 + rest 6,488)
+ *   light  off 16,948 / on 18,109     (protocol 10,460 + rest 6,488)
+ *   full   off 16,948 / on 18,109
+ *
+ * Re-measured 2026-09-12 after the tool list gained the three tools the prompt had been hiding
+ * (pair_correction, pair_yield, pair_cleanup) and the captain protocol gained one sentence about
+ * pair_correction: rest 6,445 -> 6,488 (+43, the tool names), protocol 10,366 -> 10,460 (+94, the
+ * sentence). Both variants stay inside their budgets (solo 159 chars of headroom, light/full 152).
  *
  * The first version of this test pinned only `{}`, which resolves to the cheap solo variant -
  * it guarded the wrong one while a light/full deployment paid 4,700 more per step unwatched.
@@ -19,7 +24,7 @@ import { resolveConfig } from '../lib/defaults.js';
 import { captainProtocol, soloProtocol } from '../lib/protocol/personas.js';
 
 const BUDGET = { solo: 12300, light: 17100, full: 17100 };
-const REST = 6445;
+const REST = 6488;
 /** What enabling the two-contributor workflow costs, per step, for every session. */
 const DUAL_DRIVER_PARAGRAPH = 1161;
 

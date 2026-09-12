@@ -40,6 +40,15 @@ const argv = process.argv.slice(2);
 const onlyAt = argv.indexOf('--only');
 const only = onlyAt === -1 ? undefined
   : String(argv[onlyAt + 1] ?? '').split(',').map(v => v.trim()).filter(Boolean);
+// --skip name[,name]: run everything EXCEPT these. The companion to --only for a run that has a
+// genuinely missing input rather than a narrowed question. Measured need: tests/ledger.test.mjs
+// guards the 65KB project ledger that lives BESIDE this package in the development workspace, so a
+// clean checkout - what CI has - cannot read it and reports an unexpected skip. Like --only,
+// a word that matches nothing is refused: a filter that shrinks the run silently is the defect
+// K2-1 already fixed for --only, and a second filter must not reintroduce it.
+const skipAt = argv.indexOf('--skip');
+const skip = skipAt === -1 ? undefined
+  : String(argv[skipAt + 1] ?? '').split(',').map(v => v.trim()).filter(Boolean);
 const timing = argv.includes('--timing');
 // --parallel N: run each selected suite in its OWN process, N at a time. The suites are
 // single-process and sequential by construction, so the long ones (worktrees ~4min,
@@ -64,7 +73,7 @@ if (onlyAt !== -1 && (only === undefined || only.length === 0)) {
 // K2-1: the filter must not be able to lie. An unknown flag is refused rather than
 // ignored, and EVERY word of --only has to match something - the measured defect was a
 // typo in a second word that silently ran fewer suites while the run still read green.
-const KNOWN_FLAGS = ['--only', '--timing', '--parallel', '--allow-skips'];
+const KNOWN_FLAGS = ['--only', '--skip', '--timing', '--parallel', '--allow-skips'];
 for (const token of argv) {
   if (token.startsWith('--') && !KNOWN_FLAGS.includes(token)) {
     console.error('unknown flag ' + token + '; known flags: ' + KNOWN_FLAGS.join(', '));
@@ -110,8 +119,20 @@ suites.push('runtime-input-boundary.test.mjs');
 // J2's directed scheduler regression: one board owns a checkout, and a loaded-session
 // test cannot see the board that a restart left on disk.
 suites.push('workspace-ownership.test.mjs');
-const selected = only === undefined ? suites
-  : suites.filter(s => only.some(needle => s.includes(needle)));
+if (skipAt !== -1 && (skip === undefined || skip.length === 0)) {
+  console.error('--skip needs a comma-separated list of suite names, e.g. --skip ledger');
+  process.exit(2);
+}
+const selected = (only === undefined ? suites : suites.filter(s => only.some(needle => s.includes(needle))))
+  .filter(s => skip === undefined || !skip.some(needle => s.includes(needle)));
+if (skip !== undefined) {
+  const unmatchedSkip = skip.filter(word => !suites.some(name => name.includes(word)));
+  if (unmatchedSkip.length > 0) {
+    console.error('--skip matched no suite for: ' + unmatchedSkip.join(', ') + ' — a word that excludes nothing must fail, not shrink the run silently');
+    process.exit(2);
+  }
+  if (selected.length === 0) { console.error('--skip excluded every suite; there is nothing left to run'); process.exit(2); }
+}
 if (only !== undefined) {
   const unmatched = only.filter(word => !suites.some(name => name.includes(word)));
   if (unmatched.length > 0) {
@@ -134,12 +155,26 @@ if (parallel > 1) {
         const suite = queue.shift();
         active++;
         const childAt = Date.now();
-        const child = spawn(process.execPath, [self, '--only', suite], { stdio: ['ignore', 'pipe', 'pipe'] });
+        // The child gets the acknowledgement too. It was dropped until now, so a suite whose only
+        // skip is an acknowledged environment gap (host-contract's prompt render, the J1 symlink)
+        // exited 1 under --parallel and 0 without it - the same suite, two verdicts, decided by
+        // whether the runner itself was parallel. Measured on CI, where the assertEventsSupported
+        // render check cannot run and host-contract failed with 46 passed / 0 failed / 1 skipped.
+        const childArgs = [self, '--only', suite, ...(allowSkips ? ['--allow-skips'] : [])];
+        const child = spawn(process.execPath, childArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
         let out = '';
         child.stdout.on('data', chunk => { out += String(chunk); });
         child.stderr.on('data', chunk => { out += String(chunk); });
         child.on('close', code => {
           active--; done++;
+          // Keep the failing child's own words. The summary line names the suite and its counts,
+          // and until this existed the assertion text was thrown away - which turned a runner-only
+          // failure into a hunt for whichever check it was. Off by default so a green run stays
+          // quiet; PAIR_TEST_VERBOSE=1 (what CI sets) prints the tail of every broken suite.
+          if (code !== 0 && process.env.PAIR_TEST_VERBOSE === '1') {
+            const tail = out.trimEnd().split(String.fromCharCode(10)).slice(-20).join(String.fromCharCode(10));
+            console.error('--- ' + suite + ' output (last 20 lines) ---' + String.fromCharCode(10) + tail);
+          }
           const match = summary.exec(out);
           const ms = Date.now() - childAt;
           outcomes.push({ suite, code, ms, passed: match ? Number(match[1]) : 0, failed: match ? Number(match[2]) : (code === 0 ? 0 : 1), skipped: match ? Number(match[3]) : 0 });

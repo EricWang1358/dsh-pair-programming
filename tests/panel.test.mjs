@@ -394,6 +394,34 @@ export async function run(report) {
     delete board.useCases;
     assert.equal(projectPairPanel(board).features.length, 0, 'a team without registered use cases shows no invented list');
   });
+  await check('a word missing from either language fails here instead of being drawn on the page', () => {
+    // t(key) returns the KEY when a word is missing, so a gap ships as `event.noGo` on screen (#9)
+    // with every suite green. Both directions, and no empty strings.
+    const zh = sandbox.PAIR_PANEL_ZH, en = sandbox.PAIR_PANEL_EN;
+    assert.deepEqual(Object.keys(zh).filter(key => !(key in en)), [], 'Chinese keys with no English word');
+    assert.deepEqual(Object.keys(en).filter(key => !(key in zh)), [], 'English keys with no Chinese word');
+    for (const [lang, dict] of [['zh', zh], ['en', en]]) for (const [key, value] of Object.entries(dict)) {
+      assert.ok(typeof value === 'string' && value.length > 0, lang + ' leaves ' + key + ' empty');
+    }
+    // Every key the dashboard actually asks for, across the five views and the states with no team.
+    // Two lookups are deliberate probes that fall back by design: explain() tries the attention kind
+    // before the tool, and the estimate tries its reason before the generic line. Anything else that
+    // falls back is a word the reader would have seen as a raw key.
+    const probes = new Set(['attention.obligation', 'eta.rough']);
+    const asked = new Set(), t = key => { asked.add(key); return key in zh ? zh[key] : key; };
+    const Dashboard = DashboardOf(expandingReact), board = demoBoard();
+    for (const view of ['overview', 'tasks', 'features', 'activity', 'value']) {
+      for (const taskId of [undefined, 't-1', 't-5', 't-7']) {
+        const team = projectPairPanel(board, taskId ? { taskId } : {});
+        Dashboard({ t, data: { team, warnings: ['x'], teams: [], observedAt: 1 }, view, density: 'compact', status: 'live' });
+      }
+    }
+    for (const [status, data] of [['loading', null], ['error', null], ['live', { team: null, state: 'unavailable', warnings: [], teams: [], observedAt: 1 }]]) {
+      Dashboard({ t, data, status, error: 'offline', density: 'compact' });
+    }
+    assert.ok(asked.size > 100, 'the sweep really rendered the page');
+    assert.deepEqual([...asked].filter(key => !(key in zh) && !probes.has(key)).sort(), [], 'keys the panel asked for and has no word for');
+  });
   await check('the green step reads as the Driver self-test, never as a passed check', () => {
     for (const dict of [sandbox.PAIR_PANEL_ZH, sandbox.PAIR_PANEL_EN]) {
       assert.ok(!/通过|passed|passing/i.test(dict['event.green']), 'the GREEN step is the Driver reporting its own test run');
@@ -432,6 +460,22 @@ export async function run(report) {
     assert.ok(behindTree.includes('legacyHint'), 'so the restart notice is shown for it');
     assert.ok(!behindTree.includes('undefined'), 'and the milestone rows fall back to the task total instead of printing undefined');
     assert.ok(behindTree.includes(' / 8'), 'the fallback denominator is the task total the old host sent');
+    // ...and the RING has to take that same denominator. Reading the old host's percent while
+    // labelling it with the task total put two bases on one hero: a board with one stopped card of
+    // eight rendered "59.5%" beside "3 / 8 tasks" (measured; the percent counted the seven in play).
+    const stopped = demoBoard();
+    stopped.tasks[7].status = 'cancelled';
+    const behindSameBoard = projectPairPanel(stopped);
+    assert.equal(behindSameBoard.progress.percent, 59.5, 'the current projection scores the seven cards in play');
+    assert.ok(render('overview', behindSameBoard).includes('"--pair-p":59.5'), 'and the ring carries that share');
+    const behindStopped = structuredClone(behindSameBoard);
+    delete behindStopped.progress.scored; delete behindStopped.progress.terminated;
+    const stoppedTree = render('overview', behindStopped);
+    // The ring reads its own progress variable (the disc's --pair-p), which the stub keeps in props:
+    // asserting on rendered digits instead would test the counter's animation start, not the basis.
+    assert.ok(stoppedTree.includes('"--pair-p":38'),
+      'the ring is recomputed from the task total the old host sent (round(3 of 8 * 100) = 38), not from a share it cannot report');
+    assert.ok(!stoppedTree.includes('"--pair-p":59.5'), 'so the old host never shows a percent computed from the live-card denominator it does not have');
   });
   await check('a returned proposal is one event on the failed lane, not two events on two lanes', () => {
     const board = demoBoard();
@@ -514,6 +558,29 @@ export async function run(report) {
     const rhythm = sandbox.pairRhythm([{ at, kind: 'accept', ref: 't-1' }, { at: at + 60000, kind: 'accept', ref: 't-2' }, { at: at + 120000, kind: 'noGo', ref: 't-1' }]);
     assert.deepEqual({ ...rhythm.counts }, { plan: 0, build: 0, pass: 2, fail: 1 });
     assert.equal(rhythm.passRate, 1, 'a proposal sent back is not a failed verification');
+    // Two honest numbers under one word read as a contradiction: the lane legend counts merges and
+    // completions as "passed" while the rate counts verdicts, so the rate has to name its own basis.
+    assert.deepEqual({ ...rhythm.verdicts }, { passed: 2, total: 2 });
+    const chart = renderDashboard('activity', projectPairPanel(demoBoard()));
+    assert.ok(chart.includes('rhythm.passRateHint'), 'the rate carries the verdicts it counted');
+  });
+  await check('the task detail says a round in words, and its checklist does not answer itself', () => {
+    const zh = key => sandbox.PAIR_PANEL_ZH[key] ?? key;
+    assert.equal(sandbox.pairCycleLabel({ step: 'GO' }, zh), '方案已通过');
+    assert.equal(sandbox.pairCycleLabel({ step: 'VERIFIED', verdict: 'accept' }, zh), '检查通过');
+    assert.equal(sandbox.pairCycleLabel({ step: 'FUTURE_STEP' }, zh), 'FUTURE_STEP', 'a step with no word yet still prints');
+    const team = projectPairPanel(demoBoard(), { taskId: 't-5' });
+    assert.ok(team.selected.cycles.some(c => c.step === 'GO'), 'the fixture still carries the raw step');
+    const spoken = JSON.stringify(DashboardOf(expandingReact)({ t: zh, data: { team, warnings: [], teams: [], observedAt: 1 },
+      view: 'tasks', density: 'compact', status: 'live' }));
+    assert.ok(spoken.includes('方案已通过') && spoken.includes('检查未通过'), 'the round badge is a sentence');
+    assert.ok(!/"GO"/.test(spoken) && !/"reject"/.test(spoken), 'and no protocol token reaches it');
+    const keyed = renderDashboard('tasks', team);
+    assert.ok(['check.oracle', 'check.gate', 'check.integration', 'check.done'].every(k => keyed.includes(k)),
+      'the checklist labels are nouns, so label + state does not read "Done: Done"');
+    const fresh = projectPairPanel(demoBoard(), { taskId: 't-7' });
+    assert.equal(fresh.selected.cycles.length, 0);
+    assert.ok(renderDashboard('tasks', fresh).includes('cycles.empty'), 'a task with no round says so instead of leaving a bare heading');
   });
   await check('an older board reports the pushbacks it cannot date instead of an empty failed lane', () => {
     const legacy = renderDashboard('activity', projectPairPanel(demoBoard()));
@@ -553,6 +620,16 @@ export async function run(report) {
     assert.ok(progress.eta.minutes >= progress.eta.byRounds, 'the friendlier reading never wins on its own');
     assert.ok(progress.eta.floorMinutes >= 1 && progress.eta.floorMinutes <= progress.eta.minutes, 'rounds not yet opened are still never counted down past');
     assert.ok(renderDashboard('overview', projectPairPanel(demoBoard())).includes('pair-eta'), 'the estimate still renders');
+  });
+  await check('a board whose cards were all stopped does not read as finished (#164)', () => {
+    const board = demoBoard();
+    for (const task of board.tasks) task.status = 'cancelled';
+    const stopped = projectPairPanel(board).progress;
+    assert.equal(stopped.eta.reason, 'terminated', 'nothing is in play, so the estimate cannot say All done');
+    assert.deepEqual([stopped.percent, stopped.scored, stopped.terminated], [0, 0, 8], 'and it agrees with the disc and the hero line');
+    const finished = demoBoard();
+    for (const task of finished.tasks) task.status = task.status === 'completed' ? 'completed' : 'cancelled';
+    assert.equal(projectPairPanel(finished).progress.eta.reason, 'complete', 'a board that still has cards in play, all done, still reads complete');
   });
   await check('panel registers a conversation view plus optional sidebar and disposes both',()=>{
     const views=[],removed=[],dictionary={};

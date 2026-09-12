@@ -15,7 +15,7 @@ import {
   debtKey, turnEndKind, wasTruncated, MAX_TOKEN_RESUMES, ATTENTION_KINDS,
 } from '../lib/protocol/attention.js';
 import { initialProtocolState } from '../lib/protocol/machine.js';
-import { gateStateFingerprint } from '../lib/protocol/gate.js';
+import { gateStateFingerprint, gateStateBreakdown } from '../lib/protocol/gate.js';
 
 const member = (name, over = {}) => ({ id: `child-${name}`, name, role: name, status: 'idle', joinedAt: 1, ...over });
 const task = (over = {}) => ({
@@ -69,8 +69,13 @@ export async function run(check) {
       cycles: [{ id: 'c-1', taskId: 't-1', step: 'GREEN', openedAt: 1, green: { tunedForOracle: 'widened the tolerance to pass' } }],
     },
   });
-  const disclosedItems = attentionSet(disclosed).items.filter(i => i.kind === 'disclosure');
+  const disclosedSet = attentionSet(disclosed).items;
+  const disclosedItems = disclosedSet.filter(i => i.kind === 'disclosure');
   check(disclosedItems.length === 1, 'each open disclosure is its own attention row');
+  check(disclosedSet.filter(i => i.ref === disclosedItems[0].ref).length === 1,
+    '#165 and only one row per ruling: the frontier row for the same ref is not listed a second time');
+  check(attentionSet(disclosed).obligations.some(o => o.disclosureRef === disclosedItems[0].ref),
+    '#165 while the frontier itself still owes it, so blocking_cause and the scheduler are unchanged');
   check(disclosedItems[0].who === 'captain' && disclosedItems[0].tool === 'pair_arbitrate', 'a disclosure names the captain and the exact closing call');
 
   /* ---- stale gate credentials ----------------------------------------- */
@@ -81,6 +86,17 @@ export async function run(check) {
   check(staleCredentials(completed, { worktreeSha: 'w2' })[0]?.why.includes('worktree'), 'a moved worktree invalidates the credential and says which binding broke');
   completed.protocol.gatePasses[0].binding.gateStateSha = 'stale';
   check(staleCredentials(completed)[0]?.why.includes('board'), 'a moved board invalidates the credential');
+  const upgraded = teamFixture({ tasks: [task({ status: 'completed', gatePassId: 'gp-2' })] });
+  upgraded.protocol.risks = [{ id: 'r-1', severity: 'P1', status: 'OPEN', scenario: 'as recorded when the gate ran', openedAt: 1 }];
+  upgraded.protocol.gatePasses = [{ id: 'gp-2', taskId: 't-1', at: 2,
+    binding: { gateStateSha: gateStateFingerprint(upgraded, 't-1'), breakdown: gateStateBreakdown(upgraded, 't-1'),
+      // The per-ticket index is what lets the gate say "no ticket was added or removed", which is the
+      // condition for naming the digest-definition alternative rather than a board write.
+      breakdownIndex: { risks: { 'r-1': 'a'.repeat(64) } } } }];
+  upgraded.protocol.risks[0].scenario = 'reworded by its owner, same ticket';
+  const movedWhy = staleCredentials(upgraded)[0]?.why ?? '';
+  check(movedWhy.includes('risks changed') && movedWhy.includes('re-running the gate'),
+    '#167 a stale credential names the input that moved and the digest-definition alternative, the same pair the gate refusal gives');
   const missing = teamFixture({ tasks: [task({ status: 'completed', gatePassId: 'gp-9' })] });
   check(staleCredentials(missing)[0]?.why.includes('no matching gate credential'), 'a completed card with no matching pass is flagged, not skipped');
 
@@ -175,6 +191,17 @@ export async function run(check) {
   })));
   check(mitigatedRow.includes('pair_risk(action="close")') && !mitigatedRow.includes('pair_risk(action="mitigate")'),
     'and once the risk IS mitigated the same row names the close, with the artifact it needs');
+  // D2: a MITIGATED blocker has TWO reachable dispositions and the row named only the
+  // artifact-backed close — the path a team with no independent artifact can never walk,
+  // so the reader it sent there was refused forever. #127 opened WONTFIX+rationale; if the
+  // row does not name it, the dead end is preserved by the copy alone. Asserted as text.
+  const mitigatedP0Row = attentionLines(attentionSet(teamFixture({
+    tasks: [task({ oracle: frozen })],
+    protocol: { ...initialProtocolState(), risks: [{ id: 'r-10', severity: 'P0', status: 'MITIGATED', scenario: 's', trigger: 't', suggestion: 'x', raisedBy: 'navigator', at: 1 }] },
+  })));
+  check(mitigatedP0Row.includes('pair_risk(action="close")') && mitigatedP0Row.includes('wontfix') && mitigatedP0Row.includes('rationale')
+    && mitigatedP0Row.includes('pair_risk(action="wontfix", risk_id="r-10", rationale='),
+    'a MITIGATED P0 row names BOTH reachable dispositions — the artifact-backed close and the captain\'s WONTFIX ruling with its rationale — so it cannot point at a refusal the team can never satisfy');
   const openRow = lines;
   check(openRow.includes('pair_risk(action="mitigate")') && openRow.includes('closing_cmd'),
     'while an OPEN risk points at mitigation first and shows the close that follows');
