@@ -155,7 +155,13 @@ if (parallel > 1) {
         const suite = queue.shift();
         active++;
         const childAt = Date.now();
-        const child = spawn(process.execPath, [self, '--only', suite], { stdio: ['ignore', 'pipe', 'pipe'] });
+        // The child gets the acknowledgement too. It was dropped until now, so a suite whose only
+        // skip is an acknowledged environment gap (host-contract's prompt render, the J1 symlink)
+        // exited 1 under --parallel and 0 without it - the same suite, two verdicts, decided by
+        // whether the runner itself was parallel. Measured on CI, where the assertEventsSupported
+        // render check cannot run and host-contract failed with 46 passed / 0 failed / 1 skipped.
+        const childArgs = [self, '--only', suite, ...(allowSkips ? ['--allow-skips'] : [])];
+        const child = spawn(process.execPath, childArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
         let out = '';
         child.stdout.on('data', chunk => { out += String(chunk); });
         child.stderr.on('data', chunk => { out += String(chunk); });
