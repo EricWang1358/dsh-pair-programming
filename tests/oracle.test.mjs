@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { forkProblems, redProblem, computeVerdict, freezeRecord, oracleSummary, resolveCycleOracle, boundedRedTail } from '../lib/protocol/oracle.js';
+import { forkProblems, redProblem, computeVerdict, freezeRecord, oracleSummary, resolveCycleOracle, boundedRedTail, resealStrengthens } from '../lib/protocol/oracle.js';
 import { readMailbox } from '../lib/state/mailbox.js';
 import { digestOracleFiles, runOracleCommand, resolveInside, workspaceFingerprint } from '../lib/tools/oracle-exec.js';
 import { boardDigest, DIGEST_BUDGET_CHARS } from '../lib/protocol/digest.js';
@@ -20,7 +20,7 @@ import { createTeamDir, readTeam, writeTeam } from '../lib/state/store.js';
 import { withLock } from '../lib/state/lock.js';
 import { teamLockKey } from '../lib/state/layout.js';
 import { initialProtocolState } from '../lib/protocol/machine.js';
-import { gateStateFingerprint } from '../lib/protocol/gate.js';
+import { gateStateFingerprint, runGate } from '../lib/protocol/gate.js';
 import { assertTaskOracleFiles, resolveTaskOracleFile } from '../lib/tools/oracle-exec.js';
 
 const GOOD_FORK = {
@@ -393,7 +393,111 @@ export async function run(check) {
         '#152 while a re-freeze that still fails today is an ordinary RED seal with no green marker');
       const green = await fails(() => h.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK }, { agent: h.driver }), 'navigator');
       check(green.includes('only the Navigator'), '#152 and the role boundary is untouched by the relaxation');
+      // #162: the GREEN relaxation is not a licence to trade a stronger standard for a weaker one.
+      // A re-seal may only land when the command is unchanged and the file set did not shrink — the
+      // command because shell composition is not a substitution, the files because an arm that was
+      // dropped stops being measured while the card keeps a green seal.
+      const hw = harness(sealRoot, 'refreeze-weak-state');
+      await createTeamDir(hw.stateRoot, teamFixture({ id: 'otw' }));
+      const w1 = '.pair-oracles/t-1/weak-one.mjs';
+      const w2 = '.pair-oracles/t-1/weak-two.mjs';
+      delete process.env.FIXED;
+      await writeFile(join(sealRoot, w1), 'process.exit(process.env.FIXED === "1" ? 0 : 1);');
+      await writeFile(join(sealRoot, w2), 'process.exit(process.env.FIXED === "1" ? 0 : 1);');
+      const wideCmd = `node ${w1} && node ${w2}`;
+      const wide = await hw.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK, oracle_files: [w1, w2], oracle_cmd: wideCmd }, { agent: hw.navigator });
+      check(wide.sealed_green === false && wide.red_exit !== 0, '#162 a two-arm seal starts as an ordinary RED while both arms fail');
+      process.env.FIXED = '1';
+      const narrowed = await fails(() => hw.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK, oracle_files: [w1], oracle_cmd: wideCmd }, { agent: hw.navigator }), 'captain_override');
+      check(narrowed.includes('captain_override') && narrowed.includes(w2),
+        '#162 a GREEN re-freeze that drops an arm is refused, and the refusal names the arm the card would stop measuring');
+      const narrowedOverride = await hw.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK, oracle_files: [w1], oracle_cmd: wideCmd, captain_override: 'the second arm moved to its own card' }, { agent: hw.navigator });
+      check(narrowedOverride.sealed_green === true, '#162 while captain_override still seals it: the escape is named, not removed');
+      check((await readTeam(hw.stateRoot, 'otw')).tasks[0].oracle.captainOverride === 'the second arm moved to its own card',
+        '#162 and the override is on the record, so a weaker standard is never silent');
+      const recomposed = await fails(() => hw.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK, oracle_files: [w1, w2], oracle_cmd: `node ${w2} && node ${w1}` }, { agent: hw.navigator }), 'captain_override');
+      check(recomposed.includes('captain_override') && recomposed.includes('byte-identical'),
+        '#162 and a re-ordered command is refused even with a WIDER file set: shell composition is not a substitution');
+      check(resealStrengthens({ cmd: 'node a.mjs', files: ['a.mjs'] }, { oracle_cmd: 'node a.mjs', oracle_files: ['a.mjs', 'b.mjs'] }) === true
+        && resealStrengthens({ cmd: 'node a.mjs', files: ['a.mjs', 'b.mjs'] }, { oracle_cmd: 'node a.mjs', oracle_files: ['a.mjs'] }) === false
+        && resealStrengthens(undefined, { oracle_cmd: 'node a.mjs', oracle_files: ['a.mjs'] }) === true,
+        '#162 the rule itself: supersets pass, shrinks fail, and a first seal replaces nothing');
+      delete process.env.FIXED;
     } finally { await rm(sealRoot, { recursive: true, force: true }).catch(() => {}); }
+  }
+  /* ---- #162: the FIRST seal survives a re-freeze, and an unmeasurable one is not a dead end ---- */
+  // Both halves of the measured failure. (1) firstFrozenAt was omitted whenever a re-freeze could
+  // not read it off the prior record, and since an unknown value is omitted again, a card sealed
+  // once before the field existed could never become measurable: its first seal was unrecoverable
+  // for every later re-freeze. (2) The gate answered that absence by falling back to `frozenAt`,
+  // the LATEST seal, so a re-frozen legacy card was permanently refused for being sealed "after the
+  // work" — a dead end, not a stricter arm.
+  {
+    const fsRoot = await mkdtemp(join(tmpdir(), 'pair-first-seal-'));
+    try {
+      const fsFile = '.pair-oracles/t-1/accept.mjs';
+      await mkdir(join(fsRoot, '.pair-oracles', 't-1'), { recursive: true });
+      await writeFile(join(fsRoot, fsFile), 'process.exit(1);');
+      const hfs = harness(fsRoot, 'first-seal-state');
+      await createTeamDir(hfs.stateRoot, teamFixture({ id: 'fs1' }));
+      await hfs.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK }, { agent: hfs.navigator });
+      const originalFirst = (await readTeam(hfs.stateRoot, 'fs1')).tasks[0].oracle.firstFrozenAt;
+      check(Number.isFinite(originalFirst), '#162 a first seal records when it was frozen');
+      const opened = await hfs.tool('pair_propose')({ task_id: 't-1', intent: 'i', files: ['src/a.js'], net_lines: 3, verify_plan: 'node .pair-oracles/t-1/accept.mjs' }, { agent: hfs.driver });
+      await hfs.tool('pair_green')({ cycle_id: opened.cycle_id, green_evidence: ['green'], diff_summary: 'src/a.js +1/-1', test_results: 'ok', tuned_for_oracle: 'none' }, { agent: hfs.driver });
+      await hfs.tool('pair_verify')({ cycle_id: opened.cycle_id, verdict: 'accept', evidence: ['looks right'] }, { agent: hfs.navigator });
+      const worked = await readTeam(hfs.stateRoot, 'fs1');
+      const cycleOpenedAt = worked.protocol.cycles.at(-1).openedAt;
+      check(cycleOpenedAt > originalFirst, '#162 the cycle opened after the first seal - the ordering the arm judges');
+      // The legacy shape: a card sealed once, before firstFrozenAt existed.
+      const legacy = structuredClone(worked);
+      legacy.tasks[0].oracle = { ...legacy.tasks[0].oracle, forks: 1, interpretationForks: 1 };
+      delete legacy.tasks[0].oracle.firstFrozenAt;
+      const legacyArm = runGate(legacy, 't-1', { dod: ['oracle_precedes_impl'] });
+      check(legacyArm.pass === true && legacyArm.checklist.oraclePrecedesImpl === true && legacyArm.checklist.oracleFirstSealUnmeasurable === undefined,
+        '#162 a record with forks === 1 was never re-frozen, so its own frozenAt IS the first seal: the arm still measures, and is not reported unmeasurable');
+      const lateLegacy = structuredClone(legacy);
+      lateLegacy.tasks[0].oracle.frozenAt = cycleOpenedAt + 5000;
+      check(runGate(lateLegacy, 't-1', { dod: ['oracle_precedes_impl'] }).pass === false,
+        '#162 while that same record sealed AFTER the cycle opened is still refused: the fallback is a fact read off the record, not an amnesty');
+      const unrecoverable = structuredClone(legacy);
+      unrecoverable.tasks[0].oracle.forks = 2;
+      unrecoverable.tasks[0].oracle.frozenAt = cycleOpenedAt + 5000;
+      const unmeasurable = runGate(unrecoverable, 't-1', { dod: ['oracle_precedes_impl'] });
+      check(unmeasurable.pass === true && unmeasurable.checklist.oracleFirstSealUnmeasurable?.frozenAt === cycleOpenedAt + 5000
+        && unmeasurable.checklist.oracleFirstSealUnmeasurable?.forks === 2 && unmeasurable.checklist.oraclePrecedesImpl === true,
+        '#162 a record re-frozen before the field existed is not judged by a first seal it never stored: the arm passes and records that it measured nothing');
+      // And the loss does not repeat: one more freeze records it FROM the prior record.
+      await writeTeam(hfs.stateRoot, legacy);
+      await hfs.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK }, { agent: hfs.navigator });
+      const resealed = (await readTeam(hfs.stateRoot, 'fs1')).tasks[0].oracle;
+      check(resealed.firstFrozenAt === originalFirst && resealed.forks === 2,
+        '#162 so the next re-freeze records the first seal from the prior record, and every later re-freeze carries it');
+      await hfs.tool('pair_propose')({ task_id: 't-1', intent: 'reopen', files: ['src/a.js'], net_lines: 2, verify_plan: 'node .pair-oracles/t-1/accept.mjs' }, { agent: hfs.driver });
+      const afterArm = runGate(await readTeam(hfs.stateRoot, 'fs1'), 't-1', { dod: ['oracle_precedes_impl'] });
+      check(afterArm.pass === true && afterArm.checklist.oracleFirstSealUnmeasurable === undefined,
+        '#162 and the arm is judged against a first seal the board now carries, not against the re-freeze time');
+    } finally { await rm(fsRoot, { recursive: true, force: true }).catch(() => {}); }
+  }
+  /* ---- #162: the audit stamp points at a standard moved after work had already progressed ---- */
+  // `frozenAt > firstFrozenAt` alone fired on EVERY re-freeze, including one made while the card was
+  // still being planned - a line nobody can act on, since at that point there is no work for the
+  // standard to postdate. The stamp now needs a cycle of this task that the new seal postdates AND
+  // that carries judged work, read off the fields a cycle actually records.
+  {
+    const T0 = 1_000_000;
+    const planning = teamFixture({ id: 'tight-1' });
+    planning.protocol.cycles = [{ id: 'c-1', taskId: 't-1', step: 'GO', openedAt: T0 + 500, proposal: { intent: 'i', files: ['src/a.js'] } }];
+    planning.tasks[0].oracle = { sha: 'a'.repeat(64), files: ['.pair-oracles/t-1/accept.mjs'], cmd: 'node .pair-oracles/t-1/accept.mjs', frozenAt: T0 + 5000, firstFrozenAt: T0, forks: 2, caseRefs: [] };
+    const quiet = runGate(planning, 't-1', { dod: ['oracle_precedes_impl'] });
+    check(quiet.pass === true && quiet.checklist.oracleTightenedAfterImpl === undefined,
+      '#162 re-sealing while the card had not progressed is not an audit hit: the arm passes and the board says nothing a reader could act on');
+    const tightenedBoard = structuredClone(planning);
+    tightenedBoard.protocol.cycles[0].red = { evidence: ['baseline red'], at: T0 + 800 };
+    const tightened = runGate(tightenedBoard, 't-1', { dod: ['oracle_precedes_impl'] });
+    check(tightened.pass === true && tightened.checklist.oracleTightenedAfterImpl?.frozenAt === T0 + 5000
+      && tightened.checklist.oracleTightenedAfterImpl?.firstFrozenAt === T0 && tightened.checklist.oracleTightenedAfterImpl?.cycle === 'c-1',
+      '#162 but it does fire once a cycle the new seal postdates carries judged work, naming the cycle the standard moved after');
   }
   /* ---- board digest ------------------------------------------------ */
     board = await readTeam(h.stateRoot, 'ot1');
