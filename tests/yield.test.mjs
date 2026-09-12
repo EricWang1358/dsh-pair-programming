@@ -97,6 +97,19 @@ export async function run(check) {
       'Y the yield is durable board state, not a turn-local gesture');
     check(obligations.yieldedObligations(after).length === 1, 'Y the yielded obligation stays readable for pair_status');
     check(!obligations.obligationFrontier(after).some(o => o.tool === 'pair_integrate'), 'Y the frontier stops reporting the obligation the Captain cannot execute');
+    // #150: the receipt has to say what is left. A line that stops after the yield reads as "you
+    // owe nothing" beside a board whose attention list is full -- two different lists, and the tool
+    // never said so.
+    const def = defs.find(d => d.name === 'pair_yield');
+    const text = (value) => def.output.render({}, value)[0].text;
+    const withRest = text({ already_yielded: false, yielded: { tool: 'pair_integrate', ref: 't-1', reason: 'no runtime data' }, frontier: ['captain owes pair_gate_check(t-2)', 'navigator owes pair_oracle(t-3)'] });
+    check(withRest.includes('Still owed:') && withRest.includes('pair_gate_check(t-2)') && withRest.includes('pair_oracle(t-3)'),
+      '#150 the receipt names every obligation still owed, and by whom');
+    const clear = text({ already_yielded: false, yielded: { tool: 'pair_integrate', ref: 't-1', reason: 'no runtime data' }, frontier: [] });
+    check(clear.includes('TOOL CALL') && clear.includes('attention') && clear.includes('blocking risk'),
+      '#150 and when nothing is left it says which list it is talking about instead of implying the board is clear');
+    check(text({ already_yielded: true, yielded: { tool: 'pair_integrate', ref: 't-1', reason: 'r' } }).includes('already yielded'),
+      '#150 while the idempotent path keeps its own wording');
     check(obligations.nextObligation(after)?.tool === 'pair_task_claim' && obligations.nextObligation(after)?.taskId === 't-4',
       'Y and other ready work becomes the board’s next move instead of idling behind it');
     check(kicks.length === 1 && kicks[0] === root + '\0obp', 'Y the yield dispatches the team so the newly-ready work actually starts');
