@@ -48,17 +48,22 @@ jobs:
             @deepseek-ai/dsh-skill@0.1.5-rc.2 @deepseek-ai/dsh-system-prompt@0.1.5-rc.2 \
             @deepseek-ai/dsh-util-values@0.1.5-rc.2 @deepseek-ai/dsh-client-connection@0.1.5-rc.2 \
             @deepseek-ai/dsh-client-store@0.1.5-rc.2 @deepseek-ai/dsh-host-webserver@0.1.5-rc.2 \
+            @deepseek-ai/dsh-attachment@0.1.5-rc.2 @deepseek-ai/dsh-attachment-local@0.1.5-rc.2 \
+            @deepseek-ai/dsh-home-paths@0.1.5-rc.2 \
             @deepseek-ai/cordis@4.0.2
       - name: Resolve peers
         run: node scripts/setup-peers.mjs
       - name: Protocol suites
         # --allow-skips is what the local release gate uses: one check is environment-bound (the
         # gate-exec spawn probe) and the runner reports the rest as ordinary passes.
+        # --skip ledger: that suite guards the 65KB project ledger which lives BESIDE this package
+        # in the development workspace - it is not part of this repository, so a clean checkout
+        # cannot read it (it reports an unexpected skip, and a skip is not a verified check).
         # PAIR_TEST_VERBOSE=1 makes a failing suite print its own assertion text, which the
         # parallel runner otherwise discards.
         env:
           PAIR_TEST_VERBOSE: '1'
-        run: node tests/run.mjs --parallel 4 --allow-skips
+        run: node tests/run.mjs --parallel 4 --allow-skips --skip ledger
 
   full-verify:
     # main and manual dispatch get the release gate: typecheck, suites, imports, build, package
