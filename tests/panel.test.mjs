@@ -530,6 +530,29 @@ export async function run(report) {
     const rhythm = sandbox.pairRhythm([{ at, kind: 'accept', ref: 't-1' }, { at: at + 60000, kind: 'accept', ref: 't-2' }, { at: at + 120000, kind: 'noGo', ref: 't-1' }]);
     assert.deepEqual({ ...rhythm.counts }, { plan: 0, build: 0, pass: 2, fail: 1 });
     assert.equal(rhythm.passRate, 1, 'a proposal sent back is not a failed verification');
+    // Two honest numbers under one word read as a contradiction: the lane legend counts merges and
+    // completions as "passed" while the rate counts verdicts, so the rate has to name its own basis.
+    assert.deepEqual({ ...rhythm.verdicts }, { passed: 2, total: 2 });
+    const chart = renderDashboard('activity', projectPairPanel(demoBoard()));
+    assert.ok(chart.includes('rhythm.passRateHint'), 'the rate carries the verdicts it counted');
+  });
+  await check('the task detail says a round in words, and its checklist does not answer itself', () => {
+    const zh = key => sandbox.PAIR_PANEL_ZH[key] ?? key;
+    assert.equal(sandbox.pairCycleLabel({ step: 'GO' }, zh), '方案已通过');
+    assert.equal(sandbox.pairCycleLabel({ step: 'VERIFIED', verdict: 'accept' }, zh), '检查通过');
+    assert.equal(sandbox.pairCycleLabel({ step: 'FUTURE_STEP' }, zh), 'FUTURE_STEP', 'a step with no word yet still prints');
+    const team = projectPairPanel(demoBoard(), { taskId: 't-5' });
+    assert.ok(team.selected.cycles.some(c => c.step === 'GO'), 'the fixture still carries the raw step');
+    const spoken = JSON.stringify(DashboardOf(expandingReact)({ t: zh, data: { team, warnings: [], teams: [], observedAt: 1 },
+      view: 'tasks', density: 'compact', status: 'live' }));
+    assert.ok(spoken.includes('方案已通过') && spoken.includes('检查未通过'), 'the round badge is a sentence');
+    assert.ok(!/"GO"/.test(spoken) && !/"reject"/.test(spoken), 'and no protocol token reaches it');
+    const keyed = renderDashboard('tasks', team);
+    assert.ok(['check.oracle', 'check.gate', 'check.integration', 'check.done'].every(k => keyed.includes(k)),
+      'the checklist labels are nouns, so label + state does not read "Done: Done"');
+    const fresh = projectPairPanel(demoBoard(), { taskId: 't-7' });
+    assert.equal(fresh.selected.cycles.length, 0);
+    assert.ok(renderDashboard('tasks', fresh).includes('cycles.empty'), 'a task with no round says so instead of leaving a bare heading');
   });
   await check('an older board reports the pushbacks it cannot date instead of an empty failed lane', () => {
     const legacy = renderDashboard('activity', projectPairPanel(demoBoard()));
