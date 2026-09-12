@@ -38,13 +38,13 @@ async function fixture() {
     tasks: [{ id: 't-1', subject: 'contract', dependencies: [], status: 'in_progress', assignee: 'driver', attemptId: 'attempt', oracle, createdAt: 1, updatedAt: 1 }] };
   await writeFile(join(root, 'contract.cjs'), 'module.exports = 1;');
   const stateRoot = join(root, '.pair-programming'); await createTeamDir(stateRoot, team);
-  const defs = [], kicks = [];
+  const defs = [], kicks = [], kickArgs = [];
   const ctx = { tools: { register: d => defs.push(d) }, agents: { get: () => undefined }, logger: { debug() {}, warn() {}, error() {} } };
-  const runtime = { scheduler: { kickTeam: async () => kicks.push(await readTeam(stateRoot, team.id)) } };
+  const runtime = { scheduler: { kickTeam: async (workspace, teamId, captain, signal, opts) => { kickArgs.push(opts ?? {}); kicks.push(await readTeam(stateRoot, team.id)); } } };
   const config = { stateDir: '.pair-programming', evidenceCache: false, tddMode: 'enforce', oracleFirst: true, maxCyclesPerTask: 1 };
   registerFlowTools(ctx, config, runtime); registerRepairTools(ctx, config, runtime);
   const args = { cycle_id: cycle.id, verify_plan: command, reason: 'Windows nested inline quotes corrupted the command', evidence: ['node -e emits SyntaxError while the same assertion in the frozen script passes'] };
-  return { root, stateRoot, args, cycle, kicks, runtime,
+  return { root, stateRoot, args, cycle, kicks, kickArgs, runtime,
     call: (name, parameters, id = 'nav') => defs.find(d => d.name === name).execute(parameters, { agent: { id, session: { header: { cwd: root }, append() {} } } }),
     board: () => readTeam(stateRoot, team.id),
     edit: async fn => { const t = await readTeam(stateRoot, team.id); fn(t); await writeTeam(stateRoot, t); },
@@ -70,6 +70,9 @@ export async function run(check) {
     assert.deepEqual(cycle.proposal.files, old.proposal.files);
     assert.ok((await readMailbox(h.stateRoot, 'repair', 'driver')).some(m => m.content.includes('fresh GREEN')));
     assert.equal(h.kicks.at(-1).protocol.cycles[0].step, 'GO');
+    // The kick a member's repair triggers must not lift a captain pause (#75 follow-up): it carries
+    // the background flag exactly as the other member-initiated kick sites do.
+    assert.equal(h.kickArgs.at(-1).background, true, 'a navigator repair kick is background, so it cannot resume a paused run');
     await assert.rejects(h.call('pair_verify', { cycle_id: h.cycle.id, stage: 'checkpoint' }), /GREEN|GO/);
     await h.call('pair_green', h.green(), 'driver');
     assert.equal((await h.call('pair_verify', { cycle_id: h.cycle.id, stage: 'checkpoint' })).verdict, 'checkpoint');
