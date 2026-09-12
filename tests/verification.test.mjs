@@ -482,6 +482,7 @@ export async function runReviewRegressions(check) {
     let board = await h.board();
     check(board.protocol.cycles[0].closure?.reason === 'oracle-replaced' && board.protocol.cycles[0].step === 'CLOSED', 'checkpoint re-fork explicitly archives superseded checkpoint');
     check(JSON.stringify(board.protocol.cycles[0].verify) === JSON.stringify(originalCheckpoint), 'checkpoint re-fork preserves original partial verification evidence');
+
     check(!runGate(board, 't-1', { dod: ['all_accepted'] }).pass, 'superseded checkpoint and rejection cannot replace final acceptance');
     const repair = await h.call('pair_propose', { task_id: 't-1', intent: 'repair replacement contract', files: ['product.txt'], verify_plan: command, net_lines: 1 }, 'drv');
     await writeFile(join(h.root, 'product.txt'), 'ok-new');
@@ -492,6 +493,21 @@ export async function runReviewRegressions(check) {
     board = await h.board();
     const noAudit = structuredClone(board); delete noAudit.protocol.cycles[0].closure;
     check(!runGate(noAudit, 't-1', { dod: ['oracle_precedes_impl'] }).pass, 'old checkpoint without matching supersession audit cannot waive oracle ordering');
+    // #125: the arm asks whether a standard existed before implementation began, so a tightening
+    // must not make the card uncompletable — and the arm must keep its teeth on a late first seal.
+    const openedAt = noAudit.protocol.cycles[0].openedAt;
+    const tightened = structuredClone(noAudit);
+    tightened.tasks[0].oracle = { ...noAudit.tasks[0].oracle, forks: 2, firstFrozenAt: openedAt - 1000, frozenAt: openedAt + 5000 };
+    const armTight = runGate(tightened, 't-1', { dod: ['oracle_precedes_impl'] });
+    check(armTight.pass === true && armTight.checklist.oraclePrecedesImpl === true,
+      '#125 tightening a standard after work began is judged against the FIRST seal, so the arm stays satisfiable');
+    check(armTight.checklist.oracleTightenedAfterImpl?.frozenAt === openedAt + 5000 && armTight.checklist.oracleTightenedAfterImpl?.firstFrozenAt === openedAt - 1000,
+      '#125 and the gate still records, without failing, that this standard was tightened after implementation began');
+    const lateSeal = structuredClone(noAudit);
+    lateSeal.tasks[0].oracle = { ...noAudit.tasks[0].oracle, forks: 1 };
+    delete lateSeal.tasks[0].oracle.firstFrozenAt;
+    check(!runGate(lateSeal, 't-1', { dod: ['oracle_precedes_impl'] }).pass,
+      '#125 while a standard that was never re-frozen and came after the first cycle is still refused');
     const badHistory = structuredClone(board); delete badHistory.protocol.cycles[0].red;
     check(!runGate(badHistory, 't-1', { dod: ['test_first'], tddMode: 'enforce' }).pass, 'superseded checkpoint retains Test First obligations');
   } finally { await h.cleanup(); }
