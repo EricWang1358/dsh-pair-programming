@@ -570,6 +570,16 @@ export async function run(report) {
     assert.ok(progress.eta.floorMinutes >= 1 && progress.eta.floorMinutes <= progress.eta.minutes, 'rounds not yet opened are still never counted down past');
     assert.ok(renderDashboard('overview', projectPairPanel(demoBoard())).includes('pair-eta'), 'the estimate still renders');
   });
+  await check('a board whose cards were all stopped does not read as finished (#164)', () => {
+    const board = demoBoard();
+    for (const task of board.tasks) task.status = 'cancelled';
+    const stopped = projectPairPanel(board).progress;
+    assert.equal(stopped.eta.reason, 'terminated', 'nothing is in play, so the estimate cannot say All done');
+    assert.deepEqual([stopped.percent, stopped.scored, stopped.terminated], [0, 0, 8], 'and it agrees with the disc and the hero line');
+    const finished = demoBoard();
+    for (const task of finished.tasks) task.status = task.status === 'completed' ? 'completed' : 'cancelled';
+    assert.equal(projectPairPanel(finished).progress.eta.reason, 'complete', 'a board that still has cards in play, all done, still reads complete');
+  });
   await check('panel registers a conversation view plus optional sidebar and disposes both',()=>{
     const views=[],removed=[],dictionary={};
     const ctx={effect:fn=>fn(),locale:{register:(ns,d)=>{Object.assign(dictionary,d);return ()=>{};},bind:()=>key=>key},
