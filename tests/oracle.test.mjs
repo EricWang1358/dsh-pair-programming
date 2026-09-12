@@ -366,7 +366,36 @@ export async function run(check) {
     check(tamperVerdict.verdict === 'reject' && tamperVerdict.category === 'oracle_tampered', 'E10 verification rejects a moved seal outright');
     delete process.env.FIXED;
 
-    /* ---- board digest ------------------------------------------------ */
+    /* ---- #152: a re-freeze may seal GREEN, and says so --------------- */
+  // The measured ritual this replaces: to make a declared non-gating arm gate again, the standard
+  // had to be re-sealed, the re-sealed command PASSED because the implementation now satisfied it,
+  // and the only way to open a red window was to revert finished code.
+  {
+    const sealRoot = await mkdtemp(join(tmpdir(), 'pair-refreeze-'));
+    try {
+      await mkdir(join(sealRoot, '.pair-oracles', 't-1'), { recursive: true });
+      const file = '.pair-oracles/t-1/accept.mjs';
+      await writeFile(join(sealRoot, file), 'process.exit(process.env.FIXED === "1" ? 0 : 1);\n');
+      const h = harness(sealRoot, 'refreeze-state');
+      await createTeamDir(h.stateRoot, teamFixture());
+      const first = await h.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK }, { agent: h.navigator });
+      check(first.red_exit !== 0 && first.sealed_green === false, '#152 a first seal still has to be shown to fail');
+      await writeFile(join(sealRoot, file), 'process.exit(0);\n');
+      const again = await h.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK }, { agent: h.navigator });
+      check(again.sealed_green === true && again.red_exit === 0,
+        '#152 a re-freeze whose command already passes seals GREEN instead of demanding a red window nobody can honestly open');
+      const sealed = (await readTeam(h.stateRoot, 'ot1')).tasks[0].oracle;
+      check(sealed.sealedGreen !== undefined && sealed.sealedGreen.previousSha === first.oracle_sha && sealed.redExit === 0,
+        '#152 and the board says which seal it replaced and that this one was written green');
+      await writeFile(join(sealRoot, file), 'process.exit(process.env.FIXED === "1" ? 0 : 1);\n');
+      const redAgain = await h.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK, captain_override: 'restore an ordinary RED seal after the green-seal probe' }, { agent: h.navigator });
+      check(redAgain.sealed_green === false && redAgain.red_exit !== 0,
+        '#152 while a re-freeze that still fails today is an ordinary RED seal with no green marker');
+      const green = await fails(() => h.tool('pair_oracle')({ task_id: 't-1', ...GOOD_FORK }, { agent: h.driver }), 'navigator');
+      check(green.includes('only the Navigator'), '#152 and the role boundary is untouched by the relaxation');
+    } finally { await rm(sealRoot, { recursive: true, force: true }).catch(() => {}); }
+  }
+  /* ---- board digest ------------------------------------------------ */
     board = await readTeam(h.stateRoot, 'ot1');
     const digest = boardDigest(board, { memberName: 'driver', role: 'driver' });
     check(digest.includes('Task t-1') && digest.includes('SEALED') && digest.includes('Divergence candidates'), 'F the digest carries the task, the seal and the open divergences');
