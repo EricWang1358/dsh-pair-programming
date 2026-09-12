@@ -4,7 +4,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { demoBoard, mountPanelFixture, installFixtureApi } from '../scripts/panel-fixture.mjs';
 import { projectPairPanel } from '../lib/runtime/panel-model.js';
-import { activeSpan } from '../lib/runtime/panel-progress.js';
+import { activeSpan, panelProgress } from '../lib/runtime/panel-progress.js';
 import { createPanelHandler, readPanelSnapshot, installPairPanel } from '../lib/runtime/panel-rpc.js';
 import { Context } from '@deepseek-ai/cordis';
 import { SessionStore } from '@deepseek-ai/dsh-session';
@@ -472,6 +472,19 @@ export async function run(report) {
     const tree = renderDashboard('overview', after);
     assert.ok(tree.includes('terminated.pre') && tree.includes('pair-terminated'), 'the stopped cards are reported on the page, not silently dropped');
     assert.ok(!renderDashboard('overview', before).includes('terminated.pre'), 'while a board with nothing stopped says nothing');
+  });
+  await check('the remaining estimate never undercuts what the scored stages imply', () => {
+    const m = 60000, at = 1_000_000_000_000;
+    const cycles = [{ id: 'c-1', taskId: 't-1', openedAt: at, verify: { verdict: 'checkpoint', at: at + 6 * m } }];
+    const rows = ['t-1', 't-2', 't-3', 't-4', 't-5'].map((id, i) => ({ id, stage: i === 0 ? 'coding' : 'queued',
+      oracle: i === 0, cycle: i === 0 ? { step: 'GREEN', verdict: null } : null, gate: { current: false } }));
+    const stamps = [at, at + 3 * m, at + 6 * m, at + 9 * m, at + 12 * m];
+    const progress = panelProgress({ protocol: { cycles, phase: 'CYCLING' } }, rows, stamps);
+    assert.equal(progress.eta.basis, 'throughput', 'a card set whose stages barely move cannot be promised a short finish');
+    assert.equal(progress.eta.minutes, progress.eta.throughputMinutes);
+    assert.ok(progress.eta.minutes >= progress.eta.byRounds, 'the friendlier reading never wins on its own');
+    assert.ok(progress.eta.floorMinutes >= 1 && progress.eta.floorMinutes <= progress.eta.minutes, 'rounds not yet opened are still never counted down past');
+    assert.ok(renderDashboard('overview', projectPairPanel(demoBoard())).includes('pair-eta'), 'the estimate still renders');
   });
   await check('panel registers a conversation view plus optional sidebar and disposes both',()=>{
     const views=[],removed=[],dictionary={};
