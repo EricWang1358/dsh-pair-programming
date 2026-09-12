@@ -175,6 +175,17 @@ export async function run(check) {
   })));
   check(mitigatedRow.includes('pair_risk(action="close")') && !mitigatedRow.includes('pair_risk(action="mitigate")'),
     'and once the risk IS mitigated the same row names the close, with the artifact it needs');
+  // D2: a MITIGATED blocker has TWO reachable dispositions and the row named only the
+  // artifact-backed close — the path a team with no independent artifact can never walk,
+  // so the reader it sent there was refused forever. #127 opened WONTFIX+rationale; if the
+  // row does not name it, the dead end is preserved by the copy alone. Asserted as text.
+  const mitigatedP0Row = attentionLines(attentionSet(teamFixture({
+    tasks: [task({ oracle: frozen })],
+    protocol: { ...initialProtocolState(), risks: [{ id: 'r-10', severity: 'P0', status: 'MITIGATED', scenario: 's', trigger: 't', suggestion: 'x', raisedBy: 'navigator', at: 1 }] },
+  })));
+  check(mitigatedP0Row.includes('pair_risk(action="close")') && mitigatedP0Row.includes('wontfix') && mitigatedP0Row.includes('rationale')
+    && mitigatedP0Row.includes('pair_risk(action="wontfix", risk_id="r-10", rationale='),
+    'a MITIGATED P0 row names BOTH reachable dispositions — the artifact-backed close and the captain\'s WONTFIX ruling with its rationale — so it cannot point at a refusal the team can never satisfy');
   const openRow = lines;
   check(openRow.includes('pair_risk(action="mitigate")') && openRow.includes('closing_cmd'),
     'while an OPEN risk points at mitigation first and shows the close that follows');

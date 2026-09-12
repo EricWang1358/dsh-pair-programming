@@ -59,6 +59,16 @@ export async function run(check) {
     '#126 an open P0 on one card does not make another card unverifiable');
   check(blocksImplementation(q, 't-1').length === 0 && blocksImplementation(q, 't-2').length === 1,
     '#126 and it does not halt new cycles on another card either');
+  // D1: an instrument defect is a defect in the MEASUREMENT, and the instrument is shared
+  // by every card. Reading task_id for it let the raising card keep the block while every
+  // OTHER card's gate replayed the same broken judge and issued a credential — so an
+  // instrument ticket is read as unattributed, while a product ticket keeps #126 exactly.
+  const instr = initialProtocolState();
+  const instrument = openRisk(instr, { severity: 'P0', scenario: 'the oracle self-certifies', trigger: 't', suggestion: 'x', raisedBy: 'navigator', scope: 'instrument', taskId: 't-2' });
+  check(openBlockingRisks(instr, ['P0', 'P1'], 't-1').map(x => x.id).join() === instrument.id,
+    'D1 an instrument P0 named on one card still blocks another card: the measuring device is shared, so attribution means nothing for it');
+  check(blocksImplementation(instr, 't-1').length === 0 && blocksImplementation(instr, 't-2').length === 0,
+    'D1 while it still halts no new cycle anywhere — only a product P0 does, and blocksImplementation keeps its own product filter');
   let threw = false;
   try { openRisk(p, { severity: 'P9', scenario: 's', trigger: 't', suggestion: 'x', raisedBy: 'challenger' }); } catch { threw = true; }
   check(threw, 'invalid severity rejected');
