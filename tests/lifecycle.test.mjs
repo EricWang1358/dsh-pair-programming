@@ -186,12 +186,22 @@ export async function run(check) {
     const queued = createMessage('captain', 'driver', '[PAIR:INFO] stale');
     await appendMailbox(hi.stateRoot, 't1', 'driver', queued);
     let cleared = false;
-    hi.ctx.agents.get = (id) => id === 'child-1' ? { cancel: () => { cleared = true; } } : undefined;
+    hi.ctx.agents.get = (id) => id === 'child-1' ? { cancel: () => { cleared = true; }, status: 'working' } : undefined;
     const ir = await hammer.execute({ member: 'driver', reason: 'cycle stuck' }, { agent: hi.captain });
     check(JSON.stringify(hi.interrupts) === '["child-1"]' && ir.interrupted === 'driver' && ir.reason === 'cycle stuck' && ir.delivered === true, 'pair_interrupt reports the session it cancelled and that delivery worked');
+    check(ir.turn === 'mid_turn', '#130 and says the seat was mid-turn when the signal went out, so one receipt is distinguishable from the next');
+
     check(cleared && ir.discarded === 1 && (await readUnreadMailbox(hi.stateRoot, 't1', 'driver')).length === 0, 'pair_interrupt atomically clears the host inbox and durable pair backlog by default');
     check(JSON.stringify(hi.untracked) === '["t1"]',
       'and it stops the sweep from re-waking the seat it just cancelled: a cancelled turn is not a pause while something keeps nudging it');
+    // The receipt has to tell one press from the next: the first press in the measured session
+    // stopped nothing and looked exactly like the second, which did.
+    hi.ctx.agents.get = (id) => id === 'child-1' ? { cancel: () => {}, status: 'idle' } : undefined;
+    check((await hammer.execute({ member: 'driver', reason: 'second press' }, { agent: hi.captain })).turn === 'idle',
+      '#130 an idle seat reads as idle — there was no turn to stop');
+    hi.ctx.agents.get = () => undefined;
+    check((await hammer.execute({ member: 'driver', reason: 'third press' }, { agent: hi.captain })).turn === null,
+      '#130 and no live session reads as unknown rather than as a claim either way');
     check(await rejects(() => hammer.execute({ member: 'driver', reason: 'x' }, { agent: member }), 'only the captain'), 'a non-captain cannot pull the hammer');
     check(await rejects(() => hammer.execute({ member: 'ghost', reason: 'x' }, { agent: hi.captain }), 'member named "ghost"'), 'an unknown member is named in the refusal');
     check(await rejects(() => hammer.execute({ member: 'navigator', reason: 'x' }, { agent: hi.captain }), 'no live session'), 'a member without a session id is refused by name');
