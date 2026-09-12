@@ -525,7 +525,24 @@ export async function runReviewRegressions(check) {
     check(gate.pass === true, 'checkpoint -> reject -> defect re-fork -> fresh final review reaches gate');
     board = await h.board();
     const noAudit = structuredClone(board); delete noAudit.protocol.cycles[0].closure;
-    check(!runGate(noAudit, 't-1', { dod: ['oracle_precedes_impl'] }).pass, 'old checkpoint without matching supersession audit cannot waive oracle ordering');
+    // This board is no longer refused by the ORDERING arm, and that is the correct answer, not a
+    // hole: the arm asks whether a standard existed before the work, and this board's first seal did
+    // (#162 recovered it from the prior record with forks === 1 instead of falling back to the later
+    // re-freeze time). Asserting the old refusal was asserting the missing field - measured: this
+    // check was the only red when C1 landed, and it went red only because the arm had been reading a
+    // later seal as the first one.
+    const noAuditArm = runGate(noAudit, 't-1', { dod: ['oracle_precedes_impl'] });
+    check(noAuditArm.pass === true && noAuditArm.checklist.oraclePrecedesImpl === true,
+      'and the ordering arm passes it truthfully: this board\'s first seal did precede the work');
+    // What the arm must NOT do is read a later seal as the first one. That is the only reason the
+    // pre-C1 code refused this board, so pinning it here is what keeps the old behaviour from
+    // coming back through the repair.
+    const noSeal = structuredClone(noAudit);
+    delete noSeal.tasks[0].oracle.firstFrozenAt;
+    noSeal.tasks[0].oracle.forks = 2;
+    const unmeasurable = runGate(noSeal, 't-1', { dod: ['oracle_precedes_impl'] });
+    check(unmeasurable.pass === true && unmeasurable.checklist.oracleFirstSealUnmeasurable?.forks === 2,
+      'a record re-frozen before the first-seal field existed passes with the gap recorded, instead of being read as a late seal');
     // #125: the arm asks whether a standard existed before implementation began, so a tightening
     // must not make the card uncompletable — and the arm must keep its teeth on a late first seal.
     const openedAt = noAudit.protocol.cycles[0].openedAt;
