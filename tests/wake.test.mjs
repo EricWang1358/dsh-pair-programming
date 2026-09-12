@@ -7,7 +7,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { registerWakeRuntime, wakeRuntimeFor, scheduleWake } from '../lib/runtime/wake.js';
-import { wakeCaptain } from '../lib/tools/shared.js';
+import { deliverProtocolMessage, wakeCaptain } from '../lib/tools/shared.js';
 import { installPairScheduler } from '../lib/runtime/scheduler.js';
 import { registerFlowTools } from '../lib/tools/flow.js';
 import { registerTaskTools } from '../lib/tools/task.js';
@@ -138,6 +138,83 @@ export async function run(check) {
       sched.trackTeam(wakePauseRoot, 'wp');
       check(sched.trackedTeams().length === 1, '#130 while a deliberate re-engagement still resumes the run');
     } finally { await rm(wakePauseRoot, { recursive: true, force: true }).catch(() => {}); }
+  }
+  /* ---- #E: the idle edge is the OTHER automatic lift of a pause ------------ */
+  // The defect: the pause is documented as lasting "until you speak", but any member's turn
+  // ending lifted it. The idle edge kicked the seat with no background flag, and kickMember's
+  // first act is trackTeam, which clears the pause — so a paused run resumed on the next seat
+  // that went idle. That is a second, unbounded path beside the one heartbeat window the
+  // pair_interrupt text already names.
+  {
+    const idleRoot = await mkdtemp(join(tmpdir(), 'pair-idle-pause-'));
+    const idleState = join(idleRoot, 'idle-pause-state');
+    await createTeamDir(idleState, teamFixture({ id: 'ip' }));
+    const handlers = new Map();
+    const idleChild = {
+      id: 'child-driver', status: 'running',
+      session: { header: { cwd: idleRoot }, seq: 1, snapshotEvents: () => [{ type: 'turn/end', data: { reason: 'completed' } }] },
+    };
+    const idleCtx = {
+      logger: { warn: () => {}, debug: () => {}, error: () => {} },
+      on: (name, fn) => handlers.set(name, fn),
+      agents: { get: (id) => (id === 'child-driver' ? idleChild : id === 'cap1' ? { id: 'cap1', session: { append: () => {} } } : undefined) },
+      subagents: { sendMessage: async () => 'm-1' },
+    };
+    const idleSched = installPairScheduler(idleCtx, { stateDir: 'idle-pause-state', heartbeatMs: 0 });
+    const idleKicks = [];
+    const realKickMember = idleSched.kickMember;
+    idleSched.kickMember = async (...args) => { idleKicks.push(args[2]); return realKickMember(...args); };
+    try {
+      idleChild.status = 'idle';
+      handlers.get('agent/status')({ agent: idleChild, status: 'idle' });
+      await waitFor(() => idleKicks.length === 1, 'the idle edge to kick its seat');
+      check(idleSched.trackedTeams().length === 1, '#E control: an idle turn re-tracks a run that is not paused');
+      idleSched.untrackTeam(idleRoot, 'ip');
+      check(idleSched.trackedTeams().length === 0, '#E the captain pause takes the run off the sweep');
+      handlers.get('agent/status')({ agent: idleChild, status: 'idle' });
+      await waitFor(() => idleKicks.length === 2, 'the paused idle edge to kick its seat');
+      await settle();
+      check(idleSched.trackedTeams().length === 0, '#E a member turn ending does not lift the captain pause (the idle edge is automatic)');
+      idleSched.trackTeam(idleRoot, 'ip');
+      check(idleSched.trackedTeams().length === 1, '#E while a deliberate re-engagement still resumes the run');
+    } finally { await rm(idleRoot, { recursive: true, force: true }).catch(() => {}); }
+  }
+  /* ---- #E: an AMBIENT delivery must not restart a paused run -------------- */
+  // deliverProtocolMessage never consulted the pause: a peer's protocol message woke the
+  // paused seat live. Declining only that leg was measured to change nothing, because the N5
+  // recovery kick at the end of the same function hands the same batch to the same seat one
+  // tick later — so both legs consult the pause, and the durable mailbox write still carries
+  // the mail. The captain's own delivery is what lifts the pause: that is the "until you
+  // speak" half of the contract.
+  {
+    const ambRoot = await mkdtemp(join(tmpdir(), 'pair-ambient-pause-'));
+    const ambState = join(ambRoot, 'amb-state');
+    const ambTeam = teamFixture({ id: 'amb' });
+    await createTeamDir(ambState, ambTeam);
+    const ambWakes = [];
+    const ambCaptain = { id: 'cap1', status: 'idle', session: { header: { cwd: ambRoot }, append: () => {} } };
+    const ambNav = { id: 'child-nav', status: 'idle', session: { header: { cwd: ambRoot }, append: () => {} } };
+    const ambDriver = { id: 'child-driver', status: 'idle', session: { header: { cwd: ambRoot }, append: () => {} } };
+    const ambCtx = {
+      logger: { warn: () => {}, debug: () => {}, error: () => {} }, on: () => {},
+      agents: { get: (id) => (id === 'cap1' ? ambCaptain : id === 'child-nav' ? ambNav : id === 'child-driver' ? ambDriver : undefined) },
+      subagents: { sendMessage: async (_sender, targetId) => { ambWakes.push(targetId); return 'm-1'; } },
+    };
+    const ambSched = installPairScheduler(ambCtx, { stateDir: 'amb-state', heartbeatMs: 0 });
+    try {
+      ambSched.untrackTeam(ambRoot, 'amb');
+      check(ambSched.trackedTeams().length === 0, '#E baseline: the captain pause took the run off the sweep');
+      const ambPeer = await deliverProtocolMessage(ambCtx, { stateDir: 'amb-state' }, ambNav, ambTeam, 'driver', '[PAIR:PROPOSAL] graph layer', { signal: undefined });
+      await tick(); await settle();
+      check(ambWakes.length === 0, '#E a peer protocol message does not live-wake a paused seat');
+      check(ambSched.trackedTeams().length === 0, '#E and its recovery kick does not re-track the paused run either');
+      check(typeof ambPeer.wake_refused === 'string' && ambPeer.delivered === 'mailbox', '#E the sender is told the wake was declined and why');
+      check((await readUnreadMailbox(ambState, 'amb', 'driver')).length === 1, '#E while the message is still durably in the mailbox — the pause declines the wake, never the mail');
+      const ambDeliberate = await deliverProtocolMessage(ambCtx, { stateDir: 'amb-state' }, ambCaptain, ambTeam, 'driver', '[PAIR:NEXT] deliberate ruling', { signal: undefined });
+      await tick();
+      check(ambDeliberate.delivered === 'wake' && ambWakes.length === 1, '#E a deliberate captain delivery still wakes the seat live');
+      check(ambSched.trackedTeams().length === 1, '#E and it is the captain speaking that lifts the pause');
+    } finally { await rm(ambRoot, { recursive: true, force: true }).catch(() => {}); }
   }
   /* ---- the pause / resume / takeover matrix (review item 3) ---------------- */
   // The round-40 review asked for this path to be reviewed as a whole, because the pieces
