@@ -252,6 +252,13 @@ export async function run(check) {
     check(redProblem({ exit: 1 }) === undefined && redProblem({ exit: 'timeout' }).includes('timed out'), 'B a failing oracle is RED, a hanging one is refused');
     check(computeVerdict({ run: { exit: 0 } }).verdict === 'accept', 'B a passing frozen oracle accepts');
     check(computeVerdict({ run: { exit: 1 } }).verdict === 'reject', 'B a failing frozen oracle rejects');
+    // #146: a declared blind spot must not read like a broken implementation.
+    const blind = computeVerdict({ run: { exit: 1 }, oracle: { nonGating: ['music', 'presets'], nonGatingReason: 'both route to card t-9' } });
+    check(blind.verdict === 'reject' && blind.category === 'oracle_red', '#146 a declared blind spot does not soften the verdict or its category');
+    check(blind.reason.includes('music') && blind.reason.includes('presets') && blind.reason.includes('t-9') && blind.reason.includes('checkpoint'),
+      '#146 but the refusal names the arms the seal declared blind and the two ways forward');
+    check(!computeVerdict({ run: { exit: 1 } }).reason.includes('non-gating'), '#146 while an oracle that declared nothing reads exactly as before');
+    check(!computeVerdict({ run: { exit: 0 }, oracle: { nonGating: ['a'] } }).reason.includes('non-gating'), '#146 and a green run never mentions a blind arm');
     const tampered = computeVerdict({ tampered: true, run: { exit: 0 } });
     check(tampered.verdict === 'reject' && tampered.category === 'oracle_tampered', 'B a tampered oracle rejects even when it now passes');
     check(oracleSummary(undefined) === 'none' && oracleSummary(freezeRecord(GOOD_FORK, { sha: 'abcdef0123456789', run: { exit: 1 }, by: 'navigator' })).includes('abcdef012345'), 'B the summary names the seal');
