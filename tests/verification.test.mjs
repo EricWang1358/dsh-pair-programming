@@ -114,6 +114,21 @@ export async function run(check) {
     check(cycle.pushbacks.length === 20 && cycle.pushbacks[0].at === 5 && cycle.pushbacks[19].at === 24, 'U3 the appended record is bounded, oldest entry first out');
     check(cycle.pushbacks[19].observation.length === 400, 'U3 one long quote cannot grow the board');
   });
+  await scenario('GO conditions can be extended', async h => {
+    await h.edit(t => { const c = t.protocol.cycles[0]; c.step = 'PROPOSED'; delete c.review; });
+    const first = await h.call('pair_review', { cycle_id: h.cycleId, verdict: 'go', evidence: ['plan reviewed'], conditions: 'keep the public API stable' }, 'nav');
+    check(first.conditions_updated === undefined, '#144 a first GO is a grant, not an update');
+    const before = (await h.board()).protocol.cycles[0];
+    const second = await h.call('pair_review', { cycle_id: h.cycleId, verdict: 'go', evidence: ['the Driver asked for clarity'], conditions: 'and pin the fixture' }, 'nav');
+    const after = (await h.board()).protocol.cycles[0];
+    check(second.conditions_updated === true && after.step === 'GO', '#144 a second GO on the same cycle extends the conditions instead of being refused as a skipped step');
+    check(after.review.conditions.includes('keep the public API stable') && after.review.conditions.includes('and pin the fixture'), '#144 both the original condition and the addition survive');
+    check(after.review.conditionLog?.length === 1 && after.review.conditionLog[0].text === 'and pin the fixture', '#144 and the addition is appended with its own timestamp instead of overwriting the review');
+    check(after.review.at === before.review.at && Number.isFinite(after.review.conditionsUpdatedAt), '#144 while the review keeps the time it was granted');
+    await h.edit(t => { t.protocol.cycles[0].step = 'GREEN'; });
+    check((await resultOf(h.call('pair_review', { cycle_id: h.cycleId, verdict: 'go', evidence: ['x'] }, 'nav'))).error?.includes('advance one at a time'),
+      '#144 and a GO that would move the cycle is still refused');
+  });
   await scenario('checkpoint veto and promotion', async h => {
     check((await h.verify({ ...veto, stage: 'checkpoint' })).verdict === 'reject', 'U3 green checkpoint preserves reviewer veto');
     await h.green();
