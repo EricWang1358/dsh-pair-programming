@@ -10,7 +10,7 @@ import { registerOracleTools } from '../lib/tools/oracle.js';
 import { registerArbitrateTools } from '../lib/tools/arbitrate.js';
 import { createTeamDir, readTeam, writeTeam } from '../lib/state/store.js';
 import { initialProtocolState, openCycle } from '../lib/protocol/machine.js';
-import { runGate } from '../lib/protocol/gate.js';
+import { runGate, gateStateFingerprint } from '../lib/protocol/gate.js';
 import { completionReadiness } from '../lib/protocol/completion.js';
 import { digestOracleFiles, workspaceFingerprint, runOracleCommand } from '../lib/tools/oracle-exec.js';
 import { navigatorPersona } from '../lib/protocol/personas.js';
@@ -113,6 +113,24 @@ export async function run(check) {
     for (let i = 0; i < 25; i++) logPushback(cycle, { kind: 'reject', stage: 'final', observation: 'x'.repeat(500), at: i });
     check(cycle.pushbacks.length === 20 && cycle.pushbacks[0].at === 5 && cycle.pushbacks[19].at === 24, 'U3 the appended record is bounded, oldest entry first out');
     check(cycle.pushbacks[19].observation.length === 400, 'U3 one long quote cannot grow the board');
+  });
+  await scenario('a correction is appended beside the record, never over it', async h => {
+    const before = await h.board();
+    const fingerprintBefore = gateStateFingerprint(before, 't-1');
+    const originalRecord = JSON.stringify(before.protocol.cycles[0].report);
+    const denied = await resultOf(h.call('pair_correction', { cycle_id: h.cycleId, field: 'report.test_results', correction: 'the suite was 12/0', evidence: ['node tests/run.mjs'] }, 'drv'));
+    check(denied.error?.includes('Navigator') || denied.error?.includes('Captain'), '#153 the Driver cannot correct its own account');
+    const recorded = await h.call('pair_correction', { cycle_id: h.cycleId, field: 'report.test_results', correction: 'the suite was 12/0, not 18/18', evidence: ['node tests/run.mjs --allow-skips: 12 passed, 0 failed'] }, 'nav');
+    check(recorded.by === 'navigator' && recorded.corrections === 1, '#153 the Navigator records what the record should say');
+    const after = await h.board();
+    const entry = after.protocol.cycles[0].corrections[0];
+    check(entry.field === 'report.test_results' && entry.correction.includes('12/0') && Number.isFinite(entry.at) && entry.evidence[0].includes('12 passed'),
+      '#153 and the entry is dated, attributed, names the field it corrects and carries the evidence that makes it true');
+    check(gateStateFingerprint(after, 't-1') === fingerprintBefore,
+      '#153 recording a correction does not move the board digest, so it cannot stale the credential it corrects');
+    check(JSON.stringify(after.protocol.cycles[0].report) === originalRecord, '#153 while the original record stays byte for byte');
+    const byCaptain = await h.call('pair_correction', { cycle_id: h.cycleId, field: 'report.deviations', correction: 'the shim was not dropped', evidence: ['git diff --stat'] }, 'cap');
+    check(byCaptain.by === 'captain' && byCaptain.corrections === 2, '#153 and the Captain may correct too — the board is the Captain record');
   });
   await scenario('GO conditions can be extended', async h => {
     await h.edit(t => { const c = t.protocol.cycles[0]; c.step = 'PROPOSED'; delete c.review; });

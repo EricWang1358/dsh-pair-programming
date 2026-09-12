@@ -171,7 +171,8 @@ export async function run(check) {
       proposal: { files: ['src/secret-approach.mjs'] }, red: { testFiles: ['t.mjs'] },
       green: { evidence: ['suite green'], tunedForOracle: 'the counter was fitted to the acceptance run' },
       report: { diffSummary: 'src/secret-approach.mjs +40/-2' },
-      pushbacks: [{ kind: 'reject', stage: 'final', category: 'quality', observation: 'the counter is fitted to the acceptance run, not to the contract', at: 3 }] });
+      pushbacks: [{ kind: 'reject', stage: 'final', category: 'quality', observation: 'the counter is fitted to the acceptance run, not to the contract', at: 3 }],
+      corrections: [{ at: 4, by: 'navigator', field: 'report.test_results', correction: 'CANDIDATE-CORRECTION', evidence: ['x'] }] });
     await writeTeam(join(root, 'out-expose'), exposeBoard);
     const asSpec = await solo.status({}, { agent: { id: specSeat.id, session: { header: { cwd: root }, append() {} } } });
     const specCycle = asSpec.cycles.find(c => c.id === 'c-1');
@@ -180,10 +181,34 @@ export async function run(check) {
       'U2 the acceptance author does not read the candidate through the board: no proposal, RED, GREEN or report on any cycle');
     check(specCycle.step === 'GREEN' && specCycle.taskId === 't-1', 'U2 while the cycle still says where the work stands (step and task survive the projection)');
     check(specCycle.pushbacks === undefined, 'U2 the appended pushback record quotes the candidate too, so it stays off the acceptance seat');
+    check(specCycle.corrections === undefined && !JSON.stringify(asSpec).includes('CANDIDATE-CORRECTION'),
+            'U2 and so does an appended correction: it describes the candidate record');
     check(specOther.oracle !== undefined && specOther.oracle.frozen === true && specOther.oracle.cmd === undefined,
       'U2 another card\'s sealed standard is reduced to the fact that it exists, not its command or files');
     check(asSpec.tasks.some(t => t.id === 't-1' && t.subject === 'the contract stays visible'), 'U2 the card contract itself is still visible to this seat');
     check(!asSpec.summary.includes('Tuned to the instrument:'), 'U2 and the summary stops describing the candidate (the tuned-to-the-instrument declaration)');
+    // #155: `current_cycle` was the one field that did NOT go through cycleExposure, so the whole
+    // projection could be bypassed by reading it instead of `cycles`.
+    check(asSpec.current_cycle?.id === 'c-1' && asSpec.current_cycle.step === 'GREEN'
+      && asSpec.current_cycle.proposal === undefined && asSpec.current_cycle.green === undefined
+      && asSpec.current_cycle.report === undefined && asSpec.current_cycle.red === undefined,
+      'U2 the current cycle projection is the same one: only the step and the task survive');
+    const whole = JSON.stringify(asSpec);
+    check(!whole.includes('src/secret-approach.mjs') && !whole.includes('CANDIDATE-CORRECTION'),
+      'U2 and neither a proposed file nor a correction text appears anywhere in the whole status the acceptance seat reads');
+    // Still leaking, and named rather than tolerated: the tuned-to-the-instrument declaration reaches
+    // this seat somewhere else (measured at offset 2572 in the serialised status, in a line shaped
+    // "... pair_arbitrate(cycle:c-1:tuned) — tuned to the instrument: <text>"). Filed with the window
+    // as #156; this assertion is what will close it.
+    // The failure names the field, because this whole class of bypass was found one field at a time.
+    const pathOf = (value, needle, path = '') => {
+      if (typeof value === 'string') return value.includes(needle) ? path : undefined;
+      if (Array.isArray(value)) { for (let i = 0; i < value.length; i++) { const hit = pathOf(value[i], needle, path + '[' + i + ']'); if (hit !== undefined) return hit; } return undefined; }
+      if (value && typeof value === 'object') { for (const key of Object.keys(value)) { const hit = pathOf(value[key], needle, path === '' ? key : path + '.' + key); if (hit !== undefined) return hit; } return undefined; }
+      return undefined;
+    };
+    check(!whole.includes('the counter was fitted to the acceptance run'),
+      'U2 #156 the tuned-to-the-instrument declaration reaches nowhere in this status (found at: ' + pathOf(asSpec, 'the counter was fitted to the acceptance run') + ')');
     check(asSpec.summary.includes('Goal coverage:') && asSpec.use_cases.length > 0, 'U2 the public contract it works from — goal coverage and the frozen use cases — is untouched');
     // U1 lifecycle projection: the board itself says which route each seat resolves to,
     // instead of leaving that to the settings card. A run on the captain fallback is
