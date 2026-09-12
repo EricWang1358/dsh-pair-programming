@@ -140,6 +140,14 @@ if (parallel > 1) {
         child.stderr.on('data', chunk => { out += String(chunk); });
         child.on('close', code => {
           active--; done++;
+          // Keep the failing child's own words. The summary line names the suite and its counts,
+          // and until this existed the assertion text was thrown away - which turned a runner-only
+          // failure into a hunt for whichever check it was. Off by default so a green run stays
+          // quiet; PAIR_TEST_VERBOSE=1 (what CI sets) prints the tail of every broken suite.
+          if (code !== 0 && process.env.PAIR_TEST_VERBOSE === '1') {
+            const tail = out.trimEnd().split(String.fromCharCode(10)).slice(-20).join(String.fromCharCode(10));
+            console.error('--- ' + suite + ' output (last 20 lines) ---' + String.fromCharCode(10) + tail);
+          }
           const match = summary.exec(out);
           const ms = Date.now() - childAt;
           outcomes.push({ suite, code, ms, passed: match ? Number(match[1]) : 0, failed: match ? Number(match[2]) : (code === 0 ? 0 : 1), skipped: match ? Number(match[3]) : 0 });

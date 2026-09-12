@@ -54,6 +54,10 @@ jobs:
       - name: Protocol suites
         # --allow-skips is what the local release gate uses: one check is environment-bound (the
         # gate-exec spawn probe) and the runner reports the rest as ordinary passes.
+        # PAIR_TEST_VERBOSE=1 makes a failing suite print its own assertion text, which the
+        # parallel runner otherwise discards.
+        env:
+          PAIR_TEST_VERBOSE: '1'
         run: node tests/run.mjs --parallel 4 --allow-skips
 
   full-verify:
