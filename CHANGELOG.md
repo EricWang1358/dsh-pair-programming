@@ -5,6 +5,61 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 protocol-level changes are versioned separately in `dsh.sdk.testedCohort` and
 `PROTOCOL_VERSION`.
 
+## [Unreleased]
+
+**The 2026-09-12 defect plan, batches C-F.** Four independent fixes, each one landed against a
+measured failure rather than a suspicion.
+
+**C - what a re-freeze may change, and what the ordering arm may read (#162).** The first seal was
+lost on every later re-freeze: `freezeRecord` carried `prior.firstFrozenAt` and nothing else, so a
+card sealed once before the field existed stayed unmeasurable forever, and `runGate` then fell back
+to the CURRENT `frozenAt` - a later seal - which is the deadlock #125 was supposed to end. The
+fallback is now read off the record (a `forks === 1` record IS a first seal; a re-frozen one is
+not), and a record that genuinely cannot answer the question PASSES with
+`checklist.oracleFirstSealUnmeasurable` written down, instead of failing for a fact it does not
+hold. The other half: #152 let a re-freeze seal GREEN, and nothing stopped that seal from being
+WEAKER than the one it replaced - `sealedGreen` was the only trace and had no consumer. A green
+re-seal now has to keep the command byte-identical and the sealed file set a superset, or be sealed
+with `captain_override`; and the `oracleTightenedAfterImpl` audit stamp no longer fires on a
+re-freeze made while the card was still being planned, so the line points at something.
+
+**D - one shared instrument, one reachable disposition, one honest diff.** An INSTRUMENT-scoped P0
+was filtered by card like a product one, so a defect in a shared judge blocked the card it was
+raised on and let every other card's gate replay the same judge and issue a credential; instrument
+tickets ignore attribution now. The to-do row for a MITIGATED blocker named only the executable
+artifact path, which a team without an independent artifact can be refused forever, while #127 had
+already opened `wontfix` - the row names both. And `GATE_STALE` no longer reads "risks: input
+changed" as a board write when the credential's own digest definition changed: because #131 removed
+the risk lifecycle from that digest, the first gate after an upgrade moves every credential once,
+and the refusal now says so instead of sending the reader after a write that never happened.
+
+**E - a pause lasts until the captain speaks (#75 follow-up).** `pair_interrupt` documents a pause
+that only a deliberate captain action lifts, but the member idle edge kicked the team without the
+background flag and cleared it - so any seat finishing a turn resumed the sweep. The idle edge
+carries the flag now, and a read-only `runtime.isPaused()` lets `deliverProtocolMessage` decline the
+whole wake leg (live wake AND its recovery kick, which delivered the same batch one tick later) of a
+member-initiated delivery while paused. Mail stays durable and is handed over on the next kick. Two
+residuals of the same class went with it: the kick after a repaired checkpoint, and a stale comment
+in `wake.js`.
+
+**F - the prompt says which tools exist.** The captain's tool list was missing `pair_correction`,
+`pair_yield` and `pair_cleanup` (26 of 29), the captain protocol never mentioned the append-only
+correction, and one host-contract message said 28 where the assertion said 29. Non-protocol text is
+re-measured (6,445 -> 6,488 chars) and both variants stay inside their budgets.
+
+**Also here:** CI (`.github/workflows/verify.yml`). The local sandbox cannot spawn child processes
+with piped stdio in this cohort (`spawn EPERM`), which forces the suite serial; a runner has no such
+restriction, so PRs run `node tests/run.mjs --parallel 4` and main runs `npm run verify`. Every
+`@deepseek-ai` package the suite imports is published, but the `latest` tag on that line is
+`0.0.1-rc.1` while the tested cohort is `0.1.5-rc.2`, so the workflow installs that cohort
+explicitly - mixing ranges fails with ERESOLVE. The panel's legacy-host ring now takes the same
+denominator as its label (`scored` decides both), and the standing review of the plan itself is in
+`docs/07-workflow/REVIEW-2026-09-12-plan-assessment.md`.
+
+Evidence: `node tests/run.mjs --allow-skips` -> **2060 passed, 0 failed, 2 skipped across 57
+suites** on the merged tree; each batch also carries its own mutation probe (reverting the fix turns
+exactly its new assertions red).
+
 ## [0.15.12] — 2026-09-11
 
 **The console/panel work landing together with the protocol batch.** This release is the first to
