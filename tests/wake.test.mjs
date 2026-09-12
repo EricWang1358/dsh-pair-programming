@@ -120,6 +120,25 @@ export async function run(check) {
       check(ks.trackedTeams().length === 1, '#75 while the captain own action does re-engage the run');
     } finally { await rm(kickRoot, { recursive: true, force: true }).catch(() => {}); }
   }
+  /* ---- #130: the OTHER automatic path ------------------------------------- */
+  // #75 pinned member-triggered kickTeam. scheduleWake is its sibling: the recovery kick that
+  // deliverProtocolMessage fires after a mailbox-only delivery called kickMember with no options,
+  // so it cleared a captain pause exactly the way the member-triggered kick used to.
+  {
+    const wakePauseRoot = await mkdtemp(join(tmpdir(), 'pair-wake-pause-'));
+    const sched = installPairScheduler({ logger: { warn() {} }, on: () => {}, agents: { get: () => undefined }, subagents: {} }, { stateDir: 'wake-pause-state', heartbeatMs: 0 });
+    const wakeCtx = { logger: { warn() {} } };
+    try {
+      registerWakeRuntime(wakeCtx, sched);
+      sched.untrackTeam(wakePauseRoot, 'wp');
+      check(sched.trackedTeams().length === 0, '#130 baseline: the captain pause removed the run from the sweep');
+      check(scheduleWake(wakeCtx, wakePauseRoot, 'wp', 'driver') === true, '#130 the recovery kick is scheduled');
+      await tick(); await settle();
+      check(sched.trackedTeams().length === 0, '#130 a mailbox-only peer delivery does not lift the captain pause (the other automatic path)');
+      sched.trackTeam(wakePauseRoot, 'wp');
+      check(sched.trackedTeams().length === 1, '#130 while a deliberate re-engagement still resumes the run');
+    } finally { await rm(wakePauseRoot, { recursive: true, force: true }).catch(() => {}); }
+  }
   /* ---- the pause / resume / takeover matrix (review item 3) ---------------- */
   // The round-40 review asked for this path to be reviewed as a whole, because the pieces
   // are individually reasonable and can cancel each other out (#63 was exactly that). Each
