@@ -1,0 +1,56 @@
+name: verify
+
+# The local sandbox cannot spawn child processes with piped stdio (EPERM), which forces the test
+# runner into serial mode and makes a full-suite check an event rather than a habit. A GitHub
+# runner is an ordinary VM with no such restriction, so the whole protocol suite runs there in
+# parallel, off the developer's machine. Nothing here needs the DSH host installed: every
+# @deepseek-ai peer is published on npm, and the suite loads the packages directly.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # PRs get the fast reading: the reachable proof that the protocol suites still pass.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+      - name: Install (peers are public; postinstall only checks they resolve)
+        env:
+          CI: 'true'
+        run: npm install --no-audit --no-fund
+      - name: Resolve peers
+        run: node scripts/setup-peers.mjs
+      - name: Protocol suites
+        run: node tests/run.mjs --parallel 4
+
+  full-verify:
+    # main and manual dispatch get the release gate: typecheck, suites, imports, build, package
+    # shape and the startup contract, i.e. exactly what npm run verify runs locally.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+      - name: Install (peers are public; postinstall only checks they resolve)
+        env:
+          CI: 'true'
+        run: npm install --no-audit --no-fund
+      - name: Resolve peers
+        run: node scripts/setup-peers.mjs
+      - name: npm run verify
+        run: npm run verify

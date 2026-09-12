@@ -432,6 +432,22 @@ export async function run(report) {
     assert.ok(behindTree.includes('legacyHint'), 'so the restart notice is shown for it');
     assert.ok(!behindTree.includes('undefined'), 'and the milestone rows fall back to the task total instead of printing undefined');
     assert.ok(behindTree.includes(' / 8'), 'the fallback denominator is the task total the old host sent');
+    // ...and the RING has to take that same denominator. Reading the old host's percent while
+    // labelling it with the task total put two bases on one hero: a board with one stopped card of
+    // eight rendered "59.5%" beside "3 / 8 tasks" (measured; the percent counted the seven in play).
+    const stopped = demoBoard();
+    stopped.tasks[7].status = 'cancelled';
+    const behindSameBoard = projectPairPanel(stopped);
+    assert.equal(behindSameBoard.progress.percent, 59.5, 'the current projection scores the seven cards in play');
+    assert.ok(render('overview', behindSameBoard).includes('"--pair-p":59.5'), 'and the ring carries that share');
+    const behindStopped = structuredClone(behindSameBoard);
+    delete behindStopped.progress.scored; delete behindStopped.progress.terminated;
+    const stoppedTree = render('overview', behindStopped);
+    // The ring reads its own progress variable (the disc's --pair-p), which the stub keeps in props:
+    // asserting on rendered digits instead would test the counter's animation start, not the basis.
+    assert.ok(stoppedTree.includes('"--pair-p":38'),
+      'the ring is recomputed from the task total the old host sent (round(3 of 8 * 100) = 38), not from a share it cannot report');
+    assert.ok(!stoppedTree.includes('"--pair-p":59.5'), 'so the old host never shows a percent computed from the live-card denominator it does not have');
   });
   await check('a returned proposal is one event on the failed lane, not two events on two lanes', () => {
     const board = demoBoard();
