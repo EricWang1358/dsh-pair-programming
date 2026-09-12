@@ -143,6 +143,18 @@ export async function run(check) {
     check(second.firstFrozenAt === first.firstFrozenAt && Number.isFinite(second.frozenAt), '#125 and every later seal carries it instead of overwriting it');
     const unknown = freezeRecord(sealInput, { sha: 'c'.repeat(64), run: { exit: 1, outputSha: 'z' }, by: 'navigator', forks: 2, prior: { frozenAt: 7 } });
     check(unknown.firstFrozenAt === undefined, '#125 while a re-freeze of a record that never stored it invents nothing (a late re-freeze must not read as an early seal)');
+    // #162: the same absence must not be re-invented AWAY either. A record sealed once before the
+    // field existed (forks === 1, no firstFrozenAt) IS a first seal, so its own frozenAt is that
+    // fact - recovering it here is what stops "unmeasurable" from being permanent, and the recovered
+    // value has to survive every later re-freeze.
+    const legacy = freezeRecord(sealInput, { sha: 'd'.repeat(64), run: { exit: 1, outputSha: 'w' }, by: 'navigator', forks: 2, prior: { frozenAt: 7, forks: 1 } });
+    check(legacy.firstFrozenAt === 7, '#162 a re-freeze of a record sealed once before the field existed recovers that seal as the first, instead of staying unmeasurable forever');
+    const legacyAgain = freezeRecord(sealInput, { sha: 'e'.repeat(64), run: { exit: 1, outputSha: 'v' }, by: 'navigator', forks: 3, prior: legacy });
+    check(legacyAgain.firstFrozenAt === 7,
+      '#162 and the recovered first seal survives the next re-freeze (the field was dropped again before this fix)');
+    const reFrozenBefore = freezeRecord(sealInput, { sha: 'f'.repeat(64), run: { exit: 1, outputSha: 'u' }, by: 'navigator', forks: 3, prior: { frozenAt: 9, forks: 2 } });
+    check(reFrozenBefore.firstFrozenAt === undefined,
+      '#162 while a record already re-frozen before the field existed stays unmeasurable - the gate records the gap and passes it, rather than reading a later seal as the first');
   }
   // #15: the red tail in a freeze letter, bounded. Measured on an archived board:
   // ORACLE letters are 391K across 68 freezes and red_tail is HALF of it - a diagnostic
