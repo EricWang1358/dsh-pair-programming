@@ -173,6 +173,10 @@ export async function run(check) {
       report: { diffSummary: 'src/secret-approach.mjs +40/-2' },
       pushbacks: [{ kind: 'reject', stage: 'final', category: 'quality', observation: 'the counter is fitted to the acceptance run, not to the contract', at: 3 }],
       corrections: [{ at: 4, by: 'navigator', field: 'report.test_results', correction: 'CANDIDATE-CORRECTION', evidence: ['x'] }] });
+    // The plan's item 6: free text a Driver can write must not reach this seat through the risk
+    // register or the product list either.
+    exposeBoard.protocol.risks.push({ id: 'r-shape', severity: 'P1', status: 'OPEN', scenario: 'CANDIDATE-RISK-SHAPE', trigger: 't', suggestion: 's', raisedBy: 'driver', scope: 'product', openedAt: 1 });
+    exposeBoard.product = { ...(exposeBoard.product ?? {}), discoveries: [{ id: 'disc-shape', status: 'untriaged', observation: 'CANDIDATE-DISCOVERY-SHAPE', userValue: 'v' }] };
     await writeTeam(join(root, 'out-expose'), exposeBoard);
     const asSpec = await solo.status({}, { agent: { id: specSeat.id, session: { header: { cwd: root }, append() {} } } });
     const specCycle = asSpec.cycles.find(c => c.id === 'c-1');
@@ -187,6 +191,20 @@ export async function run(check) {
       'U2 another card\'s sealed standard is reduced to the fact that it exists, not its command or files');
     check(asSpec.tasks.some(t => t.id === 't-1' && t.subject === 'the contract stays visible'), 'U2 the card contract itself is still visible to this seat');
     check(!asSpec.summary.includes('Tuned to the instrument:'), 'U2 and the summary stops describing the candidate (the tuned-to-the-instrument declaration)');
+    // The plan's item 1: `attentionLines` returns ONE multi-line element, so filtering whole elements
+    // deleted every row — this seat's own obligations and every blocking risk — the moment one row
+    // quoted the tuned declaration. That regression is what this pair of checks pins.
+    const specLines = asSpec.summary.split(String.fromCharCode(10));
+    check(specLines.some(line => line.startsWith('[PAIR:ATTENTION]')),
+      'U2 the attention block survives the candidate filter: only the rows that quote the candidate are dropped, never the whole block');
+    check(specLines.some(line => line.trimStart().startsWith('- [') && !/tuned to the instrument/i.test(line)),
+      'U2 and the rows this seat still owes are still delivered');
+    check(!JSON.stringify(asSpec).includes('CANDIDATE-RISK-SHAPE')
+      && asSpec.risks.some(r => r.id === 'r-shape' && r.severity === 'P1' && r.scenario === undefined),
+      'U2 a risk ticket keeps its shape for this seat and loses the free text a Driver writes');
+    check(!JSON.stringify(asSpec).includes('CANDIDATE-DISCOVERY-SHAPE')
+      && asSpec.product.discoveries.some(d => d.id === 'disc-shape' && d.observation === undefined),
+      'U2 and a product discovery keeps its id and state, not its observation — in the list and in the summary line that used to quote it');
     // #155: `current_cycle` was the one field that did NOT go through cycleExposure, so the whole
     // projection could be bypassed by reading it instead of `cycles`.
     check(asSpec.current_cycle?.id === 'c-1' && asSpec.current_cycle.step === 'GREEN'
