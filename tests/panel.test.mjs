@@ -394,6 +394,34 @@ export async function run(report) {
     delete board.useCases;
     assert.equal(projectPairPanel(board).features.length, 0, 'a team without registered use cases shows no invented list');
   });
+  await check('a word missing from either language fails here instead of being drawn on the page', () => {
+    // t(key) returns the KEY when a word is missing, so a gap ships as `event.noGo` on screen (#9)
+    // with every suite green. Both directions, and no empty strings.
+    const zh = sandbox.PAIR_PANEL_ZH, en = sandbox.PAIR_PANEL_EN;
+    assert.deepEqual(Object.keys(zh).filter(key => !(key in en)), [], 'Chinese keys with no English word');
+    assert.deepEqual(Object.keys(en).filter(key => !(key in zh)), [], 'English keys with no Chinese word');
+    for (const [lang, dict] of [['zh', zh], ['en', en]]) for (const [key, value] of Object.entries(dict)) {
+      assert.ok(typeof value === 'string' && value.length > 0, lang + ' leaves ' + key + ' empty');
+    }
+    // Every key the dashboard actually asks for, across the five views and the states with no team.
+    // Two lookups are deliberate probes that fall back by design: explain() tries the attention kind
+    // before the tool, and the estimate tries its reason before the generic line. Anything else that
+    // falls back is a word the reader would have seen as a raw key.
+    const probes = new Set(['attention.obligation', 'eta.rough']);
+    const asked = new Set(), t = key => { asked.add(key); return key in zh ? zh[key] : key; };
+    const Dashboard = DashboardOf(expandingReact), board = demoBoard();
+    for (const view of ['overview', 'tasks', 'features', 'activity', 'value']) {
+      for (const taskId of [undefined, 't-1', 't-5', 't-7']) {
+        const team = projectPairPanel(board, taskId ? { taskId } : {});
+        Dashboard({ t, data: { team, warnings: ['x'], teams: [], observedAt: 1 }, view, density: 'compact', status: 'live' });
+      }
+    }
+    for (const [status, data] of [['loading', null], ['error', null], ['live', { team: null, state: 'unavailable', warnings: [], teams: [], observedAt: 1 }]]) {
+      Dashboard({ t, data, status, error: 'offline', density: 'compact' });
+    }
+    assert.ok(asked.size > 100, 'the sweep really rendered the page');
+    assert.deepEqual([...asked].filter(key => !(key in zh) && !probes.has(key)).sort(), [], 'keys the panel asked for and has no word for');
+  });
   await check('the green step reads as the Driver self-test, never as a passed check', () => {
     for (const dict of [sandbox.PAIR_PANEL_ZH, sandbox.PAIR_PANEL_EN]) {
       assert.ok(!/通过|passed|passing/i.test(dict['event.green']), 'the GREEN step is the Driver reporting its own test run');
