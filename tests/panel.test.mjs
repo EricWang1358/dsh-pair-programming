@@ -407,7 +407,9 @@ export async function run(report) {
     assert.equal(sandbox.pairLegacyServer(current), false);
     assert.ok(!render('overview', current).includes('legacyHint'), 'a complete projection shows no restart notice');
     const older = structuredClone(current);
+    // The probe names the NEWEST field the page reads, so "older" now means older than THIS batch.
     delete older.features; delete older.value;
+    delete older.progress.scored; delete older.progress.terminated;
     older.progress.eta = { reason: 'rough', samples: 1, minMinutes: 3, maxMinutes: 11 };
     assert.equal(sandbox.pairLegacyServer(older), true);
     const overview = render('overview', older);
@@ -421,6 +423,72 @@ export async function run(report) {
     unknown.progress.eta = { reason: 'invented-later' };
     const tree = render('overview', unknown);
     assert.ok(tree.includes('eta.unknown') && !tree.includes('eta.invented-later'), 'an unknown reason falls back to readable copy, not to a raw key');
+    // A host exactly one release behind (0.15.12: features and value present, scored/terminated absent)
+    // used to read as current: no notice, and six milestone rows rendered as "0 / undefined" (item 10).
+    const behind = structuredClone(current);
+    delete behind.progress.scored; delete behind.progress.terminated;
+    assert.equal(sandbox.pairLegacyServer(behind), true, 'a host without this batch\'s fields is named as old');
+    const behindTree = render('overview', behind);
+    assert.ok(behindTree.includes('legacyHint'), 'so the restart notice is shown for it');
+    assert.ok(!behindTree.includes('undefined'), 'and the milestone rows fall back to the task total instead of printing undefined');
+    assert.ok(behindTree.includes(' / 8'), 'the fallback denominator is the task total the old host sent');
+  });
+  await check('a returned proposal is one event on the failed lane, not two events on two lanes', () => {
+    const board = demoBoard();
+    const cycle = board.protocol.cycles[0];
+    const at = board.updatedAt - 3 * 60000;
+    cycle.review = { verdict: 'no_go', at, evidence: ['scope grew'] };
+    cycle.pushbacks = [{ kind: 'no_go', stage: 'review', observation: 'the scope grew', at }];
+    const panel = projectPairPanel(board);
+    assert.equal(panel.history.filter(e => e.at === at).length, 1, 'the live NO_GO and its appended record are one event');
+    assert.equal(panel.history.filter(e => e.kind === 'noGo').length, 1, 'and it carries the noGo kind, not review');
+    const rhythm = sandbox.pairRhythm(panel.history);
+    const failEvents = panel.history.filter(e => e.kind === 'reject' || e.kind === 'noGo').length;
+    assert.equal(rhythm.counts.fail, failEvents, 'the failed lane counts each failed event exactly once');
+    assert.equal(sandbox.pairRhythmGroup('noGo'), 'fail', 'and the lane matches the timeline colour');
+    for (const dict of [sandbox.PAIR_PANEL_ZH, sandbox.PAIR_PANEL_EN]) {
+      assert.ok(dict['event.noGo'], 'the noGo event has copy in both languages instead of falling back to the raw key');
+    }
+  });
+  await check('every count on the page uses the cards still in play', () => {
+    const board = demoBoard();
+    board.tasks[7].status = 'cancelled';
+    const panel = projectPairPanel(board);
+    const tree = renderDashboard('overview', panel);
+    assert.equal(panel.progress.scored, 7);
+    assert.ok((tree.split(' / 7').length - 1) >= 4, 'the hero, the milestone rows and the card metrics count the cards still in play');
+    // The acceptance metric keeps counting goal CRITERIA (8 of them here), which is not a card count:
+    // the three surfaces that answer "how many cards" now all answer with the scored number.
+    assert.ok(tree.includes('terminated.pre'), 'while the stopped cards are named beside the ring');
+  });
+  await check('the undated pushback count treats live verdicts as a set', () => {
+    const board = demoBoard();
+    for (const c of board.protocol.cycles) { delete c.rejections; delete c.pushbacks; }
+    const cycle = board.protocol.cycles[0];
+    cycle.review = { verdict: 'no_go', at: 5 };
+    cycle.verify = { verdict: 'reject', at: 6 };
+    cycle.rejections = 2;
+    assert.equal(projectPairPanel(board).value.undatedPushbacks, 0,
+      'a cycle may carry a returned proposal AND a rejected verification, and both are dated on the page');
+    const orphan = structuredClone(board);
+    orphan.protocol.cycles[0].rejections = 3;
+    orphan.protocol.cycles[0].pushbacks = [{ kind: 'reject', stage: 'final', observation: 'no timestamp' }];
+    assert.equal(projectPairPanel(orphan).value.undatedPushbacks, 1,
+      'while a record with no timestamp is reported as undated instead of vanishing from both lists');
+  });
+  await check('the throughput denominator is measured over the same cards it scores', () => {
+    const m = 60000, at = 1_000_000_000_000;
+    const cycles = [{ id: 'c-1', taskId: 't-1', openedAt: at, verify: { verdict: 'checkpoint', at: at + 6 * m } }];
+    const rows = [
+      { id: 't-1', stage: 'coding', oracle: true, cycle: { step: 'GREEN', verdict: null }, gate: { current: false } },
+      { id: 't-2', stage: 'cancelled', oracle: true, cycle: { step: 'GREEN', verdict: null }, gate: { current: false } },
+    ];
+    const all = [at, at + 3 * m, at + 6 * m, at + 9 * m, at + 12 * m];
+    const board = { protocol: { cycles, phase: 'CYCLING' } };
+    const without = panelProgress(board, rows, all);
+    const withLive = panelProgress(board, rows, all, { rateStamps: all.slice(0, 4) });
+    assert.ok(withLive.eta.throughputMinutes < without.eta.throughputMinutes,
+      'dropping a terminated card\'s minutes from the rate makes the team look faster, not slower');
   });
   await check('a rejection a later verdict overwrote stays visible, and is never counted twice', () => {
     const board = demoBoard();
