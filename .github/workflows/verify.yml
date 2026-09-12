@@ -54,8 +54,9 @@ jobs:
       - name: Resolve peers
         run: node scripts/setup-peers.mjs
       - name: Protocol suites
-        # --allow-skips is what the local release gate uses: one check is environment-bound (the
-        # gate-exec spawn probe) and the runner reports the rest as ordinary passes.
+        # --allow-skips is what the local release gate uses, together with the baseline that names
+        # the checks this environment genuinely cannot run (tests/skip-baseline.json: no synchronous
+        # prompt render, no unelevated symlink). The suite itself reports zero failures.
         # --skip ledger: that suite guards the 65KB project ledger which lives BESIDE this package
         # in the development workspace - it is not part of this repository, so a clean checkout
         # cannot read it (it reports an unexpected skip, and a skip is not a verified check).

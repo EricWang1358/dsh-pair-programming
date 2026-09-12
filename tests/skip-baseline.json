@@ -2,6 +2,7 @@
   "host-contract.test.mjs": [
     "the usage section reaches the rendered system prompt"
   ],
+  "_comment": "The two entries above and below are the only checks this environment genuinely cannot run: no synchronous prompt render in the installed host, and no file symlink on Windows without elevation. CI passes --skip ledger for a third: tests/ledger.test.mjs guards the project ledger that lives BESIDE this package, so a clean checkout cannot read it at all.",
   "runtime-input-boundary.test.mjs": [
     "J1 a direct file link is refused at the leaf"
   ]
