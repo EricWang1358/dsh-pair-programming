@@ -133,6 +133,17 @@ export async function run(check) {
       check(await fp() !== beforeOracle, '#129 a future card\'s oracle file moves the candidate digest — the preparation pause is load-bearing, not a scheduling preference');
     } finally { await rm(fpRoot, { recursive: true, force: true }).catch(() => {}); }
   }
+  // #125: a re-freeze carries the FIRST seal's time — that is what makes the gate's ordering arm
+  // answerable after a tightening, and what it must NOT invent when the record never stored it.
+  {
+    const sealInput = { readings: ['a', 'b'], chosen_reading: 'a', divergence_candidates: ['c'], oracle_files: ['o.mjs'], oracle_cmd: 'node o.mjs' };
+    const first = freezeRecord(sealInput, { sha: 'a'.repeat(64), run: { exit: 1, outputSha: 'x' }, by: 'navigator', forks: 1 });
+    check(Number.isFinite(first.firstFrozenAt) && first.firstFrozenAt === first.frozenAt, '#125 a first seal records its own time as the first');
+    const second = freezeRecord(sealInput, { sha: 'b'.repeat(64), run: { exit: 1, outputSha: 'y' }, by: 'navigator', forks: 2, prior: first });
+    check(second.firstFrozenAt === first.firstFrozenAt && Number.isFinite(second.frozenAt), '#125 and every later seal carries it instead of overwriting it');
+    const unknown = freezeRecord(sealInput, { sha: 'c'.repeat(64), run: { exit: 1, outputSha: 'z' }, by: 'navigator', forks: 2, prior: { frozenAt: 7 } });
+    check(unknown.firstFrozenAt === undefined, '#125 while a re-freeze of a record that never stored it invents nothing (a late re-freeze must not read as an early seal)');
+  }
   // #15: the red tail in a freeze letter, bounded. Measured on an archived board:
   // ORACLE letters are 391K across 68 freezes and red_tail is HALF of it - a diagnostic
   // the frozen command reproduces on demand, not a decision that must be preserved whole.
