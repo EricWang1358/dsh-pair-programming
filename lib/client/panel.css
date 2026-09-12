@@ -194,7 +194,7 @@
 .pair-timeline li>span{margin-top:0}
 .pair-timeline :is(.pair-event-cycle,.pair-event-review,.pair-event-red,.pair-event-green,.pair-event-report,.pair-event-repair,.pair-event-verified){--pair-dot:var(--pair-build)}
 .pair-timeline :is(.pair-event-accept,.pair-event-completed,.pair-event-integrated,.pair-event-checkpoint){--pair-dot:var(--pair-pass)}
-.pair-timeline .pair-event-reject{--pair-dot:var(--pair-fail)}
+.pair-timeline :is(.pair-event-reject,.pair-event-noGo){--pair-dot:var(--pair-fail)}
 .pair-timeline :is(.pair-event-created,.pair-event-oracle){--pair-dot:var(--pair-plan-ring)}
 .pair-timeline :is(.pair-event-created,.pair-event-oracle)>i{background:var(--pair-plan-fill);box-shadow:inset 0 0 0 1.5px var(--pair-plan-ring),0 0 0 3px color-mix(in srgb,var(--pair-plan-ring) 14%,var(--pair-bg))}
 
