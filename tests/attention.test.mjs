@@ -69,8 +69,13 @@ export async function run(check) {
       cycles: [{ id: 'c-1', taskId: 't-1', step: 'GREEN', openedAt: 1, green: { tunedForOracle: 'widened the tolerance to pass' } }],
     },
   });
-  const disclosedItems = attentionSet(disclosed).items.filter(i => i.kind === 'disclosure');
+  const disclosedSet = attentionSet(disclosed).items;
+  const disclosedItems = disclosedSet.filter(i => i.kind === 'disclosure');
   check(disclosedItems.length === 1, 'each open disclosure is its own attention row');
+  check(disclosedSet.filter(i => i.ref === disclosedItems[0].ref).length === 1,
+    '#165 and only one row per ruling: the frontier row for the same ref is not listed a second time');
+  check(attentionSet(disclosed).obligations.some(o => o.disclosureRef === disclosedItems[0].ref),
+    '#165 while the frontier itself still owes it, so blocking_cause and the scheduler are unchanged');
   check(disclosedItems[0].who === 'captain' && disclosedItems[0].tool === 'pair_arbitrate', 'a disclosure names the captain and the exact closing call');
 
   /* ---- stale gate credentials ----------------------------------------- */
