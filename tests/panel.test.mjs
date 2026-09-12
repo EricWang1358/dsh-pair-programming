@@ -247,8 +247,8 @@ export async function run(report) {
   const expandingReact = new Proxy(inertHooks, { get: (target, key) => key === 'createElement'
     ? ((type, props, ...children) => typeof type === 'function' ? type({ ...(props || {}), children }) : { type, props, children })
     : target[key] });
-  const renderDashboard = (view, team) => { const Dashboard = sandbox.createPairDashboard(expandingReact);
-    return JSON.stringify(Dashboard({ t: key => key, data: { team, warnings: [], teams: [], observedAt: 1 }, view, density: 'compact', status: 'live' })); };
+  const DashboardOf = react => sandbox.createPairDashboard(react);
+  const renderDashboard = (view, team) => JSON.stringify(DashboardOf(expandingReact)({ t: key => key, data: { team, warnings: [], teams: [], observedAt: 1 }, view, density: 'compact', status: 'live' }));
   await check('client uses the shared API, falls back only for missing routes and retries modern transport on reconnect',async()=>{
     const calls=[],timers=new Map();let seq=0;
     const source=sandbox.createPairPanelSource(async(channel,endpoint)=>{
@@ -266,7 +266,8 @@ export async function run(report) {
     const source=sandbox.createPairPanelSource(async()=>{count++;throw new Error('HTTP 401');},{sessionId:'s'});
     const off=source.subscribe(()=>{});await tick();
     assert.equal(count,1);assert.equal(source.getSnapshot().status,'error');off();
-    const Dashboard=sandbox.createPairDashboard({createElement:(type,props,...children)=>({type,props,children})});
+    // The hook-aware stub: the dashboard keeps the last percentage it showed, which needs a ref.
+    const Dashboard=DashboardOf(expandingReact);
     for(const [error,hint] of [['HTTP 405','route'],['HTTP 401','auth'],['pair-panel/read','read'],['offline','connection']]){
       const tree=JSON.stringify(Dashboard({t:key=>key,data:null,status:'error',error,density:'compact'}));
       assert.ok(tree.includes('errorHint.'+hint));assert.ok(!tree.includes('emptyHint'));
@@ -295,8 +296,7 @@ export async function run(report) {
     off();
   });
   await check('seat history renders collapsed with both Driver identities', () => {
-    const react={createElement:(type,props,...children)=>({type,props,children})};
-    const Dashboard=sandbox.createPairDashboard(react);
+    const Dashboard=DashboardOf(expandingReact);
     const team=projectPairPanel(demoBoard());
     const tree=Dashboard({t:key=>key,data:{team,warnings:[],teams:[],observedAt:1},view:'overview',density:'compact',status:'live'});
     const found=[];
@@ -453,6 +453,25 @@ export async function run(report) {
     const board = demoBoard();
     board.protocol.cycles[1].pushbacks = [{ kind: 'reject', stage: 'final', observation: 'dated', at: board.updatedAt - 5 * 60000 }];
     assert.ok(!renderDashboard('activity', projectPairPanel(board)).includes('rhythm.undatedPre'), 'a board that dates its pushbacks shows no such note');
+  });
+  await check('a stopped card leaves the progress denominator, and a re-read board never rolls the number back', () => {
+    const before = projectPairPanel(demoBoard());
+    const board = demoBoard();
+    board.tasks[7].status = 'cancelled';
+    const after = projectPairPanel(board);
+    assert.equal(after.progress.terminated, 1);
+    assert.equal(after.progress.scored, before.progress.scored - 1);
+    assert.ok(after.progress.percent > before.progress.percent, 'a card that can never move again must not hold the percentage down');
+    assert.ok(after.progress.milestones.every(n => n <= after.progress.scored), 'milestones are scored against the cards still in play');
+    const both = demoBoard(); both.tasks[3].status = 'failed'; both.tasks[7].status = 'cancelled';
+    assert.deepEqual([projectPairPanel(both).progress.scored, projectPairPanel(both).progress.terminated], [6, 2]);
+    assert.equal(sandbox.pairSteadyPercent(undefined, 42), 42, 'a board that could not be read keeps the last number instead of rolling back through 0');
+    assert.equal(sandbox.pairSteadyPercent(null, 42), 42);
+    assert.equal(sandbox.pairSteadyPercent({ percent: 0 }, 42), 0, 'a real 0 is still a 0');
+    assert.equal(sandbox.pairSteadyPercent(null, undefined), 0);
+    const tree = renderDashboard('overview', after);
+    assert.ok(tree.includes('terminated.pre') && tree.includes('pair-terminated'), 'the stopped cards are reported on the page, not silently dropped');
+    assert.ok(!renderDashboard('overview', before).includes('terminated.pre'), 'while a board with nothing stopped says nothing');
   });
   await check('panel registers a conversation view plus optional sidebar and disposes both',()=>{
     const views=[],removed=[],dictionary={};
