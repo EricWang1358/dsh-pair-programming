@@ -76,6 +76,25 @@ export async function run(check) {
     const deliveryBoard = await readTeam(h.stateRoot, 'amend');
     check(deliveryOnly.oracle_invalidated === false && deliveryBoard.tasks[0].oracle?.sha === 'b'.repeat(64), 'deliverable-only amendments preserve the independent acceptance seal');
 
+    /* ---- #145: priority could only be set at create time -------------------- */
+    // Measured on SG-career: cancelling a card left the frontier on t-4 instead of t-2 because
+    // same-priority cards are ordered by id, and the captain's ordering judgement had nowhere to
+    // land — pair_task_amend had no priority field at all.
+    const priorityAmend = await h.tool('pair_task_amend')({ task_id: 't-1', reason: 'this card blocks a user outcome', priority: 1, priority_reason: 'the release cannot ship without it' }, { agent: h.captain });
+    const priorityBoard = await readTeam(h.stateRoot, 'amend');
+    check(priorityBoard.tasks[0].priority === 1 && priorityBoard.tasks[0].priorityReason.includes('cannot ship'),
+      '#145 an amendment can raise a card priority, and the reason is recorded on the card');
+    check(priorityAmend.oracle_invalidated === false && priorityBoard.tasks[0].oracle?.sha === 'b'.repeat(64),
+      '#145 and priority is scheduling, not contract: the independent acceptance seal survives');
+    check(priorityBoard.tasks[0].amendments.at(-1).changedFields.includes('priority'),
+      '#145 while the amendment trail names the field it changed');
+    check((await fails(() => h.tool('pair_task_amend')({ task_id: 't-1', reason: 'bad value', priority: 4, priority_reason: 'x' }, { agent: h.captain }))).includes('1, 2 or 3'),
+      '#145 a priority outside 1..3 is refused, exactly as on create');
+    check((await fails(() => h.tool('pair_task_amend')({ task_id: 't-1', reason: 'why', priority: 1 }, { agent: h.captain }))).includes('priority_reason'),
+      '#145 a non-default priority without a user-value reason is refused');
+    check((await fails(() => h.tool('pair_task_amend')({ task_id: 't-1', reason: 'reason only', priority_reason: 'because' }, { agent: h.captain }))).includes('at least one replacement field'),
+      '#145 and a reason with nothing to re-prioritise is not a change');
+
     const cyclic = await readTeam(h.stateRoot, 'amend');
     cyclic.tasks[1].dependencies = ['t-1'];
     cyclic.tasks[0].dependencies = [];
