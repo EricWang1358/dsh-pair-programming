@@ -29,19 +29,26 @@ jobs:
       - name: Install the DSH SDK the suite imports
         env:
           CI: 'true'
-        # The suite imports more of the DSH SDK than package.json declares: dsh-settings and cordis
-        # are OPTIONAL peers, and the host-side packages the tests drive directly (commands, skill,
+        # The suite imports more of the DSH SDK than package.json declares: dsh-settings and cordis are
+        # OPTIONAL peers, and the host-side packages the tests drive directly (commands, skill,
         # system-prompt, util-values, client-connection, client-store, host-webserver, settings-file)
-        # are not peers at all. A plain install left 39 suites dying on module resolution, so CI
-        # names the full set and lets npm resolve the ranges.
+        # are not peers at all. A plain install left 39 suites dying on module resolution, so CI names
+        # the full set.
+        #
+        # Pinned to the cohort package.json declares as tested (dsh 0.1.5-rc.2). npm's `latest` tag on
+        # this line is 0.0.1-rc.1, so an unpinned install resolves to a much older SDK than the host
+        # this plugin is developed against - and mixing ranges then fails with ERESOLVE. One cohort,
+        # one version, no resolution to argue about.
         run: |
-          npm install --no-audit --no-fund \
-            @deepseek-ai/dsh-agent @deepseek-ai/dsh-llm @deepseek-ai/dsh-session \
-            @deepseek-ai/dsh-subagent @deepseek-ai/dsh-tools @deepseek-ai/dsh-settings \
-            @deepseek-ai/dsh-settings-file @deepseek-ai/dsh-commands @deepseek-ai/dsh-skill \
-            @deepseek-ai/dsh-system-prompt @deepseek-ai/dsh-util-values \
-            @deepseek-ai/dsh-client-connection @deepseek-ai/dsh-client-store \
-            @deepseek-ai/dsh-host-webserver @deepseek-ai/cordis
+          npm install --no-audit --no-fund --no-save \
+            @deepseek-ai/dsh-tools@0.1.5-rc.2 @deepseek-ai/dsh-agent@0.1.5-rc.2 \
+            @deepseek-ai/dsh-llm@0.1.5-rc.2 @deepseek-ai/dsh-session@0.1.5-rc.2 \
+            @deepseek-ai/dsh-subagent@0.1.5-rc.2 @deepseek-ai/dsh-settings@0.1.5-rc.2 \
+            @deepseek-ai/dsh-settings-file@0.1.5-rc.2 @deepseek-ai/dsh-commands@0.1.5-rc.2 \
+            @deepseek-ai/dsh-skill@0.1.5-rc.2 @deepseek-ai/dsh-system-prompt@0.1.5-rc.2 \
+            @deepseek-ai/dsh-util-values@0.1.5-rc.2 @deepseek-ai/dsh-client-connection@0.1.5-rc.2 \
+            @deepseek-ai/dsh-client-store@0.1.5-rc.2 @deepseek-ai/dsh-host-webserver@0.1.5-rc.2 \
+            @deepseek-ai/cordis@4.0.2
       - name: Resolve peers
         run: node scripts/setup-peers.mjs
       - name: Protocol suites
