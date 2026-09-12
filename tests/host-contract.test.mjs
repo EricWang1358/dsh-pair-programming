@@ -72,7 +72,13 @@ export async function run(check) {
   /* ---- tool schemas the host actually accepted -------------------------- */
   const schemas = ctx.tools.schemas();
   const pairTools = schemas.filter(schema => schema.name.startsWith('pair_'));
-  check(pairTools.length === 29 && ['pair_integrate', 'pair_backlog', 'pair_repair_verify_plan', 'pair_yield', 'pair_cleanup', 'pair_correction'].every(name => pairTools.some(tool => tool.name === name)), 'all 29 pair_* tools including integration, product backlog, command recovery, the captain yield and the append-only correction are accepted by the real registry');
+  // The message carries the measured values: this check has failed on a runner with the assertion
+  // text as its only trace, and a bare "expected true" cannot say which of the two conditions broke
+  // (a missing tool, or a count that moved for some other reason).
+  const expectedTools = ['pair_integrate', 'pair_backlog', 'pair_repair_verify_plan', 'pair_yield', 'pair_cleanup', 'pair_correction'];
+  const missingTools = expectedTools.filter(name => !pairTools.some(tool => tool.name === name));
+  check(pairTools.length === 29 && missingTools.length === 0,
+    `all 29 pair_* tools are accepted by the real registry (registered ${pairTools.length}${missingTools.length === 0 ? '' : ', missing ' + missingTools.join('/')})`);
   check(pairTools.every(schema => typeof schema.description === 'string' && schema.description.length > 0), 'each carries a description the host kept');
   const badParams = pairTools.filter(schema => schema.parameters !== undefined && schema.parameters.type !== 'object');
   check(badParams.length === 0, 'and none declares a non-object parameter envelope');
