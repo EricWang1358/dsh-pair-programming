@@ -26,10 +26,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.19.0'
-      - name: Install (peers are public; postinstall only checks they resolve)
+      - name: Install (peers are public; the two optional ones are named explicitly)
         env:
           CI: 'true'
-        run: npm install --no-audit --no-fund
+        # dsh-settings and cordis are declared OPTIONAL peers (peerDependenciesMeta), so a plain
+        # install leaves them out and setup:peers then reports them unresolved. The suite imports
+        # both directly (tests/panel.test.mjs imports cordis; settings.test.mjs needs dsh-settings),
+        # so CI installs them explicitly instead of letting the optional flag decide.
+        run: npm install --no-audit --no-fund @deepseek-ai/dsh-settings @deepseek-ai/cordis
       - name: Resolve peers
         run: node scripts/setup-peers.mjs
       - name: Protocol suites
@@ -46,10 +50,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.19.0'
-      - name: Install (peers are public; postinstall only checks they resolve)
+      - name: Install (peers are public; the two optional ones are named explicitly)
         env:
           CI: 'true'
-        run: npm install --no-audit --no-fund
+        # dsh-settings and cordis are declared OPTIONAL peers (peerDependenciesMeta), so a plain
+        # install leaves them out and setup:peers then reports them unresolved. The suite imports
+        # both directly (tests/panel.test.mjs imports cordis; settings.test.mjs needs dsh-settings),
+        # so CI installs them explicitly instead of letting the optional flag decide.
+        run: npm install --no-audit --no-fund @deepseek-ai/dsh-settings @deepseek-ai/cordis
       - name: Resolve peers
         run: node scripts/setup-peers.mjs
       - name: npm run verify
